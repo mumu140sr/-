@@ -160,6 +160,13 @@ function renderStaffTable() {
         </select>
       </td>
       <td><input type="number" min="0" max="6" value="${s.prevConsecutive}" data-field="prevConsecutive" data-id="${s.id}"/></td>
+      <td>
+        <select data-field="prevLastShift" data-id="${s.id}">
+          <option value=""  ${(s.prevLastShift || '') === ''  ? 'selected' : ''}>―</option>
+          <option value="早" ${(s.prevLastShift || '') === '早' ? 'selected' : ''}>早</option>
+          <option value="遅" ${(s.prevLastShift || '') === '遅' ? 'selected' : ''}>遅</option>
+        </select>
+      </td>
       <td><input type="text" value="${escapeHtml(s.note || '')}" data-field="note" data-id="${s.id}"/></td>
       <td><button class="btn-icon" data-del="${s.id}" title="削除">🗑</button></td>
     `;
@@ -219,6 +226,7 @@ function setupStaffPanel() {
       prefs: ['早可', '遅可'],
       balance: 'balanced',
       prevConsecutive: 0,
+      prevLastShift: '',
       note: '',
     });
     renderStaffTable();

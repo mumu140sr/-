@@ -231,6 +231,7 @@ function addSampleStaff() {
       prefs: s.prefs,
       balance: s.balance || 'balanced',
       prevConsecutive: 0,
+      prevLastShift: '',  // 前月末最終勤務日のシフトカテゴリ ('' | '早' | '遅')
       note: '',
     });
   });

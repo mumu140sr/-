@@ -354,7 +354,12 @@ function calculateScore(shifts, allowedShifts, days) {
   // ===== 横のルール: 各スタッフごと =====
   staff.forEach(s => {
     let consecutiveWork = s.prevConsecutive || 0;
+    // 前月末からの早遅情報を初期 prevShift として表現
+    // ('早' / '遅' という単純な文字列を使う。isEarly/isLate が正しく判定するため)
     let prevShift = '';
+    if (consecutiveWork > 0 && s.prevLastShift) {
+      prevShift = s.prevLastShift; // '早' または '遅'
+    }
     let offCount = 0;
     let earlyCount = 0; // 早番カウント
     let lateCount = 0;  // 遅番カウント
@@ -383,14 +388,14 @@ function calculateScore(shifts, allowedShifts, days) {
           score += 800 * over + 200 * over * over;
         }
 
-        // 遅→早禁止
+        // 遅→早禁止（月初は前月末シフトも考慮）
         if (settings.forbidLateEarly && isLate(prevShift) && isEarly(cur)) {
           score += 1500;
         }
 
         // === 連勤中の早遅統一ペナルティ ===
         // 休を挟まない連続勤務中（consecutiveWork >= 2）に早→遅 / 遅→早 が混ざるとNG
-        // (遅→早 は forbidLateEarly で別途処理されるためここでは早→遅のみ追加処理)
+        // 月初は前月末からの連勤として prevShift = s.prevLastShift で評価される
         if (consecutiveWork >= 2 && isWork(prevShift)) {
           const prevEarly = isEarly(prevShift);
           const prevLate = isLate(prevShift);
@@ -479,7 +484,11 @@ function checkViolations(shifts) {
   // 各スタッフの違反
   staff.forEach(s => {
     let consecutiveWork = s.prevConsecutive || 0;
+    // 前月末からの早遅情報を初期 prevShift に反映
     let prevShift = '';
+    if (consecutiveWork > 0 && s.prevLastShift) {
+      prevShift = s.prevLastShift;
+    }
     let offCount = 0;
     // === 実質的な許容シフト（代替ロジック含む） ===
     const baseRoleShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts.slice();
