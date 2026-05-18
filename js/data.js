@@ -24,15 +24,20 @@ const OFF_TYPES = {
   '慶': { label: '慶弔休',       class: 's-off',      isOff: true, isRequest: true },
 };
 
-// 役割タイプ → 入れるシフト種別
+// 役職タイプ（組織上の地位）
+const POSITION_TYPES = {
+  viceManager: { label: '副店長', priority: 1 },
+  chief:       { label: 'チーフ', priority: 2 },
+  leader:      { label: 'リーダー', priority: 3 },
+  staff:       { label: 'スタッフ', priority: 4 },
+};
+
+// 役割タイプ（業務上の役割）→ 入れるシフト種別
 const ROLE_TYPES = {
-  viceManager: { label: '副店長',         shifts: ['早責', '遅責'] },
-  chief:       { label: 'チーフ',         shifts: ['早総務', '遅総務'] },
-  leader:      { label: 'リーダー',       shifts: ['早', '遅'] },
-  responsible: { label: '責任者',         shifts: ['早責', '遅責'] },
-  affairs:     { label: '総務',           shifts: ['早総務', '遅総務'] },
-  normal:      { label: '一般',           shifts: ['早', '遅'] },
-  normalSales: { label: '一般（営業）',   shifts: ['早', '遅'] },
+  responsible: { label: '責任者',       shifts: ['早責', '遅責'] },
+  normal:      { label: '一般',         shifts: ['早', '遅'] },
+  normalSales: { label: '一般（営業）', shifts: ['早', '遅'] },
+  affairs:     { label: '総務',         shifts: ['早総務', '遅総務'] },
 };
 
 // シフト希望の選択肢
@@ -65,12 +70,16 @@ const AppState = {
     '早':   '#d4eaf7',
     '遅':   '#ffe0b2',
   },
-  // スタッフ: [{id, name, roleType, maxOff, prefs:[], prevConsecutive, note}]
+  // スタッフ: [{id, name, positionType, roleType, maxOff, prefs:[], prevConsecutive, note}]
   staff: [],
   // 希望休（手動入力）: { staffId: { day: '休' } }
   requests: {},
   // 生成結果: { staffId: { day: '早' } }
   shifts: {},
+  // 手動固定シフト: { staffId: { day: '早責' } } - 最適化で変更しない
+  fixedShifts: {},
+  // 特別日設定: { day: 'replacement' | 'renewal' }
+  specialDays: {},
   // ルール違反: [{ staffId, day, type, message, action }]
   violations: [],
   // 生成済みフラグ
@@ -145,6 +154,8 @@ function saveToStorage() {
     staff: AppState.staff,
     requests: AppState.requests,
     shifts: AppState.shifts,
+    fixedShifts: AppState.fixedShifts,
+    specialDays: AppState.specialDays,
     _staffIdCounter,
   };
   localStorage.setItem('shiftAppData', JSON.stringify(data));
@@ -161,6 +172,8 @@ function loadFromStorage() {
     AppState.staff = data.staff || [];
     AppState.requests = data.requests || {};
     AppState.shifts = data.shifts || {};
+    AppState.fixedShifts = data.fixedShifts || {};
+    AppState.specialDays = data.specialDays || {};
     _staffIdCounter = data._staffIdCounter || (AppState.staff.length + 1);
     return true;
   } catch (e) {
@@ -173,6 +186,8 @@ function resetAll() {
   AppState.staff = [];
   AppState.requests = {};
   AppState.shifts = {};
+  AppState.fixedShifts = {};
+  AppState.specialDays = {};
   AppState.violations = [];
   AppState.generated = false;
   _staffIdCounter = 1;
@@ -182,25 +197,26 @@ function resetAll() {
 // 初期スタッフ（サンプル）
 function addSampleStaff() {
   const samples = [
-    { name: '田中 太郎',   roleType: 'viceManager', maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '佐藤 花子',   roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '鈴木 一郎',   roleType: 'chief',       maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '高橋 美咲',   roleType: 'affairs',     maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '伊藤 健太',   roleType: 'leader',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '渡辺 由美',   roleType: 'leader',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '山本 拓也',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '中村 さくら', roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '小林 健',     roleType: 'normalSales', maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '加藤 真理',   roleType: 'normal',      maxOff: 9, prefs: ['早可'] },
-    { name: '吉田 翔',     roleType: 'normalSales', maxOff: 9, prefs: ['遅可'] },
-    { name: '山田 恵子',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '松本 大輔',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '井上 千秋',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '田中 太郎',   positionType: 'viceManager', roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '佐藤 花子',   positionType: 'chief',       roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '鈴木 一郎',   positionType: 'chief',       roleType: 'affairs',     maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '高橋 美咲',   positionType: 'leader',      roleType: 'affairs',     maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '伊藤 健太',   positionType: 'leader',      roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '渡辺 由美',   positionType: 'leader',      roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '山本 拓也',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '中村 さくら', positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '小林 健',     positionType: 'staff',       roleType: 'normalSales', maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '加藤 真理',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可'] },
+    { name: '吉田 翔',     positionType: 'staff',       roleType: 'normalSales', maxOff: 9, prefs: ['遅可'] },
+    { name: '山田 恵子',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '松本 大輔',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '井上 千秋',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
   ];
   samples.forEach(s => {
     AppState.staff.push({
       id: newStaffId(),
       name: s.name,
+      positionType: s.positionType,
       roleType: s.roleType,
       maxOff: s.maxOff,
       prefs: s.prefs,

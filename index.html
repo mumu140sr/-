@@ -62,6 +62,20 @@
     </div>
 
     <div class="card">
+      <h3>🌟 特別日設定</h3>
+      <div class="form-row">
+        <label>入れ替え日（副店長を遅番固定）</label>
+        <input type="text" id="replacementDays" placeholder="例: 1,15,28" style="width:200px" />
+        <span class="hint">カンマ区切りで日付を入力（例: 1,15,28）</span>
+      </div>
+      <div class="form-row">
+        <label>新装日（副店長を早番固定）</label>
+        <input type="text" id="renewalDays" placeholder="例: 10,20" style="width:200px" />
+        <span class="hint">カンマ区切りで日付を入力（例: 10,20）</span>
+      </div>
+    </div>
+
+    <div class="card">
       <h3>📖 使い方</h3>
       <ol class="usage">
         <li><b>① 基本設定</b>で対象月・連勤上限などを決めます</li>
@@ -106,6 +120,7 @@
           <thead>
             <tr>
               <th>名前</th>
+              <th>役職タイプ</th>
               <th>役割タイプ</th>
               <th>公休数<br><small>(月の休み数)</small></th>
               <th>シフト希望</th>
@@ -119,35 +134,72 @@
       </div>
     </div>
     <div class="card">
-      <h3>役割タイプ説明</h3>
-      <ul class="hint-list">
-        <li><b>副店長</b>: 早責・遅責に入る</li>
-        <li><b>チーフ</b>: 早総務・遅総務に入る</li>
-        <li><b>リーダー</b>: 早・遅に入る</li>
-        <li><b>責任者</b>: 早責・遅責に入る</li>
-        <li><b>総務</b>: 早総務・遅総務に入る</li>
-        <li><b>一般</b>: 早・遅に入る</li>
-        <li><b>一般（営業）</b>: 早・遅に入る</li>
-      </ul>
+      <h3>役職タイプと役割タイプ説明</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div>
+          <h4>役職タイプ（組織上の地位）</h4>
+          <ul class="hint-list">
+            <li><b>副店長</b>: 最上位役職。責任者不在時に代行可能</li>
+            <li><b>チーフ</b>: 副店長不在時に責任者役割を担える</li>
+            <li><b>リーダー</b>: 中堅スタッフ</li>
+            <li><b>スタッフ</b>: 一般スタッフ</li>
+          </ul>
+        </div>
+        <div>
+          <h4>役割タイプ（業務上の役割）</h4>
+          <ul class="hint-list">
+            <li><b>責任者</b>: 早責・遅責に入る</li>
+            <li><b>総務</b>: 早総務・遅総務に入る</li>
+            <li><b>一般</b>: 早・遅に入る</li>
+            <li><b>一般（営業）</b>: 早・遅に入る</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card" style="background:#fff9c4;margin-top:12px">
+        <h4>🔄 代替責任者ロジック</h4>
+        <p>副店長が休みで責任者シフトに入れない場合、役職優先順位に従って代替者が自動的に責任者役割を担います：<br>
+        <b>副店長 → チーフ → リーダー</b></p>
+      </div>
     </div>
   </section>
 
   <!-- ④ 希望休入力 -->
   <section class="tab-panel" id="panel-calendar">
-    <h2>④ 希望休入力</h2>
+    <h2>④ 希望休・固定シフト入力</h2>
     <div class="card">
       <div class="toolbar">
-        <span>記号: </span>
-        <button class="chip-btn" data-mark="休">休</button>
-        <button class="chip-btn" data-mark="有">有</button>
-        <button class="chip-btn" data-mark="公">公</button>
-        <button class="chip-btn" data-mark="研">研</button>
-        <button class="chip-btn" data-mark="☆">☆</button>
-        <button class="chip-btn" data-mark="季">季</button>
-        <button class="chip-btn" data-mark="引">引</button>
-        <button class="chip-btn" data-mark="慶">慶</button>
-        <button class="chip-btn" data-mark="">クリア</button>
-        <span class="hint">クリックで選択中の記号を入力、ダブルクリックで削除</span>
+        <span style="font-weight:700">モード: </span>
+        <label><input type="radio" name="calendarMode" value="request" checked /> 希望休</label>
+        <label><input type="radio" name="calendarMode" value="fixed" /> 固定シフト</label>
+        <span class="hint" style="margin-left:16px">固定シフトは最適化エンジンでも変更されません</span>
+      </div>
+      <div id="requestMode" class="calendar-mode">
+        <div class="toolbar">
+          <span>記号: </span>
+          <button class="chip-btn" data-mark="休">休</button>
+          <button class="chip-btn" data-mark="有">有</button>
+          <button class="chip-btn" data-mark="公">公</button>
+          <button class="chip-btn" data-mark="研">研</button>
+          <button class="chip-btn" data-mark="☆">☆</button>
+          <button class="chip-btn" data-mark="季">季</button>
+          <button class="chip-btn" data-mark="引">引</button>
+          <button class="chip-btn" data-mark="慶">慶</button>
+          <button class="chip-btn" data-mark="">クリア</button>
+          <span class="hint">クリックで選択中の記号を入力、ダブルクリックで削除</span>
+        </div>
+      </div>
+      <div id="fixedMode" class="calendar-mode" style="display:none">
+        <div class="toolbar">
+          <span>シフト: </span>
+          <button class="chip-btn-fixed" data-shift="早責">早責</button>
+          <button class="chip-btn-fixed" data-shift="遅責">遅責</button>
+          <button class="chip-btn-fixed" data-shift="早総務">早総務</button>
+          <button class="chip-btn-fixed" data-shift="遅総務">遅総務</button>
+          <button class="chip-btn-fixed" data-shift="早">早</button>
+          <button class="chip-btn-fixed" data-shift="遅">遅</button>
+          <button class="chip-btn-fixed" data-shift="">クリア</button>
+          <span class="hint">固定シフトは最適化時も変更されません</span>
+        </div>
       </div>
       <div class="table-wrap">
         <table id="calendarTable" class="calendar-table"></table>

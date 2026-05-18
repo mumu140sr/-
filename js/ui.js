@@ -36,6 +36,8 @@ function setupSettingsPanel() {
   const $forbidLE = document.getElementById('forbidLateEarly');
   const $penaltySO = document.getElementById('penaltySingleOff');
   const $maxAtt = document.getElementById('maxAttempts');
+  const $replacementDays = document.getElementById('replacementDays');
+  const $renewalDays = document.getElementById('renewalDays');
 
   // 初期値設定
   if (!AppState.settings.targetMonth) {
@@ -47,6 +49,12 @@ function setupSettingsPanel() {
   $forbidLE.checked = AppState.settings.forbidLateEarly;
   $penaltySO.checked = AppState.settings.penaltySingleOff;
   $maxAtt.value = AppState.settings.maxAttempts;
+  
+  // 特別日の初期値
+  const replacementArr = Object.keys(AppState.specialDays).filter(d => AppState.specialDays[d] === 'replacement');
+  const renewalArr = Object.keys(AppState.specialDays).filter(d => AppState.specialDays[d] === 'renewal');
+  $replacementDays.value = replacementArr.join(',');
+  $renewalDays.value = renewalArr.join(',');
 
   $month.addEventListener('change', () => {
     AppState.settings.targetMonth = $month.value;
@@ -64,6 +72,27 @@ function setupSettingsPanel() {
   });
   $maxAtt.addEventListener('change', () => {
     AppState.settings.maxAttempts = parseInt($maxAtt.value) || 100000;
+  });
+  
+  // 特別日の変更
+  $replacementDays.addEventListener('change', () => {
+    const days = $replacementDays.value.split(',').map(d => parseInt(d.trim())).filter(d => d > 0 && d <= 31);
+    // 既存の入れ替え日を削除
+    for (const d in AppState.specialDays) {
+      if (AppState.specialDays[d] === 'replacement') delete AppState.specialDays[d];
+    }
+    // 新しい入れ替え日を登録
+    days.forEach(d => AppState.specialDays[d] = 'replacement');
+  });
+  
+  $renewalDays.addEventListener('change', () => {
+    const days = $renewalDays.value.split(',').map(d => parseInt(d.trim())).filter(d => d > 0 && d <= 31);
+    // 既存の新装日を削除
+    for (const d in AppState.specialDays) {
+      if (AppState.specialDays[d] === 'renewal') delete AppState.specialDays[d];
+    }
+    // 新しい新装日を登録
+    days.forEach(d => AppState.specialDays[d] = 'renewal');
   });
 }
 
@@ -105,6 +134,12 @@ function renderStaffTable() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><input type="text" value="${escapeHtml(s.name)}" data-field="name" data-id="${s.id}"/></td>
+      <td>
+        <select data-field="positionType" data-id="${s.id}">
+          ${Object.entries(POSITION_TYPES).map(([k, v]) =>
+            `<option value="${k}" ${s.positionType === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+        </select>
+      </td>
       <td>
         <select data-field="roleType" data-id="${s.id}">
           ${Object.entries(ROLE_TYPES).map(([k, v]) =>
@@ -172,6 +207,7 @@ function setupStaffPanel() {
     AppState.staff.push({
       id: newStaffId(),
       name: '新規スタッフ',
+      positionType: 'staff',
       roleType: 'normal',
       maxOff: 9,
       prefs: ['早可', '遅可'],

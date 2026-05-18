@@ -31,13 +31,21 @@ async function optimizeSchedule(progressCallback) {
     allowedShifts[s.id] = filtered;
   });
 
-  // 2. 希望休をロックして初期化
+  // 2. 希望休と固定シフトをロックして初期化
   let shifts = {};
   const locked = {};
   staff.forEach(s => {
     shifts[s.id] = {};
     locked[s.id] = {};
     for (let d = 1; d <= days; d++) {
+      // 固定シフトが最優先
+      const fixed = (AppState.fixedShifts[s.id] || {})[d];
+      if (fixed) {
+        shifts[s.id][d] = fixed;
+        locked[s.id][d] = true;
+        continue;
+      }
+      // 次に希望休
       const req = (AppState.requests[s.id] || {})[d];
       if (req && OFF_TYPES[req]) {
         shifts[s.id][d] = req;
@@ -48,6 +56,9 @@ async function optimizeSchedule(progressCallback) {
       }
     }
   });
+
+  // 2.5. 特別日の副店長固定処理
+  applySpecialDaysLogic(shifts, locked, staff, days);
 
   // 3. 初期解：必要人数と休日数を満たすように貪欲法で配置
   generateInitialSolution(shifts, locked, allowedShifts, days);
@@ -510,4 +521,62 @@ function checkViolations(shifts) {
   }
 
   return violations;
+}
+
+/**
+ * 特別日の副店長固定処理
+ * - 入れ替え日: 副店長を遅責に固定
+ * - 新装日: 副店長を早責に固定
+ */
+function applySpecialDaysLogic(shifts, locked, staff, days) {
+  const viceManagers = staff.filter(s => s.positionType === 'viceManager');
+  
+  for (let d = 1; d <= days; d++) {
+    const specialType = AppState.specialDays[d];
+    if (!specialType) continue;
+    
+    viceManagers.forEach(vm => {
+      if (locked[vm.id][d]) return; // 既にロック済み（希望休など）
+      
+      if (specialType === 'replacement') {
+        // 入れ替え日: 副店長を遅責に
+        shifts[vm.id][d] = '遅責';
+        locked[vm.id][d] = true;
+      } else if (specialType === 'renewal') {
+        // 新装日: 副店長を早責に
+        shifts[vm.id][d] = '早責';
+        locked[vm.id][d] = true;
+      }
+    });
+  }
+}
+
+/**
+ * 代替責任者ロジック
+ * 副店長が休みで責任者に入れない場合、チーフ→リーダーの順に代替
+ * 初期解生成時に適用
+ */
+function applySubstituteResponsible(shifts, staff, day, shiftType) {
+  // shiftType は '早責' または '遅責'
+  
+  // まず副店長を探す
+  const viceManagers = staff.filter(s => s.positionType === 'viceManager' && shifts[s.id][day] === shiftType);
+  if (viceManagers.length > 0) return viceManagers[0]; // 副店長がいればOK
+  
+  // 副店長がいない→チーフを探す
+  const chiefs = staff.filter(s => s.positionType === 'chief' && !isOff(shifts[s.id][day]) && shifts[s.id][day] !== shiftType);
+  if (chiefs.length > 0) {
+    // チーフを責任者に昇格
+    chiefs[0].tempResponsible = true; // 一時的に責任者役割を付与
+    return chiefs[0];
+  }
+  
+  // チーフもいない→リーダーを探す
+  const leaders = staff.filter(s => s.positionType === 'leader' && !isOff(shifts[s.id][day]) && shifts[s.id][day] !== shiftType);
+  if (leaders.length > 0) {
+    leaders[0].tempResponsible = true;
+    return leaders[0];
+  }
+  
+  return null;
 }
