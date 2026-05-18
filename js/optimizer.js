@@ -17,8 +17,8 @@ async function optimizeSchedule(progressCallback) {
     let baseShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts.slice();
     
     // === 代替責任者ロジック ===
-    // 副店長・チーフ・リーダーは責任者役割を代替できる（一般役割でも）
-    if (s.positionType === 'viceManager' || s.positionType === 'chief' || s.positionType === 'leader') {
+    // 責任者をやれるのは副店長・チーフのみ（リーダー以下は不可）
+    if (s.positionType === 'viceManager' || s.positionType === 'chief') {
       if (!baseShifts.includes('早責')) baseShifts.push('早責');
       if (!baseShifts.includes('遅責')) baseShifts.push('遅責');
     }
@@ -470,8 +470,8 @@ function checkViolations(shifts) {
     // === 実質的な許容シフト（代替ロジック含む） ===
     const baseRoleShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts.slice();
     const effectiveAllowed = baseRoleShifts.slice();
-    // 代替責任者: 副店長・チーフ・リーダーは責任者シフトに入れる
-    if (s.positionType === 'viceManager' || s.positionType === 'chief' || s.positionType === 'leader') {
+    // 代替責任者: 副店長・チーフのみ責任者シフトに入れる（リーダー以下は不可）
+    if (s.positionType === 'viceManager' || s.positionType === 'chief') {
       if (!effectiveAllowed.includes('早責')) effectiveAllowed.push('早責');
       if (!effectiveAllowed.includes('遅責')) effectiveAllowed.push('遅責');
     }
@@ -641,12 +641,6 @@ function applySubstituteResponsible(shifts, staff, day, shiftType) {
     return chiefs[0];
   }
   
-  // チーフもいない→リーダーを探す
-  const leaders = staff.filter(s => s.positionType === 'leader' && !isOff(shifts[s.id][day]) && shifts[s.id][day] !== shiftType);
-  if (leaders.length > 0) {
-    leaders[0].tempResponsible = true;
-    return leaders[0];
-  }
-  
+  // 副店長・チーフがいない場合は代替不可（リーダー以下は責任者にできない）
   return null;
 }
