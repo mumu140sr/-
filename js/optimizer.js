@@ -363,9 +363,9 @@ function calculateScore(shifts, allowedShifts, days) {
       const cur = shifts[s.id][d];
 
       if (isWork(cur)) {
-        // 入れないシフトを割り当てている
+        // 入れないシフトを割り当てている（許容外シフト：絶対NG）
         if (!allowedShifts[s.id].includes(cur)) {
-          score += 5000;
+          score += 50000;
         }
         
         // 本来の役割でないシフト（代替役割）への軽ペナルティ
@@ -467,7 +467,23 @@ function checkViolations(shifts) {
     let consecutiveWork = s.prevConsecutive || 0;
     let prevShift = '';
     let offCount = 0;
-    const allowedShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts;
+    // === 実質的な許容シフト（代替ロジック含む） ===
+    const baseRoleShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts.slice();
+    const effectiveAllowed = baseRoleShifts.slice();
+    // 代替責任者: 副店長・チーフ・リーダーは責任者シフトに入れる
+    if (s.positionType === 'viceManager' || s.positionType === 'chief' || s.positionType === 'leader') {
+      if (!effectiveAllowed.includes('早責')) effectiveAllowed.push('早責');
+      if (!effectiveAllowed.includes('遅責')) effectiveAllowed.push('遅責');
+    }
+    // 代替総務: リーダー＋一般 / チーフは総務に入れる
+    if (s.positionType === 'leader' && (s.roleType === 'normal' || s.roleType === 'normalSales')) {
+      if (!effectiveAllowed.includes('早総務')) effectiveAllowed.push('早総務');
+      if (!effectiveAllowed.includes('遅総務')) effectiveAllowed.push('遅総務');
+    }
+    if (s.positionType === 'chief') {
+      if (!effectiveAllowed.includes('早総務')) effectiveAllowed.push('早総務');
+      if (!effectiveAllowed.includes('遅総務')) effectiveAllowed.push('遅総務');
+    }
     const consecutiveReportedDays = new Set(); // 重複報告を避ける
 
     for (let d = 1; d <= days; d++) {
@@ -489,13 +505,15 @@ function checkViolations(shifts) {
             action: '順序を入れ替えてください',
           });
         }
-        if (!allowedShifts.includes(cur)) {
+        // 実質的に許容されていないシフト = 本当の違反
+        if (!effectiveAllowed.includes(cur)) {
           violations.push({
             staffId: s.id, day: d, type: 'role-mismatch',
             message: `🚨 役割タイプに合わないシフト（${cur}）`,
             action: '別のスタッフと交換してください',
           });
         }
+        // 本来の役割外だが代替として許容されている場合は情報のみ（違反としない）
         // 早遅希望チェック
         if (s.prefs && s.prefs.length > 0) {
           if (isEarly(cur) && !s.prefs.includes('早可')) {
@@ -533,12 +551,19 @@ function checkViolations(shifts) {
     }
 
     // 公休数チェック（目標との差）
+    // 不足は厳しく、超過は情報として軽く扱う（人手余剰のため休が増えるのは自然）
     const diff = offCount - (s.maxOff || 0);
-    if (diff !== 0) {
+    if (diff < 0) {
       violations.push({
         staffId: s.id, day: 0, type: 'off-count',
-        message: `⚠️ 休日数 ${offCount}日（目標${s.maxOff}日, 差${diff > 0 ? '+' : ''}${diff}）`,
-        action: '休日数を調整してください',
+        message: `🚨 休日数 ${offCount}日（目標${s.maxOff}日, 差${diff}）`,
+        action: '休日数を増やしてください',
+      });
+    } else if (diff > 0) {
+      violations.push({
+        staffId: s.id, day: 0, type: 'off-count-over',
+        message: `ℹ️ 休日数 ${offCount}日（目標${s.maxOff}日, 差+${diff}）人員余剰`,
+        action: '余剰人員のため休日が増えています',
       });
     }
   });
