@@ -418,6 +418,9 @@ function setupDragAndDrop() {
     cell.addEventListener('dragend', e => {
       e.target.classList.remove('dragging');
       document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      // ドラッグ終了後は dragSource をクリアして、クリックがブロックされないように
+      // (少し遅延させて drop ハンドラーの処理を先行させる)
+      setTimeout(() => { dragSource = null; }, 50);
     });
   });
   document.querySelectorAll('.result-table td[data-sid]').forEach(td => {
@@ -445,6 +448,7 @@ function setupDragAndDrop() {
       if (!AppState.shifts[sid2]) AppState.shifts[sid2] = {};
       AppState.shifts[sid1][d1] = v2;
       AppState.shifts[sid2][d2] = v1;
+      dragSource = null; // クリアしてクリック編集できるように
       // 違反再チェック・診断レポート更新
       refreshAfterManualEdit();
       toast('シフトを交換しました', 'info', 1500);
@@ -454,56 +458,72 @@ function setupDragAndDrop() {
 
 // 手動シフト編集（セルクリックでモーダル表示）
 let editingCell = null;
+let modalListenersInstalled = false; // モーダル系の固定リスナーは1度だけ登録
+
 function setupManualEdit() {
   const modal = document.getElementById('shiftEditModal');
   const modalTarget = document.getElementById('modalTarget');
   const modalCancel = document.getElementById('modalCancel');
 
-  // セルをクリックで編集モーダル表示
+  // --- セルクリックで編集モーダル表示（テーブル再描画ごとに登録し直す） ---
   document.querySelectorAll('.result-table td[data-sid]').forEach(td => {
+    // pointer cursor で編集できることを示す
+    td.style.cursor = 'pointer';
     td.addEventListener('click', (e) => {
-      // ドラッグ中は無視
+      // ドラッグ完了直後はクリックを無視（dragSource は dragend でクリアされる）
       if (dragSource) return;
-      
+
       editingCell = td;
       const sid = td.dataset.sid;
       const d = parseInt(td.dataset.day);
       const staff = AppState.staff.find(s => s.id === sid);
       const staffName = staff ? staff.name : '';
-      
+
       modalTarget.textContent = `${staffName} - ${d}日`;
       modal.classList.add('show');
+      // クリックイベントの伝播を止めてモーダル背景のリスナーで即閉じるのを防ぐ
+      e.stopPropagation();
     });
   });
 
+  // --- モーダル系の固定リスナー（HTMLに最初から存在する要素なので1度だけ登録） ---
+  if (modalListenersInstalled) return;
+  modalListenersInstalled = true;
+
   // シフト選択ボタン
   document.querySelectorAll('.shift-option').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (!editingCell) return;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!editingCell) {
+        console.warn('editingCell is null — クリック対象のセルが特定できません');
+        return;
+      }
       const sid = editingCell.dataset.sid;
       const d = parseInt(editingCell.dataset.day);
       const newShift = btn.dataset.shift;
-      
+
       if (!AppState.shifts[sid]) AppState.shifts[sid] = {};
       AppState.shifts[sid][d] = newShift;
-      
+
       modal.classList.remove('show');
+      const editedLabel = `${(AppState.staff.find(s => s.id === sid) || {}).name || ''} ${d}日`;
       editingCell = null;
-      
+
       // 違反再チェック・必要人数集計・公休数集計・診断レポートを一括更新
       refreshAfterManualEdit();
-      
-      toast(`シフトを ${newShift || '空'} に変更しました`, 'info', 1500);
+
+      toast(`${editedLabel} を「${newShift || '空'}」に変更しました`, 'info', 1500);
     });
   });
 
   // キャンセル
-  modalCancel.addEventListener('click', () => {
+  modalCancel.addEventListener('click', (e) => {
+    e.stopPropagation();
     modal.classList.remove('show');
     editingCell = null;
   });
 
-  // モーダル外クリックで閉じる
+  // モーダル外クリックで閉じる（モーダル本体＝オーバーレイ部分のクリックのみ反応）
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
       modal.classList.remove('show');
