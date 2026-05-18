@@ -388,6 +388,20 @@ function calculateScore(shifts, allowedShifts, days) {
           score += 1500;
         }
 
+        // === 連勤中の早遅統一ペナルティ ===
+        // 休を挟まない連続勤務中（consecutiveWork >= 2）に早→遅 / 遅→早 が混ざるとNG
+        // (遅→早 は forbidLateEarly で別途処理されるためここでは早→遅のみ追加処理)
+        if (consecutiveWork >= 2 && isWork(prevShift)) {
+          const prevEarly = isEarly(prevShift);
+          const prevLate = isLate(prevShift);
+          const curEarly = isEarly(cur);
+          const curLate = isLate(cur);
+          // 早→遅 または 遅→早 の切り替えはNG
+          if ((prevEarly && curLate) || (prevLate && curEarly)) {
+            score += 600; // 連勤内での時間帯切り替えにペナルティ
+          }
+        }
+
         // 早遅カウント
         if (isEarly(cur)) earlyCount++;
         else if (isLate(cur)) lateCount++;

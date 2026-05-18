@@ -445,9 +445,8 @@ function setupDragAndDrop() {
       if (!AppState.shifts[sid2]) AppState.shifts[sid2] = {};
       AppState.shifts[sid1][d1] = v2;
       AppState.shifts[sid2][d2] = v1;
-      // 違反再チェック
-      AppState.violations = checkViolations(AppState.shifts);
-      renderResultTable();
+      // 違反再チェック・診断レポート更新
+      refreshAfterManualEdit();
       toast('シフトを交換しました', 'info', 1500);
     });
   });
@@ -488,19 +487,11 @@ function setupManualEdit() {
       if (!AppState.shifts[sid]) AppState.shifts[sid] = {};
       AppState.shifts[sid][d] = newShift;
       
-      // セルの表示更新
-      const span = editingCell.querySelector('.shift-cell');
-      span.textContent = newShift;
-      span.className = 'shift-cell ' + getShiftClass(newShift);
-      
-      // 違反再チェック
-      AppState.violations = checkViolations(AppState.shifts);
-      
-      // 集計更新
-      renderSummary();
-      
       modal.classList.remove('show');
       editingCell = null;
+      
+      // 違反再チェック・必要人数集計・公休数集計・診断レポートを一括更新
+      refreshAfterManualEdit();
       
       toast(`シフトを ${newShift || '空'} に変更しました`, 'info', 1500);
     });
@@ -519,6 +510,33 @@ function setupManualEdit() {
       editingCell = null;
     }
   });
+}
+
+/**
+ * 手動編集後の一括更新
+ * - 違反再チェック
+ * - 結果テーブル全体を再描画（必要人数集計行・各スタッフ右端の勤務/休カウント含む）
+ * - サマリー（各スタッフの早責/遅責/早総務.../休/合計勤務）を更新
+ * - 診断レポートを更新
+ * - localStorage に保存
+ */
+function refreshAfterManualEdit() {
+  AppState.violations = checkViolations(AppState.shifts);
+  renderResultTable(); // テーブル本体 + 集計行 + サマリー がすべて再描画される
+
+  // 診断レポートも更新（生成後に表示されているなら）
+  const reportCard = document.getElementById('reportCard');
+  if (reportCard && reportCard.style.display !== 'none') {
+    const result = {
+      success: AppState.violations.length === 0,
+      score: AppState.violations.length,
+      violations: AppState.violations,
+    };
+    renderReport(result);
+  }
+
+  // 永続化
+  if (typeof saveToStorage === 'function') saveToStorage();
 }
 
 // ユーティリティ
