@@ -14,7 +14,27 @@ async function optimizeSchedule(progressCallback) {
   // 1. 各スタッフが入れるシフト種別を確定
   const allowedShifts = {};
   staff.forEach(s => {
-    const baseShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts.slice();
+    let baseShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts.slice();
+    
+    // === 代替責任者ロジック ===
+    // 副店長・チーフ・リーダーは責任者役割を代替できる（一般役割でも）
+    if (s.positionType === 'viceManager' || s.positionType === 'chief' || s.positionType === 'leader') {
+      if (!baseShifts.includes('早責')) baseShifts.push('早責');
+      if (!baseShifts.includes('遅責')) baseShifts.push('遅責');
+    }
+    
+    // === 代替総務ロジック ===
+    // リーダー＋一般役割の人は総務を代替できる
+    if (s.positionType === 'leader' && (s.roleType === 'normal' || s.roleType === 'normalSales')) {
+      if (!baseShifts.includes('早総務')) baseShifts.push('早総務');
+      if (!baseShifts.includes('遅総務')) baseShifts.push('遅総務');
+    }
+    // チーフは元々総務に入れるが、念のため
+    if (s.positionType === 'chief' && !baseShifts.includes('早総務')) {
+      baseShifts.push('早総務');
+      baseShifts.push('遅総務');
+    }
+    
     // 早遅希望でフィルタ
     let filtered = baseShifts;
     if (s.prefs && s.prefs.length > 0) {
@@ -336,6 +356,8 @@ function calculateScore(shifts, allowedShifts, days) {
     let consecutiveWork = s.prevConsecutive || 0;
     let prevShift = '';
     let offCount = 0;
+    let earlyCount = 0; // 早番カウント
+    let lateCount = 0;  // 遅番カウント
 
     for (let d = 1; d <= days; d++) {
       const cur = shifts[s.id][d];
@@ -344,6 +366,14 @@ function calculateScore(shifts, allowedShifts, days) {
         // 入れないシフトを割り当てている
         if (!allowedShifts[s.id].includes(cur)) {
           score += 5000;
+        }
+        
+        // 本来の役割でないシフト（代替役割）への軽ペナルティ
+        const baseRoleShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts;
+        if (!baseRoleShifts.includes(cur)) {
+          // 代替役割を使っている場合、軽いペナルティ
+          // ただし不足時はこの代替が必要なので軽くする
+          score += 30;
         }
 
         consecutiveWork++;
@@ -357,6 +387,10 @@ function calculateScore(shifts, allowedShifts, days) {
         if (settings.forbidLateEarly && isLate(prevShift) && isEarly(cur)) {
           score += 1500;
         }
+
+        // 早遅カウント
+        if (isEarly(cur)) earlyCount++;
+        else if (isLate(cur)) lateCount++;
 
         prevShift = cur;
       } else {
@@ -379,6 +413,17 @@ function calculateScore(shifts, allowedShifts, days) {
 
         prevShift = cur;
       }
+    }
+    
+    // ===== 早遅バランスのペナルティ =====
+    const balance = SHIFT_BALANCE[s.balance || 'balanced'];
+    const totalShifts = earlyCount + lateCount;
+    if (balance && totalShifts > 0) {
+      const targetEarly = totalShifts * balance.earlyRatio;
+      const targetLate = totalShifts * balance.lateRatio;
+      const earlyDiff = Math.abs(earlyCount - targetEarly);
+      const lateDiff = Math.abs(lateCount - targetLate);
+      score += (earlyDiff + lateDiff) * 80; // バランスのずれにペナルティ
     }
 
     // 単発出勤チェック (休→勤→休)

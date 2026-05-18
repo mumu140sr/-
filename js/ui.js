@@ -153,6 +153,12 @@ function renderStaffTable() {
             `<label><input type="checkbox" data-pref="${p}" data-id="${s.id}" ${s.prefs.includes(p) ? 'checked' : ''}/>${p}</label>`).join('')}
         </div>
       </td>
+      <td>
+        <select data-field="balance" data-id="${s.id}">
+          ${Object.entries(SHIFT_BALANCE).map(([k, v]) =>
+            `<option value="${k}" ${(s.balance || 'balanced') === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+        </select>
+      </td>
       <td><input type="number" min="0" max="6" value="${s.prevConsecutive}" data-field="prevConsecutive" data-id="${s.id}"/></td>
       <td><input type="text" value="${escapeHtml(s.note || '')}" data-field="note" data-id="${s.id}"/></td>
       <td><button class="btn-icon" data-del="${s.id}" title="削除">🗑</button></td>
@@ -211,6 +217,7 @@ function setupStaffPanel() {
       roleType: 'normal',
       maxOff: 9,
       prefs: ['早可', '遅可'],
+      balance: 'balanced',
       prevConsecutive: 0,
       note: '',
     });

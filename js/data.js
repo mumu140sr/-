@@ -43,6 +43,15 @@ const ROLE_TYPES = {
 // シフト希望の選択肢
 const SHIFT_PREFS = ['早可', '遅可'];
 
+// 早遅比率の選択肢
+const SHIFT_BALANCE = {
+  earlyHeavy:  { label: '早番多め', earlyRatio: 0.7, lateRatio: 0.3 },
+  earlyMore:   { label: '早番やや多め', earlyRatio: 0.6, lateRatio: 0.4 },
+  balanced:    { label: '均等',     earlyRatio: 0.5, lateRatio: 0.5 },
+  lateMore:    { label: '遅番やや多め', earlyRatio: 0.4, lateRatio: 0.6 },
+  lateHeavy:   { label: '遅番多め', earlyRatio: 0.3, lateRatio: 0.7 },
+};
+
 // アプリケーションの状態
 const AppState = {
   settings: {
@@ -197,20 +206,20 @@ function resetAll() {
 // 初期スタッフ（サンプル）
 function addSampleStaff() {
   const samples = [
-    { name: '田中 太郎',   positionType: 'viceManager', roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '佐藤 花子',   positionType: 'chief',       roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '鈴木 一郎',   positionType: 'chief',       roleType: 'affairs',     maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '高橋 美咲',   positionType: 'leader',      roleType: 'affairs',     maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '伊藤 健太',   positionType: 'leader',      roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '渡辺 由美',   positionType: 'leader',      roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '山本 拓也',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '中村 さくら', positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '小林 健',     positionType: 'staff',       roleType: 'normalSales', maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '加藤 真理',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可'] },
-    { name: '吉田 翔',     positionType: 'staff',       roleType: 'normalSales', maxOff: 9, prefs: ['遅可'] },
-    { name: '山田 恵子',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '松本 大輔',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '井上 千秋',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '田中 太郎',   positionType: 'viceManager', roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
+    { name: '佐藤 花子',   positionType: 'chief',       roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'], balance: 'earlyMore' },
+    { name: '鈴木 一郎',   positionType: 'chief',       roleType: 'affairs',     maxOff: 9, prefs: ['早可', '遅可'], balance: 'lateMore' },
+    { name: '高橋 美咲',   positionType: 'leader',      roleType: 'affairs',     maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
+    { name: '伊藤 健太',   positionType: 'leader',      roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'earlyHeavy' },
+    { name: '渡辺 由美',   positionType: 'leader',      roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'lateHeavy' },
+    { name: '山本 拓也',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
+    { name: '中村 さくら', positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'earlyMore' },
+    { name: '小林 健',     positionType: 'staff',       roleType: 'normalSales', maxOff: 9, prefs: ['早可', '遅可'], balance: 'lateMore' },
+    { name: '加藤 真理',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可'],         balance: 'earlyHeavy' },
+    { name: '吉田 翔',     positionType: 'staff',       roleType: 'normalSales', maxOff: 9, prefs: ['遅可'],         balance: 'lateHeavy' },
+    { name: '山田 恵子',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
+    { name: '松本 大輔',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
+    { name: '井上 千秋',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
   ];
   samples.forEach(s => {
     AppState.staff.push({
@@ -220,6 +229,7 @@ function addSampleStaff() {
       roleType: s.roleType,
       maxOff: s.maxOff,
       prefs: s.prefs,
+      balance: s.balance || 'balanced',
       prevConsecutive: 0,
       note: '',
     });
