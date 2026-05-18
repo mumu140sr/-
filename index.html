@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>シフト自動生成アプリ</title>
+<link rel="stylesheet" href="css/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<header class="app-header">
+  <div class="title">
+    <h1>📅 シフト自動生成アプリ</h1>
+    <span class="subtitle">焼きなまし法による最適化エンジン搭載</span>
+  </div>
+  <div class="header-actions">
+    <button id="btnSave" class="btn btn-ghost">💾 保存</button>
+    <button id="btnLoad" class="btn btn-ghost">📂 読込</button>
+    <button id="btnReset" class="btn btn-ghost">🗑 リセット</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="settings">① 基本設定</button>
+  <button class="tab" data-tab="roles">② 役職マスター</button>
+  <button class="tab" data-tab="staff">③ スタッフ管理</button>
+  <button class="tab" data-tab="calendar">④ 希望休入力</button>
+  <button class="tab" data-tab="generate">⑤ 自動生成</button>
+  <button class="tab" data-tab="result">⑥ シフト表</button>
+</nav>
+
+<main class="content">
+
+  <!-- ① 基本設定 -->
+  <section class="tab-panel active" id="panel-settings">
+    <h2>① 基本設定</h2>
+    <div class="card">
+      <div class="form-row">
+        <label>対象年月</label>
+        <input type="month" id="targetMonth" />
+      </div>
+      <div class="form-row">
+        <label>連勤上限（日）</label>
+        <input type="number" id="maxConsecutive" min="2" max="10" value="4" />
+        <span class="hint">この日数を超える連勤を禁止します（例: 4にすると5連勤以上禁止）</span>
+      </div>
+      <div class="form-row">
+        <label>遅→早の禁止</label>
+        <label class="switch"><input type="checkbox" id="forbidLateEarly" checked /><span></span></label>
+        <span class="hint">前日が遅番、翌日が早番のパターンを禁止します</span>
+      </div>
+      <div class="form-row">
+        <label>単発休みのペナルティ</label>
+        <label class="switch"><input type="checkbox" id="penaltySingleOff" checked /><span></span></label>
+        <span class="hint">勤務日に挟まれた1日だけの休みを避けます</span>
+      </div>
+      <div class="form-row">
+        <label>焼きなまし反復回数</label>
+        <input type="number" id="maxAttempts" min="10000" max="500000" step="10000" value="100000" />
+        <span class="hint">多いほど精度UP、時間も増えます（推奨: 100000）</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>📖 使い方</h3>
+      <ol class="usage">
+        <li><b>① 基本設定</b>で対象月・連勤上限などを決めます</li>
+        <li><b>② 役職マスター</b>で「早責」「遅責」「早」「遅」「早総」「遅総」など各役職の1日に必要な人数を設定</li>
+        <li><b>③ スタッフ管理</b>で各スタッフの役職、公休数、早遅の希望を登録</li>
+        <li><b>④ 希望休入力</b>で各スタッフの希望休（休/有/公など）をカレンダーに入力</li>
+        <li><b>⑤ 自動生成</b>ボタンで焼きなまし法による最適化を実行</li>
+        <li><b>⑥ シフト表</b>で結果を確認、ドラッグで手動修正もOK</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ② 役職マスター -->
+  <section class="tab-panel" id="panel-roles">
+    <h2>② 役職マスター（各役職の1日あたり必要人数）</h2>
+    <div class="card">
+      <p class="hint">各シフト種別ごとに、毎日必要な人数を設定します。0にすると不要扱いになります。</p>
+      <table class="role-table">
+        <thead>
+          <tr>
+            <th>シフト記号</th>
+            <th>意味</th>
+            <th>必要人数/日</th>
+            <th>色</th>
+          </tr>
+        </thead>
+        <tbody id="roleTableBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ③ スタッフ管理 -->
+  <section class="tab-panel" id="panel-staff">
+    <h2>③ スタッフ管理</h2>
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn btn-primary" id="btnAddStaff">＋ スタッフ追加</button>
+        <span class="hint">最大20人まで登録できます</span>
+      </div>
+      <div class="table-wrap">
+        <table class="staff-table">
+          <thead>
+            <tr>
+              <th>名前</th>
+              <th>役割タイプ</th>
+              <th>公休数<br><small>(月の休み数)</small></th>
+              <th>シフト希望</th>
+              <th>前月末連勤<br><small>日数</small></th>
+              <th>備考</th>
+              <th>削除</th>
+            </tr>
+          </thead>
+          <tbody id="staffTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>役割タイプ説明</h3>
+      <ul class="hint-list">
+        <li><b>責任者</b>: 早責・遅責に入る</li>
+        <li><b>総合</b>: 早総・遅総に入る</li>
+        <li><b>一般</b>: 早・遅に入る</li>
+        <li><b>オールマイティ</b>: 全シフトに入れる</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ④ 希望休入力 -->
+  <section class="tab-panel" id="panel-calendar">
+    <h2>④ 希望休入力</h2>
+    <div class="card">
+      <div class="toolbar">
+        <span>記号: </span>
+        <button class="chip-btn" data-mark="休">休</button>
+        <button class="chip-btn" data-mark="有">有</button>
+        <button class="chip-btn" data-mark="公">公</button>
+        <button class="chip-btn" data-mark="研">研</button>
+        <button class="chip-btn" data-mark="☆">☆</button>
+        <button class="chip-btn" data-mark="季">季</button>
+        <button class="chip-btn" data-mark="引">引</button>
+        <button class="chip-btn" data-mark="慶">慶</button>
+        <button class="chip-btn" data-mark="">クリア</button>
+        <span class="hint">クリックで選択中の記号を入力、ダブルクリックで削除</span>
+      </div>
+      <div class="table-wrap">
+        <table id="calendarTable" class="calendar-table"></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ⑤ 自動生成 -->
+  <section class="tab-panel" id="panel-generate">
+    <h2>⑤ 自動生成</h2>
+    <div class="card">
+      <p>設定をもとに焼きなまし法による最適化を実行します。</p>
+      <button id="btnGenerate" class="btn btn-large btn-primary">🚀 シフト自動生成を実行</button>
+      <div id="progressArea" style="display:none">
+        <div class="progress-info">
+          <span id="progressText">準備中...</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card" id="reportCard" style="display:none">
+      <h3>📊 AI診断レポート</h3>
+      <div id="reportContent"></div>
+    </div>
+  </section>
+
+  <!-- ⑥ シフト表 -->
+  <section class="tab-panel" id="panel-result">
+    <h2>⑥ シフト表</h2>
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn btn-primary" id="btnExportExcel">📥 Excelエクスポート</button>
+        <button class="btn" id="btnExportCSV">📥 CSVエクスポート</button>
+        <button class="btn" id="btnRecheck">🔍 ルールチェック</button>
+        <span class="hint">セルをドラッグ&ドロップでスタッフ間/日付間のシフト交換ができます</span>
+      </div>
+      <div class="legend">
+        <span class="legend-item"><span class="legend-color" style="background:#fde2e2"></span>早責</span>
+        <span class="legend-item"><span class="legend-color" style="background:#fce4b6"></span>早総</span>
+        <span class="legend-item"><span class="legend-color" style="background:#d4eaf7"></span>早</span>
+        <span class="legend-item"><span class="legend-color" style="background:#d1c4e9"></span>遅責</span>
+        <span class="legend-item"><span class="legend-color" style="background:#c8e6c9"></span>遅総</span>
+        <span class="legend-item"><span class="legend-color" style="background:#ffe0b2"></span>遅</span>
+        <span class="legend-item"><span class="legend-color" style="background:#eeeeee"></span>休</span>
+        <span class="legend-item"><span class="legend-color" style="background:#ffcdd2;border:2px solid #b71c1c"></span>ルール違反</span>
+      </div>
+      <div class="table-wrap">
+        <table id="resultTable" class="result-table"></table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>📊 集計</h3>
+      <div id="summaryArea"></div>
+    </div>
+  </section>
+
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="js/data.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/optimizer.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

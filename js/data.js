@@ -1,0 +1,208 @@
+/* ===========================================
+   data.js - データモデルと定数定義
+   =========================================== */
+
+// シフト種別の定義
+const SHIFT_TYPES = {
+  EARLY_RESP:  { key: '早責', label: '早番責任者', class: 's-early-resp',  category: 'early', isResp: true,  isWork: true  },
+  LATE_RESP:   { key: '遅責', label: '遅番責任者', class: 's-late-resp',   category: 'late',  isResp: true,  isWork: true  },
+  EARLY_GEN:   { key: '早総', label: '早番総合',   class: 's-early-gen',   category: 'early', isResp: false, isWork: true, isGeneral: true },
+  LATE_GEN:    { key: '遅総', label: '遅番総合',   class: 's-late-gen',    category: 'late',  isResp: false, isWork: true, isGeneral: true },
+  EARLY:       { key: '早',   label: '早番',       class: 's-early',       category: 'early', isResp: false, isWork: true  },
+  LATE:        { key: '遅',   label: '遅番',       class: 's-late',        category: 'late',  isResp: false, isWork: true  },
+};
+
+// 休み記号の定義
+const OFF_TYPES = {
+  '休': { label: '公休',         class: 's-off',      isOff: true, isRequest: true },
+  '公': { label: '公休',         class: 's-public',   isOff: true, isRequest: true },
+  '有': { label: '有給',         class: 's-paid',     isOff: true, isRequest: true },
+  '研': { label: '研修',         class: 's-training', isOff: true, isRequest: true },
+  '☆': { label: '希望休',        class: 's-off',      isOff: true, isRequest: true },
+  '季': { label: '季節休暇',     class: 's-off',      isOff: true, isRequest: true },
+  '引': { label: '引継',         class: 's-off',      isOff: true, isRequest: true },
+  '慶': { label: '慶弔休',       class: 's-off',      isOff: true, isRequest: true },
+};
+
+// 役割タイプ → 入れるシフト種別
+const ROLE_TYPES = {
+  responsible: { label: '責任者',         shifts: ['早責', '遅責'] },
+  general:     { label: '総合',           shifts: ['早総', '遅総'] },
+  normal:      { label: '一般',           shifts: ['早', '遅'] },
+  all:         { label: 'オールマイティ', shifts: ['早責', '遅責', '早総', '遅総', '早', '遅'] },
+};
+
+// シフト希望の選択肢
+const SHIFT_PREFS = ['早可', '遅可'];
+
+// アプリケーションの状態
+const AppState = {
+  settings: {
+    targetMonth: '',  // YYYY-MM
+    maxConsecutive: 4,  // 連勤上限
+    forbidLateEarly: true,
+    penaltySingleOff: true,
+    maxAttempts: 100000,
+  },
+  // 役職マスター: 各日に必要な人数
+  roleRequirements: {
+    '早責': 1,
+    '遅責': 1,
+    '早総': 1,
+    '遅総': 1,
+    '早':   2,
+    '遅':   2,
+  },
+  // 役職カラー（カスタマイズ用）
+  roleColors: {
+    '早責': '#fde2e2',
+    '遅責': '#d1c4e9',
+    '早総': '#fce4b6',
+    '遅総': '#c8e6c9',
+    '早':   '#d4eaf7',
+    '遅':   '#ffe0b2',
+  },
+  // スタッフ: [{id, name, roleType, maxOff, prefs:[], prevConsecutive, note}]
+  staff: [],
+  // 希望休（手動入力）: { staffId: { day: '休' } }
+  requests: {},
+  // 生成結果: { staffId: { day: '早' } }
+  shifts: {},
+  // ルール違反: [{ staffId, day, type, message, action }]
+  violations: [],
+  // 生成済みフラグ
+  generated: false,
+};
+
+let _staffIdCounter = 1;
+
+function newStaffId() {
+  return 'S' + (_staffIdCounter++).toString().padStart(3, '0');
+}
+
+function getDaysInMonth(yearMonth) {
+  if (!yearMonth) return 31;
+  const [y, m] = yearMonth.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
+
+function getWeekday(yearMonth, day) {
+  if (!yearMonth) return 0;
+  const [y, m] = yearMonth.split('-').map(Number);
+  return new Date(y, m - 1, day).getDay(); // 0=日, 6=土
+}
+
+function getWeekdayLabel(w) {
+  return ['日', '月', '火', '水', '木', '金', '土'][w];
+}
+
+// シフト記号 → クラス
+function getShiftClass(shift) {
+  if (!shift) return 's-empty';
+  if (SHIFT_TYPES[shiftKeyToEnum(shift)]) {
+    return SHIFT_TYPES[shiftKeyToEnum(shift)].class;
+  }
+  if (OFF_TYPES[shift]) return OFF_TYPES[shift].class;
+  return 's-empty';
+}
+
+function shiftKeyToEnum(key) {
+  for (const [k, v] of Object.entries(SHIFT_TYPES)) {
+    if (v.key === key) return k;
+  }
+  return null;
+}
+
+function isOff(shift) {
+  return !!OFF_TYPES[shift];
+}
+
+function isWork(shift) {
+  return !!shiftKeyToEnum(shift);
+}
+
+function isEarly(shift) {
+  const enumKey = shiftKeyToEnum(shift);
+  if (!enumKey) return false;
+  return SHIFT_TYPES[enumKey].category === 'early';
+}
+
+function isLate(shift) {
+  const enumKey = shiftKeyToEnum(shift);
+  if (!enumKey) return false;
+  return SHIFT_TYPES[enumKey].category === 'late';
+}
+
+// ローカルストレージ保存/読込
+function saveToStorage() {
+  const data = {
+    settings: AppState.settings,
+    roleRequirements: AppState.roleRequirements,
+    roleColors: AppState.roleColors,
+    staff: AppState.staff,
+    requests: AppState.requests,
+    shifts: AppState.shifts,
+    _staffIdCounter,
+  };
+  localStorage.setItem('shiftAppData', JSON.stringify(data));
+}
+
+function loadFromStorage() {
+  const raw = localStorage.getItem('shiftAppData');
+  if (!raw) return false;
+  try {
+    const data = JSON.parse(raw);
+    Object.assign(AppState.settings, data.settings || {});
+    Object.assign(AppState.roleRequirements, data.roleRequirements || {});
+    Object.assign(AppState.roleColors, data.roleColors || {});
+    AppState.staff = data.staff || [];
+    AppState.requests = data.requests || {};
+    AppState.shifts = data.shifts || {};
+    _staffIdCounter = data._staffIdCounter || (AppState.staff.length + 1);
+    return true;
+  } catch (e) {
+    console.error('読込エラー', e);
+    return false;
+  }
+}
+
+function resetAll() {
+  AppState.staff = [];
+  AppState.requests = {};
+  AppState.shifts = {};
+  AppState.violations = [];
+  AppState.generated = false;
+  _staffIdCounter = 1;
+  localStorage.removeItem('shiftAppData');
+}
+
+// 初期スタッフ（サンプル）
+function addSampleStaff() {
+  const samples = [
+    { name: '田中 太郎',   roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '佐藤 花子',   roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '鈴木 一郎',   roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '高橋 美咲',   roleType: 'general',     maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '伊藤 健太',   roleType: 'general',     maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '渡辺 由美',   roleType: 'general',     maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '山本 拓也',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '中村 さくら', roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '小林 健',     roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '加藤 真理',   roleType: 'normal',      maxOff: 9, prefs: ['早可'] },
+    { name: '吉田 翔',     roleType: 'normal',      maxOff: 9, prefs: ['遅可'] },
+    { name: '山田 恵子',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '松本 大輔',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '井上 千秋',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+  ];
+  samples.forEach(s => {
+    AppState.staff.push({
+      id: newStaffId(),
+      name: s.name,
+      roleType: s.roleType,
+      maxOff: s.maxOff,
+      prefs: s.prefs,
+      prevConsecutive: 0,
+      note: '',
+    });
+  });
+}
