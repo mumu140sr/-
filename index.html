@@ -65,7 +65,7 @@
       <h3>📖 使い方</h3>
       <ol class="usage">
         <li><b>① 基本設定</b>で対象月・連勤上限などを決めます</li>
-        <li><b>② 役職マスター</b>で「早責」「遅責」「早」「遅」「早総」「遅総」など各役職の1日に必要な人数を設定</li>
+        <li><b>② 役職マスター</b>で「早責」「遅責」「早」「遅」「早総務」「遅総務」など各役職の1日に必要な人数を設定</li>
         <li><b>③ スタッフ管理</b>で各スタッフの役職、公休数、早遅の希望を登録</li>
         <li><b>④ 希望休入力</b>で各スタッフの希望休（休/有/公など）をカレンダーに入力</li>
         <li><b>⑤ 自動生成</b>ボタンで焼きなまし法による最適化を実行</li>
@@ -121,10 +121,13 @@
     <div class="card">
       <h3>役割タイプ説明</h3>
       <ul class="hint-list">
+        <li><b>副店長</b>: 早責・遅責に入る</li>
+        <li><b>チーフ</b>: 早総務・遅総務に入る</li>
+        <li><b>リーダー</b>: 早・遅に入る</li>
         <li><b>責任者</b>: 早責・遅責に入る</li>
-        <li><b>総合</b>: 早総・遅総に入る</li>
+        <li><b>総務</b>: 早総務・遅総務に入る</li>
         <li><b>一般</b>: 早・遅に入る</li>
-        <li><b>オールマイティ</b>: 全シフトに入れる</li>
+        <li><b>一般（営業）</b>: 早・遅に入る</li>
       </ul>
     </div>
   </section>
@@ -185,10 +188,10 @@
       </div>
       <div class="legend">
         <span class="legend-item"><span class="legend-color" style="background:#fde2e2"></span>早責</span>
-        <span class="legend-item"><span class="legend-color" style="background:#fce4b6"></span>早総</span>
+        <span class="legend-item"><span class="legend-color" style="background:#fce4b6"></span>早総務</span>
         <span class="legend-item"><span class="legend-color" style="background:#d4eaf7"></span>早</span>
         <span class="legend-item"><span class="legend-color" style="background:#d1c4e9"></span>遅責</span>
-        <span class="legend-item"><span class="legend-color" style="background:#c8e6c9"></span>遅総</span>
+        <span class="legend-item"><span class="legend-color" style="background:#c8e6c9"></span>遅総務</span>
         <span class="legend-item"><span class="legend-color" style="background:#ffe0b2"></span>遅</span>
         <span class="legend-item"><span class="legend-color" style="background:#eeeeee"></span>休</span>
         <span class="legend-item"><span class="legend-color" style="background:#ffcdd2;border:2px solid #b71c1c"></span>ルール違反</span>
@@ -206,6 +209,34 @@
 </main>
 
 <div id="toast" class="toast"></div>
+
+<!-- 手動シフト編集モーダル -->
+<div id="shiftEditModal" class="modal">
+  <div class="modal-content">
+    <h3>シフト編集</h3>
+    <p id="modalTarget"></p>
+    <div class="shift-selector">
+      <button class="shift-option" data-shift="早責">早責</button>
+      <button class="shift-option" data-shift="遅責">遅責</button>
+      <button class="shift-option" data-shift="早総務">早総務</button>
+      <button class="shift-option" data-shift="遅総務">遅総務</button>
+      <button class="shift-option" data-shift="早">早</button>
+      <button class="shift-option" data-shift="遅">遅</button>
+      <button class="shift-option" data-shift="休">休</button>
+      <button class="shift-option" data-shift="公">公</button>
+      <button class="shift-option" data-shift="有">有</button>
+      <button class="shift-option" data-shift="研">研</button>
+      <button class="shift-option" data-shift="☆">☆</button>
+      <button class="shift-option" data-shift="季">季</button>
+      <button class="shift-option" data-shift="引">引</button>
+      <button class="shift-option" data-shift="慶">慶</button>
+      <button class="shift-option" data-shift="">クリア</button>
+    </div>
+    <div class="modal-actions">
+      <button id="modalCancel" class="btn">キャンセル</button>
+    </div>
+  </div>
+</div>
 
 <script src="js/data.js"></script>
 <script src="js/ui.js"></script>

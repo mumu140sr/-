@@ -6,8 +6,8 @@
 const SHIFT_TYPES = {
   EARLY_RESP:  { key: '早責', label: '早番責任者', class: 's-early-resp',  category: 'early', isResp: true,  isWork: true  },
   LATE_RESP:   { key: '遅責', label: '遅番責任者', class: 's-late-resp',   category: 'late',  isResp: true,  isWork: true  },
-  EARLY_GEN:   { key: '早総', label: '早番総合',   class: 's-early-gen',   category: 'early', isResp: false, isWork: true, isGeneral: true },
-  LATE_GEN:    { key: '遅総', label: '遅番総合',   class: 's-late-gen',    category: 'late',  isResp: false, isWork: true, isGeneral: true },
+  EARLY_GEN:   { key: '早総務', label: '早番総務',   class: 's-early-gen',   category: 'early', isResp: false, isWork: true, isGeneral: true },
+  LATE_GEN:    { key: '遅総務', label: '遅番総務',   class: 's-late-gen',    category: 'late',  isResp: false, isWork: true, isGeneral: true },
   EARLY:       { key: '早',   label: '早番',       class: 's-early',       category: 'early', isResp: false, isWork: true  },
   LATE:        { key: '遅',   label: '遅番',       class: 's-late',        category: 'late',  isResp: false, isWork: true  },
 };
@@ -26,10 +26,13 @@ const OFF_TYPES = {
 
 // 役割タイプ → 入れるシフト種別
 const ROLE_TYPES = {
+  viceManager: { label: '副店長',         shifts: ['早責', '遅責'] },
+  chief:       { label: 'チーフ',         shifts: ['早総務', '遅総務'] },
+  leader:      { label: 'リーダー',       shifts: ['早', '遅'] },
   responsible: { label: '責任者',         shifts: ['早責', '遅責'] },
-  general:     { label: '総合',           shifts: ['早総', '遅総'] },
+  affairs:     { label: '総務',           shifts: ['早総務', '遅総務'] },
   normal:      { label: '一般',           shifts: ['早', '遅'] },
-  all:         { label: 'オールマイティ', shifts: ['早責', '遅責', '早総', '遅総', '早', '遅'] },
+  normalSales: { label: '一般（営業）',   shifts: ['早', '遅'] },
 };
 
 // シフト希望の選択肢
@@ -48,8 +51,8 @@ const AppState = {
   roleRequirements: {
     '早責': 1,
     '遅責': 1,
-    '早総': 1,
-    '遅総': 1,
+    '早総務': 1,
+    '遅総務': 1,
     '早':   2,
     '遅':   2,
   },
@@ -57,8 +60,8 @@ const AppState = {
   roleColors: {
     '早責': '#fde2e2',
     '遅責': '#d1c4e9',
-    '早総': '#fce4b6',
-    '遅総': '#c8e6c9',
+    '早総務': '#fce4b6',
+    '遅総務': '#c8e6c9',
     '早':   '#d4eaf7',
     '遅':   '#ffe0b2',
   },
@@ -179,17 +182,17 @@ function resetAll() {
 // 初期スタッフ（サンプル）
 function addSampleStaff() {
   const samples = [
-    { name: '田中 太郎',   roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '田中 太郎',   roleType: 'viceManager', maxOff: 9, prefs: ['早可', '遅可'] },
     { name: '佐藤 花子',   roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '鈴木 一郎',   roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '高橋 美咲',   roleType: 'general',     maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '伊藤 健太',   roleType: 'general',     maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '渡辺 由美',   roleType: 'general',     maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '鈴木 一郎',   roleType: 'chief',       maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '高橋 美咲',   roleType: 'affairs',     maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '伊藤 健太',   roleType: 'leader',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '渡辺 由美',   roleType: 'leader',      maxOff: 9, prefs: ['早可', '遅可'] },
     { name: '山本 拓也',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
     { name: '中村 さくら', roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
-    { name: '小林 健',     roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
+    { name: '小林 健',     roleType: 'normalSales', maxOff: 9, prefs: ['早可', '遅可'] },
     { name: '加藤 真理',   roleType: 'normal',      maxOff: 9, prefs: ['早可'] },
-    { name: '吉田 翔',     roleType: 'normal',      maxOff: 9, prefs: ['遅可'] },
+    { name: '吉田 翔',     roleType: 'normalSales', maxOff: 9, prefs: ['遅可'] },
     { name: '山田 恵子',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
     { name: '松本 大輔',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },
     { name: '井上 千秋',   roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'] },

@@ -313,7 +313,7 @@ function renderResultTable() {
   });
 
   // 集計行
-  const summaryShiftKeys = ['早責', '遅責', '早総', '遅総', '早', '遅'];
+  const summaryShiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅'];
   summaryShiftKeys.forEach(key => {
     const required = AppState.roleRequirements[key] || 0;
     if (required === 0) return;
@@ -336,6 +336,7 @@ function renderResultTable() {
   table.appendChild(tbody);
 
   setupDragAndDrop();
+  setupManualEdit(); // 手動編集機能を追加
   renderSummary();
 }
 
@@ -344,18 +345,18 @@ function renderSummary() {
   const days = getDaysInMonth(AppState.settings.targetMonth);
 
   let html = '<table style="width:auto"><thead><tr><th>スタッフ</th>';
-  ['早責', '遅責', '早総', '遅総', '早', '遅', '休系', '合計勤務'].forEach(h => html += `<th>${h}</th>`);
+  ['早責', '遅責', '早総務', '遅総務', '早', '遅', '休系', '合計勤務'].forEach(h => html += `<th>${h}</th>`);
   html += '</tr></thead><tbody>';
 
   AppState.staff.forEach(s => {
-    const counts = { '早責': 0, '遅責': 0, '早総': 0, '遅総': 0, '早': 0, '遅': 0, off: 0, work: 0 };
+    const counts = { '早責': 0, '遅責': 0, '早総務': 0, '遅総務': 0, '早': 0, '遅': 0, off: 0, work: 0 };
     for (let d = 1; d <= days; d++) {
       const sh = (AppState.shifts[s.id] || {})[d] || '';
       if (counts[sh] !== undefined) { counts[sh]++; counts.work++; }
       else if (isOff(sh)) counts.off++;
     }
     html += `<tr><td>${escapeHtml(s.name)}</td>`;
-    ['早責', '遅責', '早総', '遅総', '早', '遅'].forEach(k => html += `<td>${counts[k]}</td>`);
+    ['早責', '遅責', '早総務', '遅総務', '早', '遅'].forEach(k => html += `<td>${counts[k]}</td>`);
     html += `<td>${counts.off}</td><td>${counts.work}</td></tr>`;
   });
   html += '</tbody></table>';
@@ -406,6 +407,74 @@ function setupDragAndDrop() {
       renderResultTable();
       toast('シフトを交換しました', 'info', 1500);
     });
+  });
+}
+
+// 手動シフト編集（セルクリックでモーダル表示）
+let editingCell = null;
+function setupManualEdit() {
+  const modal = document.getElementById('shiftEditModal');
+  const modalTarget = document.getElementById('modalTarget');
+  const modalCancel = document.getElementById('modalCancel');
+
+  // セルをクリックで編集モーダル表示
+  document.querySelectorAll('.result-table td[data-sid]').forEach(td => {
+    td.addEventListener('click', (e) => {
+      // ドラッグ中は無視
+      if (dragSource) return;
+      
+      editingCell = td;
+      const sid = td.dataset.sid;
+      const d = parseInt(td.dataset.day);
+      const staff = AppState.staff.find(s => s.id === sid);
+      const staffName = staff ? staff.name : '';
+      
+      modalTarget.textContent = `${staffName} - ${d}日`;
+      modal.classList.add('show');
+    });
+  });
+
+  // シフト選択ボタン
+  document.querySelectorAll('.shift-option').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!editingCell) return;
+      const sid = editingCell.dataset.sid;
+      const d = parseInt(editingCell.dataset.day);
+      const newShift = btn.dataset.shift;
+      
+      if (!AppState.shifts[sid]) AppState.shifts[sid] = {};
+      AppState.shifts[sid][d] = newShift;
+      
+      // セルの表示更新
+      const span = editingCell.querySelector('.shift-cell');
+      span.textContent = newShift;
+      span.className = 'shift-cell ' + getShiftClass(newShift);
+      
+      // 違反再チェック
+      AppState.violations = checkViolations(AppState.shifts);
+      
+      // 集計更新
+      renderSummary();
+      
+      modal.classList.remove('show');
+      editingCell = null;
+      
+      toast(`シフトを ${newShift || '空'} に変更しました`, 'info', 1500);
+    });
+  });
+
+  // キャンセル
+  modalCancel.addEventListener('click', () => {
+    modal.classList.remove('show');
+    editingCell = null;
+  });
+
+  // モーダル外クリックで閉じる
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      modal.classList.remove('show');
+      editingCell = null;
+    }
   });
 }
 

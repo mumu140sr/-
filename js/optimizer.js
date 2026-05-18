@@ -168,7 +168,7 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
   });
 
   // ステップ2: 各日のシフトに割り当て
-  const shiftKeys = ['早責', '遅責', '早総', '遅総', '早', '遅'];
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅'];
   
   for (let d = 1; d <= days; d++) {
     // この日に勤務可能な（空きの）スタッフ
@@ -303,7 +303,7 @@ function calculateScore(shifts, allowedShifts, days) {
   const maxCons = settings.maxConsecutive;
 
   // ===== 縦のルール: 各日に必要人数を確保 =====
-  const shiftKeys = ['早責', '遅責', '早総', '遅総', '早', '遅'];
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅'];
   for (let d = 1; d <= days; d++) {
     const counts = {};
     shiftKeys.forEach(k => counts[k] = 0);
@@ -488,7 +488,7 @@ function checkViolations(shifts) {
   });
 
   // 各日の必要人数チェック
-  const shiftKeys = ['早責', '遅責', '早総', '遅総', '早', '遅'];
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅'];
   for (let d = 1; d <= days; d++) {
     const counts = {};
     shiftKeys.forEach(k => counts[k] = 0);

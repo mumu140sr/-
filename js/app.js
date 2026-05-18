@@ -220,7 +220,7 @@ function exportToExcel() {
   });
 
   // 集計行
-  const shiftKeys = ['早責', '遅責', '早総', '遅総', '早', '遅'];
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅'];
   shiftKeys.forEach(key => {
     const req = AppState.roleRequirements[key] || 0;
     if (req === 0) return;
@@ -246,7 +246,7 @@ function exportToExcel() {
   // セル色を設定（シフト種別ごと）
   const colorMap = {
     '早責': 'FDE2E2', '遅責': 'D1C4E9',
-    '早総': 'FCE4B6', '遅総': 'C8E6C9',
+    '早総務': 'FCE4B6', '遅総務': 'C8E6C9',
     '早':   'D4EAF7', '遅':   'FFE0B2',
     '休':   'EEEEEE', '公':   'F5F5F5',
     '有':   'FFF9C4', '研':   'E0F7FA',
@@ -265,15 +265,15 @@ function exportToExcel() {
   XLSX.utils.book_append_sheet(wb, ws, 'シフト表');
 
   // 集計シート
-  const summary = [['スタッフ', '早責', '遅責', '早総', '遅総', '早', '遅', '休系', '合計勤務']];
+  const summary = [['スタッフ', '早責', '遅責', '早総務', '遅総務', '早', '遅', '休系', '合計勤務']];
   AppState.staff.forEach(s => {
-    const counts = { '早責': 0, '遅責': 0, '早総': 0, '遅総': 0, '早': 0, '遅': 0, off: 0, work: 0 };
+    const counts = { '早責': 0, '遅責': 0, '早総務': 0, '遅総務': 0, '早': 0, '遅': 0, off: 0, work: 0 };
     for (let d = 1; d <= days; d++) {
       const sh = (AppState.shifts[s.id] || {})[d] || '';
       if (counts[sh] !== undefined) { counts[sh]++; counts.work++; }
       else if (isOff(sh)) counts.off++;
     }
-    summary.push([s.name, counts['早責'], counts['遅責'], counts['早総'], counts['遅総'], counts['早'], counts['遅'], counts.off, counts.work]);
+    summary.push([s.name, counts['早責'], counts['遅責'], counts['早総務'], counts['遅総務'], counts['早'], counts['遅'], counts.off, counts.work]);
   });
   const ws2 = XLSX.utils.aoa_to_sheet(summary);
   XLSX.utils.book_append_sheet(wb, ws2, '集計');
