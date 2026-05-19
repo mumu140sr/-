@@ -18,13 +18,14 @@ document.addEventListener('DOMContentLoaded', () => {
   setupResultPanel();
   setupHeaderActions();
 
-  // 初期描画
-  renderRoleTable();
-  renderStaffTable();
-  renderCalendar();
-  renderResultTable();
+  // 初期描画（設定パネルの入力値復元含む）
+  refreshAllUI();
 
-  toast('シフト自動生成アプリへようこそ！', 'success');
+  if (loaded) {
+    toast('前回のデータを読込みました', 'success');
+  } else {
+    toast('シフト自動生成アプリへようこそ！', 'success');
+  }
 });
 
 // ヘッダーアクション
@@ -36,21 +37,7 @@ function setupHeaderActions() {
 
   document.getElementById('btnLoad').addEventListener('click', () => {
     if (loadFromStorage()) {
-      renderRoleTable();
-      renderStaffTable();
-      renderCalendar();
-      renderResultTable();
-      // settings欄も更新
-      const $month = document.getElementById('targetMonth');
-      const $maxCons = document.getElementById('maxConsecutive');
-      const $forbidLE = document.getElementById('forbidLateEarly');
-      const $penaltySO = document.getElementById('penaltySingleOff');
-      const $maxAtt = document.getElementById('maxAttempts');
-      $month.value = AppState.settings.targetMonth;
-      $maxCons.value = AppState.settings.maxConsecutive;
-      $forbidLE.checked = AppState.settings.forbidLateEarly;
-      $penaltySO.checked = AppState.settings.penaltySingleOff;
-      $maxAtt.value = AppState.settings.maxAttempts;
+      refreshAllUI();
       toast('設定を読込みました', 'success');
     } else {
       toast('保存されたデータがありません', 'error');
@@ -61,10 +48,7 @@ function setupHeaderActions() {
     if (confirm('全てのデータをリセットしますか？（保存データも削除されます）')) {
       resetAll();
       addSampleStaff();
-      renderRoleTable();
-      renderStaffTable();
-      renderCalendar();
-      renderResultTable();
+      refreshAllUI();
       toast('リセットしました', 'info');
     }
   });

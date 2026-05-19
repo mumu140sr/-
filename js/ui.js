@@ -10,6 +10,52 @@ function toast(message, type = 'info', duration = 3000) {
   setTimeout(() => { t.className = 'toast ' + type; }, duration);
 }
 
+// === 自動保存（デバウンス付き） ===
+let _autoSaveTimer = null;
+function autoSave() {
+  if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(() => {
+    if (typeof saveToStorage === 'function') {
+      saveToStorage();
+    }
+    _autoSaveTimer = null;
+  }, 300); // 300ms 後に保存
+}
+
+/**
+ * ロード後・リセット後などに全UIを再構築する
+ * - 設定パネルの各入力値（月・連勤上限・特別日など）も復元
+ */
+function refreshAllUI() {
+  // 設定パネルの入力値を復元
+  const $month = document.getElementById('targetMonth');
+  const $maxCons = document.getElementById('maxConsecutive');
+  const $forbidLE = document.getElementById('forbidLateEarly');
+  const $penaltySO = document.getElementById('penaltySingleOff');
+  const $maxAtt = document.getElementById('maxAttempts');
+  const $replacementDays = document.getElementById('replacementDays');
+  const $renewalDays = document.getElementById('renewalDays');
+  if ($month) $month.value = AppState.settings.targetMonth || '';
+  if ($maxCons) $maxCons.value = AppState.settings.maxConsecutive;
+  if ($forbidLE) $forbidLE.checked = AppState.settings.forbidLateEarly;
+  if ($penaltySO) $penaltySO.checked = AppState.settings.penaltySingleOff;
+  if ($maxAtt) $maxAtt.value = AppState.settings.maxAttempts;
+  // 特別日の入力欄
+  if ($replacementDays) {
+    const replacementArr = Object.keys(AppState.specialDays).filter(d => AppState.specialDays[d] === 'replacement');
+    $replacementDays.value = replacementArr.join(',');
+  }
+  if ($renewalDays) {
+    const renewalArr = Object.keys(AppState.specialDays).filter(d => AppState.specialDays[d] === 'renewal');
+    $renewalDays.value = renewalArr.join(',');
+  }
+  // テーブル類を再描画
+  renderRoleTable();
+  renderStaffTable();
+  renderCalendar();
+  renderResultTable();
+}
+
 // タブ切り替え
 function setupTabs() {
   document.querySelectorAll('.tab').forEach(tab => {
@@ -116,12 +162,14 @@ function renderRoleTable() {
     input.addEventListener('change', e => {
       const role = e.target.dataset.role;
       AppState.roleRequirements[role] = parseInt(e.target.value) || 0;
+      autoSave();
     });
   });
   tbody.querySelectorAll('.role-color-input').forEach(input => {
     input.addEventListener('change', e => {
       const role = e.target.dataset.role;
       AppState.roleColors[role] = e.target.value;
+      autoSave();
     });
   });
 }

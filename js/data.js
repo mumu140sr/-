@@ -156,18 +156,28 @@ function isLate(shift) {
 
 // ローカルストレージ保存/読込
 function saveToStorage() {
-  const data = {
-    settings: AppState.settings,
-    roleRequirements: AppState.roleRequirements,
-    roleColors: AppState.roleColors,
-    staff: AppState.staff,
-    requests: AppState.requests,
-    shifts: AppState.shifts,
-    fixedShifts: AppState.fixedShifts,
-    specialDays: AppState.specialDays,
-    _staffIdCounter,
-  };
-  localStorage.setItem('shiftAppData', JSON.stringify(data));
+  try {
+    const data = {
+      version: 2,  // データスキーマバージョン
+      settings: AppState.settings,
+      roleRequirements: AppState.roleRequirements,
+      roleColors: AppState.roleColors,
+      staff: AppState.staff,
+      requests: AppState.requests,
+      shifts: AppState.shifts,
+      fixedShifts: AppState.fixedShifts,
+      specialDays: AppState.specialDays,
+      violations: AppState.violations,
+      generated: AppState.generated,
+      _staffIdCounter,
+      savedAt: new Date().toISOString(),
+    };
+    localStorage.setItem('shiftAppData', JSON.stringify(data));
+    return true;
+  } catch (e) {
+    console.error('保存エラー', e);
+    return false;
+  }
 }
 
 function loadFromStorage() {
@@ -178,11 +188,25 @@ function loadFromStorage() {
     Object.assign(AppState.settings, data.settings || {});
     Object.assign(AppState.roleRequirements, data.roleRequirements || {});
     Object.assign(AppState.roleColors, data.roleColors || {});
-    AppState.staff = data.staff || [];
+    AppState.staff = (data.staff || []).map(s => ({
+      // 古いデータとの下位互換のためデフォルトを補完
+      id: s.id,
+      name: s.name || '',
+      positionType: s.positionType || 'staff',
+      roleType: s.roleType || 'normal',
+      maxOff: s.maxOff != null ? s.maxOff : 9,
+      prefs: Array.isArray(s.prefs) ? s.prefs : ['早可', '遅可'],
+      balance: s.balance || 'balanced',
+      prevConsecutive: s.prevConsecutive || 0,
+      prevLastShift: s.prevLastShift || '',
+      note: s.note || '',
+    }));
     AppState.requests = data.requests || {};
     AppState.shifts = data.shifts || {};
     AppState.fixedShifts = data.fixedShifts || {};
     AppState.specialDays = data.specialDays || {};
+    AppState.violations = data.violations || [];
+    AppState.generated = data.generated === true;
     _staffIdCounter = data._staffIdCounter || (AppState.staff.length + 1);
     return true;
   } catch (e) {
