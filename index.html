@@ -176,19 +176,26 @@
         <span class="hint" style="margin-left:16px">固定シフトは最適化エンジンでも変更されません</span>
       </div>
       <div id="requestMode" class="calendar-mode">
-        <div class="toolbar">
-          <span>記号: </span>
+        <div class="toolbar" style="flex-wrap:wrap">
+          <span>休系: </span>
           <button class="chip-btn" data-mark="休">休</button>
           <button class="chip-btn" data-mark="有">有</button>
           <button class="chip-btn" data-mark="公">公</button>
-          <button class="chip-btn" data-mark="研">研</button>
           <button class="chip-btn" data-mark="☆">☆</button>
           <button class="chip-btn" data-mark="季">季</button>
           <button class="chip-btn" data-mark="引">引</button>
           <button class="chip-btn" data-mark="慶">慶</button>
+          <span style="margin-left:12px">出勤系: </span>
+          <button class="chip-btn" data-mark="研">研(研修)</button>
+          <button class="chip-btn" data-mark="早責">早責</button>
+          <button class="chip-btn" data-mark="遅責">遅責</button>
+          <button class="chip-btn" data-mark="早総務">早総務</button>
+          <button class="chip-btn" data-mark="遅総務">遅総務</button>
+          <button class="chip-btn" data-mark="早">早</button>
+          <button class="chip-btn" data-mark="遅">遅</button>
           <button class="chip-btn" data-mark="">クリア</button>
-          <span class="hint">クリックで選択中の記号を入力、ダブルクリックで削除</span>
         </div>
+        <p class="hint" style="margin:8px 0 0">クリックで選択中の記号を入力、ダブルクリックで削除。出勤シフト指定（早/遅/研など）は最適化時にロックされます。</p>
       </div>
       <div id="fixedMode" class="calendar-mode" style="display:none">
         <div class="toolbar">

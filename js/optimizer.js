@@ -12,28 +12,57 @@ async function optimizeSchedule(progressCallback) {
   const settings = AppState.settings;
 
   // 1. 各スタッフが入れるシフト種別を確定
+  // substitutePriority: 代替役割の優先度（小さいほど優先＝ペナルティ軽い）
+  //   0 = 本来の役割（ペナルティなし）
+  //   1 = リーダー＋一般役割 → 総務代替（第一代替）
+  //   2 = スタッフ＋一般役割 → 総務代替（第二代替）
+  //   3 = リーダー＋一般営業 → 総務代替（第三代替）
+  //   4 = チーフ → 総務代替（最終手段）
   const allowedShifts = {};
+  const substitutePriority = {}; // { staffId: { '早総務': 1, '早責': 0, ... } }
   staff.forEach(s => {
     let baseShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts.slice();
+    const prio = {};
+    baseShifts.forEach(sh => prio[sh] = 0); // 本来の役割は優先度0
     
     // === 代替責任者ロジック ===
     // 責任者をやれるのは副店長・チーフのみ（リーダー以下は不可）
     if (s.positionType === 'viceManager' || s.positionType === 'chief') {
-      if (!baseShifts.includes('早責')) baseShifts.push('早責');
-      if (!baseShifts.includes('遅責')) baseShifts.push('遅責');
+      if (!baseShifts.includes('早責')) { baseShifts.push('早責'); prio['早責'] = 1; }
+      if (!baseShifts.includes('遅責')) { baseShifts.push('遅責'); prio['遅責'] = 1; }
     }
     
-    // === 代替総務ロジック ===
-    // リーダー＋一般役割の人は総務を代替できる
-    if (s.positionType === 'leader' && (s.roleType === 'normal' || s.roleType === 'normalSales')) {
-      if (!baseShifts.includes('早総務')) baseShifts.push('早総務');
-      if (!baseShifts.includes('遅総務')) baseShifts.push('遅総務');
+    // === 代替総務ロジック（優先順位制） ===
+    // 役割タイプが「総務」の人は本来総務（既に baseShifts に含まれている、優先度0）
+    // 以下は代替候補：
+    
+    // 第一代替: リーダー職位 + 一般役割
+    if (s.positionType === 'leader' && s.roleType === 'normal') {
+      if (!baseShifts.includes('早総務')) { baseShifts.push('早総務'); prio['早総務'] = 1; }
+      if (!baseShifts.includes('遅総務')) { baseShifts.push('遅総務'); prio['遅総務'] = 1; }
     }
-    // チーフは元々総務に入れるが、念のため
-    if (s.positionType === 'chief' && !baseShifts.includes('早総務')) {
-      baseShifts.push('早総務');
-      baseShifts.push('遅総務');
+    // 第二代替: スタッフ職位 + 一般役割
+    else if (s.positionType === 'staff' && s.roleType === 'normal') {
+      if (!baseShifts.includes('早総務')) { baseShifts.push('早総務'); prio['早総務'] = 2; }
+      if (!baseShifts.includes('遅総務')) { baseShifts.push('遅総務'); prio['遅総務'] = 2; }
     }
+    // 第三代替: リーダー職位 + 一般営業役割
+    else if (s.positionType === 'leader' && s.roleType === 'normalSales') {
+      if (!baseShifts.includes('早総務')) { baseShifts.push('早総務'); prio['早総務'] = 3; }
+      if (!baseShifts.includes('遅総務')) { baseShifts.push('遅総務'); prio['遅総務'] = 3; }
+    }
+    
+    // 最終手段: チーフ（誰も入れない場合の緊急代替）
+    if (s.positionType === 'chief') {
+      if (!baseShifts.includes('早総務')) { baseShifts.push('早総務'); prio['早総務'] = 4; }
+      if (!baseShifts.includes('遅総務')) { baseShifts.push('遅総務'); prio['遅総務'] = 4; }
+    }
+    
+    // 「研」は全員入れる（研修は出勤扱いだが、希望休カレンダーから固定で入る想定）
+    if (!baseShifts.includes('研')) baseShifts.push('研');
+    prio['研'] = 0; // ペナルティなし
+    
+    substitutePriority[s.id] = prio;
     
     // 早遅希望でフィルタ
     let filtered = baseShifts;
@@ -65,9 +94,10 @@ async function optimizeSchedule(progressCallback) {
         locked[s.id][d] = true;
         continue;
       }
-      // 次に希望休
+      // 次に希望休（休系シフト・研修・出勤シフト指定すべてロック）
       const req = (AppState.requests[s.id] || {})[d];
-      if (req && OFF_TYPES[req]) {
+      if (req && (OFF_TYPES[req] || isWork(req))) {
+        // 休系（休/公/有/☆/季/引/慶）も研修も出勤シフト指定（早/遅/早責など）もすべてロック
         shifts[s.id][d] = req;
         locked[s.id][d] = true;
       } else {
@@ -84,7 +114,7 @@ async function optimizeSchedule(progressCallback) {
   generateInitialSolution(shifts, locked, allowedShifts, days);
 
   // 4. 焼きなまし法
-  let currentScore = calculateScore(shifts, allowedShifts, days);
+  let currentScore = calculateScore(shifts, allowedShifts, days, substitutePriority);
   let bestShifts = deepCopyShifts(shifts);
   let bestScore = currentScore;
 
@@ -121,7 +151,7 @@ async function optimizeSchedule(progressCallback) {
 
     if (!undoFn) continue;
 
-    const newScore = calculateScore(shifts, allowedShifts, days);
+    const newScore = calculateScore(shifts, allowedShifts, days, substitutePriority);
     const delta = newScore - currentScore;
 
     if (delta <= 0 || Math.random() < Math.exp(-delta / T)) {
@@ -326,8 +356,10 @@ function trySwapDayBetweenStaff(shifts, locked, staff, days) {
 
 /**
  * スコア計算（小さいほど良い、0が完璧）
+ * @param {Object} substitutePriority - { staffId: { shiftKey: priority(0-4) } }
+ *   0=本来 / 1=第一代替 / 2=第二代替 / 3=第三代替 / 4=最終手段
  */
-function calculateScore(shifts, allowedShifts, days) {
+function calculateScore(shifts, allowedShifts, days, substitutePriority) {
   let score = 0;
   const staff = AppState.staff;
   const settings = AppState.settings;
@@ -373,12 +405,15 @@ function calculateScore(shifts, allowedShifts, days) {
           score += 50000;
         }
         
-        // 本来の役割でないシフト（代替役割）への軽ペナルティ
-        const baseRoleShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts;
-        if (!baseRoleShifts.includes(cur)) {
-          // 代替役割を使っている場合、軽いペナルティ
-          // ただし不足時はこの代替が必要なので軽くする
-          score += 30;
+        // 代替役割の優先度に応じたペナルティ
+        // 優先度: 0=本来(0), 1=第一代替(20), 2=第二代替(50), 3=第三代替(100), 4=最終手段(300)
+        if (substitutePriority && substitutePriority[s.id]) {
+          const prio = substitutePriority[s.id][cur];
+          if (prio === 1) score += 20;
+          else if (prio === 2) score += 50;
+          else if (prio === 3) score += 100;
+          else if (prio === 4) score += 300;
+          // prio===0 はペナルティなし（本来の役割）
         }
 
         consecutiveWork++;
@@ -498,15 +533,22 @@ function checkViolations(shifts) {
       if (!effectiveAllowed.includes('早責')) effectiveAllowed.push('早責');
       if (!effectiveAllowed.includes('遅責')) effectiveAllowed.push('遅責');
     }
-    // 代替総務: リーダー＋一般 / チーフは総務に入れる
-    if (s.positionType === 'leader' && (s.roleType === 'normal' || s.roleType === 'normalSales')) {
+    // 代替総務: 優先順位制
+    //  第一: リーダー+一般
+    //  第二: スタッフ+一般
+    //  第三: リーダー+一般営業
+    //  最終: チーフ
+    const canSubAffairs =
+      (s.positionType === 'leader' && s.roleType === 'normal') ||
+      (s.positionType === 'staff'  && s.roleType === 'normal') ||
+      (s.positionType === 'leader' && s.roleType === 'normalSales') ||
+      (s.positionType === 'chief');
+    if (canSubAffairs) {
       if (!effectiveAllowed.includes('早総務')) effectiveAllowed.push('早総務');
       if (!effectiveAllowed.includes('遅総務')) effectiveAllowed.push('遅総務');
     }
-    if (s.positionType === 'chief') {
-      if (!effectiveAllowed.includes('早総務')) effectiveAllowed.push('早総務');
-      if (!effectiveAllowed.includes('遅総務')) effectiveAllowed.push('遅総務');
-    }
+    // 「研」は出勤扱いだが、希望休カレンダーから入る特殊シフト。全員許容
+    if (!effectiveAllowed.includes('研')) effectiveAllowed.push('研');
     const consecutiveReportedDays = new Set(); // 重複報告を避ける
 
     for (let d = 1; d <= days; d++) {

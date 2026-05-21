@@ -444,18 +444,22 @@ function renderSummary() {
   const days = getDaysInMonth(AppState.settings.targetMonth);
 
   let html = '<table style="width:auto"><thead><tr><th>スタッフ</th>';
-  ['早責', '遅責', '早総務', '遅総務', '早', '遅', '休系', '合計勤務'].forEach(h => html += `<th>${h}</th>`);
+  ['早責', '遅責', '早総務', '遅総務', '早', '遅', '研', '休系', '合計勤務'].forEach(h => html += `<th>${h}</th>`);
   html += '</tr></thead><tbody>';
 
   AppState.staff.forEach(s => {
-    const counts = { '早責': 0, '遅責': 0, '早総務': 0, '遅総務': 0, '早': 0, '遅': 0, off: 0, work: 0 };
+    const counts = { '早責': 0, '遅責': 0, '早総務': 0, '遅総務': 0, '早': 0, '遅': 0, '研': 0, off: 0, work: 0 };
     for (let d = 1; d <= days; d++) {
       const sh = (AppState.shifts[s.id] || {})[d] || '';
-      if (counts[sh] !== undefined) { counts[sh]++; counts.work++; }
-      else if (isOff(sh)) counts.off++;
+      if (counts[sh] !== undefined) {
+        counts[sh]++;
+        counts.work++; // 研も合計勤務に含める（出勤扱い）
+      } else if (isOff(sh)) {
+        counts.off++;
+      }
     }
     html += `<tr><td>${escapeHtml(s.name)}</td>`;
-    ['早責', '遅責', '早総務', '遅総務', '早', '遅'].forEach(k => html += `<td>${counts[k]}</td>`);
+    ['早責', '遅責', '早総務', '遅総務', '早', '遅', '研'].forEach(k => html += `<td>${counts[k]}</td>`);
     html += `<td>${counts.off}</td><td>${counts.work}</td></tr>`;
   });
   html += '</tbody></table>';

@@ -2,14 +2,16 @@
    data.js - データモデルと定数定義
    =========================================== */
 
-// シフト種別の定義
+// シフト種別の定義（出勤扱い）
 const SHIFT_TYPES = {
-  EARLY_RESP:  { key: '早責', label: '早番責任者', class: 's-early-resp',  category: 'early', isResp: true,  isWork: true  },
-  LATE_RESP:   { key: '遅責', label: '遅番責任者', class: 's-late-resp',   category: 'late',  isResp: true,  isWork: true  },
+  EARLY_RESP:  { key: '早責', label: '早番責任者', class: 's-early-resp',  category: 'early',   isResp: true,  isWork: true  },
+  LATE_RESP:   { key: '遅責', label: '遅番責任者', class: 's-late-resp',   category: 'late',    isResp: true,  isWork: true  },
   EARLY_GEN:   { key: '早総務', label: '早番総務',   class: 's-early-gen',   category: 'early', isResp: false, isWork: true, isGeneral: true },
   LATE_GEN:    { key: '遅総務', label: '遅番総務',   class: 's-late-gen',    category: 'late',  isResp: false, isWork: true, isGeneral: true },
-  EARLY:       { key: '早',   label: '早番',       class: 's-early',       category: 'early', isResp: false, isWork: true  },
-  LATE:        { key: '遅',   label: '遅番',       class: 's-late',        category: 'late',  isResp: false, isWork: true  },
+  EARLY:       { key: '早',   label: '早番',       class: 's-early',       category: 'early',   isResp: false, isWork: true  },
+  LATE:        { key: '遅',   label: '遅番',       class: 's-late',        category: 'late',    isResp: false, isWork: true  },
+  // 研修: 出勤扱いだが特殊カテゴリ（必要人数には含めない・公休にも含めない）
+  TRAINING:    { key: '研',   label: '研修',       class: 's-training',    category: 'training', isResp: false, isWork: true, isTraining: true },
 };
 
 // 休み記号の定義
@@ -17,7 +19,6 @@ const OFF_TYPES = {
   '休': { label: '公休',         class: 's-off',      isOff: true, isRequest: true },
   '公': { label: '公休',         class: 's-public',   isOff: true, isRequest: true },
   '有': { label: '有給',         class: 's-paid',     isOff: true, isRequest: true },
-  '研': { label: '研修',         class: 's-training', isOff: true, isRequest: true },
   '☆': { label: '希望休',        class: 's-off',      isOff: true, isRequest: true },
   '季': { label: '季節休暇',     class: 's-off',      isOff: true, isRequest: true },
   '引': { label: '引継',         class: 's-off',      isOff: true, isRequest: true },
@@ -152,6 +153,16 @@ function isLate(shift) {
   const enumKey = shiftKeyToEnum(shift);
   if (!enumKey) return false;
   return SHIFT_TYPES[enumKey].category === 'late';
+}
+
+// 研修判定
+function isTraining(shift) {
+  return shift === '研';
+}
+
+// 通常の必要人数カウント対象シフトか（研修は除外）
+function isCountableWork(shift) {
+  return isWork(shift) && !isTraining(shift);
 }
 
 // ローカルストレージ保存/読込
