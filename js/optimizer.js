@@ -58,9 +58,10 @@ async function optimizeSchedule(progressCallback) {
       if (!baseShifts.includes('遅総務')) { baseShifts.push('遅総務'); prio['遅総務'] = 4; }
     }
     
-    // 「研」は全員入れる（研修は出勤扱いだが、希望休カレンダーから固定で入る想定）
-    if (!baseShifts.includes('研')) baseShifts.push('研');
-    prio['研'] = 0; // ペナルティなし
+    // 注意: 「研」は allowedShifts に追加しない
+    // → optimizer が空きセルに勝手に研を当てるのを防ぐ
+    // 研修は希望休カレンダーで明示的に入れた箇所のみロックされる
+    prio['研'] = 0; // 違反扱いしないため優先度0で登録（参照されるのみ）
     
     substitutePriority[s.id] = prio;
     
@@ -400,20 +401,24 @@ function calculateScore(shifts, allowedShifts, days, substitutePriority) {
       const cur = shifts[s.id][d];
 
       if (isWork(cur)) {
-        // 入れないシフトを割り当てている（許容外シフト：絶対NG）
-        if (!allowedShifts[s.id].includes(cur)) {
-          score += 50000;
-        }
-        
-        // 代替役割の優先度に応じたペナルティ
-        // 優先度: 0=本来(0), 1=第一代替(20), 2=第二代替(50), 3=第三代替(100), 4=最終手段(300)
-        if (substitutePriority && substitutePriority[s.id]) {
-          const prio = substitutePriority[s.id][cur];
-          if (prio === 1) score += 20;
-          else if (prio === 2) score += 50;
-          else if (prio === 3) score += 100;
-          else if (prio === 4) score += 300;
-          // prio===0 はペナルティなし（本来の役割）
+        // 研修は希望休カレンダー由来の固定シフトのみ存在するため、許容外チェックの対象外
+        // (allowedShifts に研は含めないので、このスキップが必要)
+        if (!isTraining(cur)) {
+          // 入れないシフトを割り当てている（許容外シフト：絶対NG）
+          if (!allowedShifts[s.id].includes(cur)) {
+            score += 50000;
+          }
+
+          // 代替役割の優先度に応じたペナルティ
+          // 優先度: 0=本来(0), 1=第一代替(20), 2=第二代替(50), 3=第三代替(100), 4=最終手段(300)
+          if (substitutePriority && substitutePriority[s.id]) {
+            const prio = substitutePriority[s.id][cur];
+            if (prio === 1) score += 20;
+            else if (prio === 2) score += 50;
+            else if (prio === 3) score += 100;
+            else if (prio === 4) score += 300;
+            // prio===0 はペナルティなし（本来の役割）
+          }
         }
 
         consecutiveWork++;

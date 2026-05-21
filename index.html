@@ -169,12 +169,6 @@
   <section class="tab-panel" id="panel-calendar">
     <h2>④ 希望休・固定シフト入力</h2>
     <div class="card">
-      <div class="toolbar">
-        <span style="font-weight:700">モード: </span>
-        <label><input type="radio" name="calendarMode" value="request" checked /> 希望休</label>
-        <label><input type="radio" name="calendarMode" value="fixed" /> 固定シフト</label>
-        <span class="hint" style="margin-left:16px">固定シフトは最適化エンジンでも変更されません</span>
-      </div>
       <div id="requestMode" class="calendar-mode">
         <div class="toolbar" style="flex-wrap:wrap">
           <span>休系: </span>
@@ -196,19 +190,6 @@
           <button class="chip-btn" data-mark="">クリア</button>
         </div>
         <p class="hint" style="margin:8px 0 0">クリックで選択中の記号を入力、ダブルクリックで削除。出勤シフト指定（早/遅/研など）は最適化時にロックされます。</p>
-      </div>
-      <div id="fixedMode" class="calendar-mode" style="display:none">
-        <div class="toolbar">
-          <span>シフト: </span>
-          <button class="chip-btn-fixed" data-shift="早責">早責</button>
-          <button class="chip-btn-fixed" data-shift="遅責">遅責</button>
-          <button class="chip-btn-fixed" data-shift="早総務">早総務</button>
-          <button class="chip-btn-fixed" data-shift="遅総務">遅総務</button>
-          <button class="chip-btn-fixed" data-shift="早">早</button>
-          <button class="chip-btn-fixed" data-shift="遅">遅</button>
-          <button class="chip-btn-fixed" data-shift="">クリア</button>
-          <span class="hint">固定シフトは最適化時も変更されません</span>
-        </div>
       </div>
       <div class="table-wrap">
         <table id="calendarTable" class="calendar-table"></table>

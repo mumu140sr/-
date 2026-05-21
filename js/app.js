@@ -249,15 +249,15 @@ function exportToExcel() {
   XLSX.utils.book_append_sheet(wb, ws, 'シフト表');
 
   // 集計シート
-  const summary = [['スタッフ', '早責', '遅責', '早総務', '遅総務', '早', '遅', '休系', '合計勤務']];
+  const summary = [['スタッフ', '早責', '遅責', '早総務', '遅総務', '早', '遅', '研', '休系', '合計勤務']];
   AppState.staff.forEach(s => {
-    const counts = { '早責': 0, '遅責': 0, '早総務': 0, '遅総務': 0, '早': 0, '遅': 0, off: 0, work: 0 };
+    const counts = { '早責': 0, '遅責': 0, '早総務': 0, '遅総務': 0, '早': 0, '遅': 0, '研': 0, off: 0, work: 0 };
     for (let d = 1; d <= days; d++) {
       const sh = (AppState.shifts[s.id] || {})[d] || '';
       if (counts[sh] !== undefined) { counts[sh]++; counts.work++; }
       else if (isOff(sh)) counts.off++;
     }
-    summary.push([s.name, counts['早責'], counts['遅責'], counts['早総務'], counts['遅総務'], counts['早'], counts['遅'], counts.off, counts.work]);
+    summary.push([s.name, counts['早責'], counts['遅責'], counts['早総務'], counts['遅総務'], counts['早'], counts['遅'], counts['研'], counts.off, counts.work]);
   });
   const ws2 = XLSX.utils.aoa_to_sheet(summary);
   XLSX.utils.book_append_sheet(wb, ws2, '集計');
