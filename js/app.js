@@ -56,7 +56,10 @@ function setupHeaderActions() {
 
 // ⑤ 自動生成パネル
 function setupGeneratePanel() {
-  document.getElementById('btnGenerate').addEventListener('click', async () => {
+  const btn = document.getElementById('btnGenerate');
+  const btnCancel = document.getElementById('btnCancelGenerate');
+
+  btn.addEventListener('click', async () => {
     if (AppState.staff.length === 0) {
       toast('スタッフを登録してください', 'error');
       return;
@@ -66,26 +69,33 @@ function setupGeneratePanel() {
       return;
     }
 
-    const btn = document.getElementById('btnGenerate');
     const $area = document.getElementById('progressArea');
     const $bar = document.getElementById('progressBar');
     const $text = document.getElementById('progressText');
     const $report = document.getElementById('reportCard');
 
     btn.disabled = true;
+    btn.textContent = '⏳ 最適化中...';
+    if (btnCancel) btnCancel.style.display = 'inline-block';
     $area.style.display = 'block';
     $report.style.display = 'none';
     $bar.style.width = '0%';
-    $text.textContent = '初期解を生成中...';
+    $text.textContent = 'バックグラウンドで初期解を生成中...';
 
+    const startedAt = Date.now();
     try {
-      const result = await optimizeSchedule((pct, msg) => {
+      // Worker 版を使う（フォールバック付き）
+      const runner = (typeof optimizeScheduleViaWorker === 'function')
+        ? optimizeScheduleViaWorker
+        : optimizeSchedule;
+      const result = await runner((pct, msg) => {
         $bar.style.width = pct + '%';
         $text.textContent = msg;
       });
 
+      const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
-      $text.textContent = `完了！ 最終スコア: ${result.score}`;
+      $text.textContent = `完了！ 最終スコア: ${result.score} (${elapsed}秒)`;
 
       // レポート表示
       $report.style.display = 'block';
@@ -104,11 +114,46 @@ function setupGeneratePanel() {
       saveToStorage();
     } catch (e) {
       console.error(e);
-      toast('エラーが発生しました: ' + e.message, 'error');
+      if (e && /terminated|cancel/i.test(e.message || '')) {
+        toast('最適化を中止しました', 'info');
+        $text.textContent = '中止しました';
+      } else {
+        toast('エラーが発生しました: ' + e.message, 'error');
+      }
     } finally {
       btn.disabled = false;
+      btn.textContent = '🚀 シフト自動生成を実行';
+      if (btnCancel) btnCancel.style.display = 'none';
     }
   });
+
+  // キャンセルボタン
+  if (btnCancel) {
+    btnCancel.addEventListener('click', () => {
+      if (typeof cancelActiveOptimization === 'function' && cancelActiveOptimization()) {
+        toast('中止リクエストを送りました', 'info');
+        btnCancel.style.display = 'none';
+        btn.disabled = false;
+        btn.textContent = '🚀 シフト自動生成を実行';
+        const $text = document.getElementById('progressText');
+        if ($text) $text.textContent = '中止しました';
+      }
+    });
+  }
+
+  // AI解説ボタン
+  const btnAI = document.getElementById('btnAIExplain');
+  if (btnAI) {
+    btnAI.addEventListener('click', () => {
+      if (!AppState.generated) {
+        toast('シフトを生成してから実行してください', 'error');
+        return;
+      }
+      if (typeof showAIExplanationModal === 'function') {
+        showAIExplanationModal();
+      }
+    });
+  }
 }
 
 function renderReport(result) {

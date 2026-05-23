@@ -202,7 +202,11 @@
     <h2>⑤ 自動生成</h2>
     <div class="card">
       <p>設定をもとに焼きなまし法による最適化を実行します。</p>
-      <button id="btnGenerate" class="btn btn-large btn-primary">🚀 シフト自動生成を実行</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="btnGenerate" class="btn btn-large btn-primary">🚀 シフト自動生成を実行</button>
+        <button id="btnCancelGenerate" class="btn btn-large" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button>
+      </div>
+      <p class="hint" style="margin-top:8px">バックグラウンドで処理されるため、実行中もアプリは操作可能です。</p>
       <div id="progressArea" style="display:none">
         <div class="progress-info">
           <span id="progressText">準備中...</span>
@@ -214,6 +218,9 @@
     </div>
     <div class="card" id="reportCard" style="display:none">
       <h3>📊 AI診断レポート</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button id="btnAIExplain" class="btn btn-primary">🤖 AIに違反を解説してもらう</button>
+      </div>
       <div id="reportContent"></div>
     </div>
   </section>
@@ -281,8 +288,10 @@
 </div>
 
 <script src="js/data.js"></script>
-<script src="js/ui.js"></script>
 <script src="js/optimizer.js"></script>
+<script src="js/worker-client.js"></script>
+<script src="js/ai-explain.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
