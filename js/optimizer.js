@@ -429,25 +429,25 @@ function calculateScore(shifts, allowedShifts, days, substitutePriority) {
         }
 
         // 遅→早禁止（月初は前月末シフトも考慮）
-        if (settings.forbidLateEarly && isLate(prevShift) && isEarly(cur)) {
+        // 研修も早番時間帯なので 遅→研 も禁止
+        if (settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
           score += 1500;
         }
 
         // === 連勤中の早遅統一ペナルティ ===
         // 休を挟まない連続勤務中（consecutiveWork >= 2）に早→遅 / 遅→早 が混ざるとNG
+        // 研修は早番カテゴリ扱い → 早↔研 はOK、研↔遅 / 遅↔研 はNG
         // 月初は前月末からの連勤として prevShift = s.prevLastShift で評価される
         if (consecutiveWork >= 2 && isWork(prevShift)) {
-          const prevEarly = isEarly(prevShift);
-          const prevLate = isLate(prevShift);
-          const curEarly = isEarly(cur);
-          const curLate = isLate(cur);
-          // 早→遅 または 遅→早 の切り替えはNG
-          if ((prevEarly && curLate) || (prevLate && curEarly)) {
+          const prevCat = getShiftCategory(prevShift); // 'early' | 'late' | null
+          const curCat = getShiftCategory(cur);
+          // 早カテゴリ ↔ 遅カテゴリ の切り替えはNG
+          if (prevCat && curCat && prevCat !== curCat) {
             score += 600; // 連勤内での時間帯切り替えにペナルティ
           }
         }
 
-        // 早遅カウント
+        // 早遅カウント（研修は早番カテゴリだが、バランス計算からは除外）
         if (isEarly(cur)) earlyCount++;
         else if (isLate(cur)) lateCount++;
 
@@ -461,8 +461,8 @@ function calculateScore(shifts, allowedShifts, days, substitutePriority) {
           const prev = shifts[s.id][d - 1];
           const next = shifts[s.id][d + 1];
           if (isWork(prev) && isWork(next)) {
-            // 遅→休→早 は最悪
-            if (isLate(prev) && isEarly(next)) {
+            // 遅→休→早(研含む) は最悪
+            if (isLate(prev) && isEarlyCategory(next)) {
               score += 200;
             } else {
               score += 50;
@@ -568,12 +568,25 @@ function checkViolations(shifts) {
           });
           consecutiveReportedDays.add(d);
         }
-        if (settings.forbidLateEarly && isLate(prevShift) && isEarly(cur)) {
+        if (settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
+          const label = isTraining(cur) ? '遅→研' : '遅→早';
           violations.push({
             staffId: s.id, day: d, type: 'late-early',
-            message: `🚨 遅→早（インターバル不足）`,
+            message: `🚨 ${label}（インターバル不足）`,
             action: '順序を入れ替えてください',
           });
+        }
+        // 連勤中の時間帯切り替え違反（早カテゴリ ↔ 遅カテゴリ）
+        if (consecutiveWork >= 2 && isWork(prevShift)) {
+          const prevCat = getShiftCategory(prevShift);
+          const curCat = getShiftCategory(cur);
+          if (prevCat && curCat && prevCat !== curCat) {
+            violations.push({
+              staffId: s.id, day: d, type: 'category-switch',
+              message: `⚠️ 連勤中の時間帯切替（${prevShift}→${cur}）`,
+              action: '連続勤務は同じ時間帯で揃えてください',
+            });
+          }
         }
         // 実質的に許容されていないシフト = 本当の違反
         if (!effectiveAllowed.includes(cur)) {
@@ -608,10 +621,11 @@ function checkViolations(shifts) {
         if (settings.penaltySingleOff && d > 1 && d < days) {
           const prev = (shifts[s.id] || {})[d - 1] || '';
           const next = (shifts[s.id] || {})[d + 1] || '';
-          if (isLate(prev) && isEarly(next)) {
+          if (isLate(prev) && isEarlyCategory(next)) {
+            const label = isTraining(next) ? '遅→休→研' : '遅→休→早';
             violations.push({
               staffId: s.id, day: d, type: 'bad-rest',
-              message: `⚠️ 遅→休→早（リズムが悪い）`,
+              message: `⚠️ ${label}（リズムが悪い）`,
               action: '時間帯を揃えてください',
             });
           }

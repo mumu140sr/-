@@ -165,6 +165,18 @@ function isCountableWork(shift) {
   return isWork(shift) && !isTraining(shift);
 }
 
+// 早番扱い（研修も早番時間帯のため早番カテゴリに含める）
+function isEarlyCategory(shift) {
+  return isEarly(shift) || isTraining(shift);
+}
+
+// 連続シフトの時間帯判定（早番カテゴリ or 遅番カテゴリ or null）
+function getShiftCategory(shift) {
+  if (isLate(shift)) return 'late';
+  if (isEarlyCategory(shift)) return 'early';  // 早番・早責・早総務・研 を同一カテゴリに
+  return null;
+}
+
 // ローカルストレージ保存/読込
 function saveToStorage() {
   try {
