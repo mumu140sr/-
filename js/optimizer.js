@@ -13,9 +13,38 @@ async function optimizeSchedule(progressCallback) {
 
   // 1. 各スタッフが入れるシフト種別を確定
   const allowedShifts = {};
+  const substitutePriority = {};
   staff.forEach(s => {
-    const baseShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts.slice();
-    // 早遅希望でフィルタ
+    let baseShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts.slice();
+    const prio = {};
+    baseShifts.forEach(sh => prio[sh] = 0);
+
+    if (s.positionType === 'viceManager' || s.positionType === 'chief') {
+      if (!baseShifts.includes('早責')) { baseShifts.push('早責'); prio['早責'] = 1; }
+      if (!baseShifts.includes('遅責')) { baseShifts.push('遅責'); prio['遅責'] = 1; }
+    }
+
+    if (s.positionType === 'leader' && s.roleType === 'normal') {
+      if (!baseShifts.includes('早総務')) { baseShifts.push('早総務'); prio['早総務'] = 1; }
+      if (!baseShifts.includes('遅総務')) { baseShifts.push('遅総務'); prio['遅総務'] = 1; }
+    }
+    else if (s.positionType === 'staff' && s.roleType === 'normal') {
+      if (!baseShifts.includes('早総務')) { baseShifts.push('早総務'); prio['早総務'] = 2; }
+      if (!baseShifts.includes('遅総務')) { baseShifts.push('遅総務'); prio['遅総務'] = 2; }
+    }
+    else if (s.positionType === 'leader' && s.roleType === 'normalSales') {
+      if (!baseShifts.includes('早総務')) { baseShifts.push('早総務'); prio['早総務'] = 3; }
+      if (!baseShifts.includes('遅総務')) { baseShifts.push('遅総務'); prio['遅総務'] = 3; }
+    }
+
+    if (s.positionType === 'chief') {
+      if (!baseShifts.includes('早総務')) { baseShifts.push('早総務'); prio['早総務'] = 4; }
+      if (!baseShifts.includes('遅総務')) { baseShifts.push('遅総務'); prio['遅総務'] = 4; }
+    }
+
+    prio['研'] = 0;
+    substitutePriority[s.id] = prio;
+
     let filtered = baseShifts;
     if (s.prefs && s.prefs.length > 0) {
       filtered = baseShifts.filter(sh => {
@@ -26,20 +55,25 @@ async function optimizeSchedule(progressCallback) {
         return true;
       });
     }
-    // 何も入れなくなった場合は基本に戻す
     if (filtered.length === 0) filtered = baseShifts;
     allowedShifts[s.id] = filtered;
   });
 
-  // 2. 希望休をロックして初期化
+  // 2. 希望休と固定シフトをロックして初期化
   let shifts = {};
   const locked = {};
   staff.forEach(s => {
     shifts[s.id] = {};
     locked[s.id] = {};
     for (let d = 1; d <= days; d++) {
+      const fixed = (AppState.fixedShifts[s.id] || {})[d];
+      if (fixed) {
+        shifts[s.id][d] = fixed;
+        locked[s.id][d] = true;
+        continue;
+      }
       const req = (AppState.requests[s.id] || {})[d];
-      if (req && OFF_TYPES[req]) {
+      if (req && (OFF_TYPES[req] || isWork(req))) {
         shifts[s.id][d] = req;
         locked[s.id][d] = true;
       } else {
@@ -49,11 +83,14 @@ async function optimizeSchedule(progressCallback) {
     }
   });
 
+  // 2.5. 特別日の副店長固定処理
+  applySpecialDaysLogic(shifts, locked, staff, days);
+
   // 3. 初期解：必要人数と休日数を満たすように貪欲法で配置
   generateInitialSolution(shifts, locked, allowedShifts, days);
 
   // 4. 焼きなまし法
-  let currentScore = calculateScore(shifts, allowedShifts, days);
+  let currentScore = calculateScore(shifts, allowedShifts, days, substitutePriority);
   let bestShifts = deepCopyShifts(shifts);
   let bestScore = currentScore;
 
@@ -61,20 +98,17 @@ async function optimizeSchedule(progressCallback) {
   let T = 500.0;
   const coolingRate = Math.pow(0.01 / T, 1.0 / maxAttempts);
   const reportInterval = Math.max(500, Math.floor(maxAttempts / 200));
-  let stagnantCount = 0;
   const lastBestUpdate = { attempt: 0 };
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     T *= coolingRate;
     if (T < 0.01) T = 0.01;
 
-    // 局所最適に長く留まったらリヒート
     if (attempt - lastBestUpdate.attempt > maxAttempts / 10) {
       T = Math.min(100, T * 5);
       lastBestUpdate.attempt = attempt;
     }
 
-    // 近傍生成: 複数種類の操作からランダムに選ぶ
     const op = Math.random();
     let undoFn = null;
 
@@ -90,7 +124,7 @@ async function optimizeSchedule(progressCallback) {
 
     if (!undoFn) continue;
 
-    const newScore = calculateScore(shifts, allowedShifts, days);
+    const newScore = calculateScore(shifts, allowedShifts, days, substitutePriority);
     const delta = newScore - currentScore;
 
     if (delta <= 0 || Math.random() < Math.exp(-delta / T)) {
@@ -107,7 +141,7 @@ async function optimizeSchedule(progressCallback) {
     if (attempt % reportInterval === 0) {
       const pct = Math.floor((attempt / maxAttempts) * 100);
       progressCallback && progressCallback(pct, `最適化中... 現在スコア: ${currentScore.toFixed(0)} / 最良: ${bestScore.toFixed(0)} (試行 ${attempt}/${maxAttempts})`);
-      await sleep(0); // UI更新を許可
+      await sleep(0);
     }
 
     if (bestScore === 0) {
@@ -116,40 +150,28 @@ async function optimizeSchedule(progressCallback) {
     }
   }
 
-  // ベストの解を採用
   AppState.shifts = bestShifts;
   AppState.violations = checkViolations(bestShifts);
   AppState.generated = true;
 
-  return {
-    score: bestScore,
-    violations: AppState.violations,
-    success: bestScore === 0,
-  };
+  return { score: bestScore, violations: AppState.violations, success: bestScore === 0 };
 }
 
 function deepCopyShifts(shifts) {
   const copy = {};
-  for (const sid in shifts) {
-    copy[sid] = Object.assign({}, shifts[sid]);
-  }
+  for (const sid in shifts) copy[sid] = Object.assign({}, shifts[sid]);
   return copy;
 }
 
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 /**
  * 初期解生成
- * 1. 各スタッフに目標休日数(maxOff)分の「休」を配置
- * 2. 残り日数を各日の必要シフトに割り当て
  */
 function generateInitialSolution(shifts, locked, allowedShifts, days) {
   const staff = AppState.staff;
+  const maxCons = AppState.settings.maxConsecutive || 4;
 
-  // ステップ1: 各スタッフに休日を配置
-  // ロック済みの休日数を考慮する
   staff.forEach(s => {
     let alreadyOff = 0;
     const unlockedDays = [];
@@ -158,27 +180,35 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
       if (!locked[s.id][d]) unlockedDays.push(d);
     }
     const needMoreOff = Math.max(0, (s.maxOff || 0) - alreadyOff);
-    
-    // 等間隔気味に休みを配置（連勤を避ける）
+
+    // 前月末連勤を初期解へ反映
+    const prevCons = s.prevConsecutive || 0;
+    let forcedRestDay = null;
+    if (prevCons > 0) {
+      const canWorkMore = Math.max(0, maxCons - prevCons);
+      const restByDay = Math.min(canWorkMore + 1, days);
+      for (let d = 1; d <= restByDay; d++) {
+        if (!locked[s.id][d]) { forcedRestDay = d; break; }
+      }
+    }
+
     shuffleArray(unlockedDays);
-    const offDays = unlockedDays.slice(0, needMoreOff);
-    offDays.forEach(d => {
-      shifts[s.id][d] = '休';
-    });
+    let offDays = unlockedDays.slice(0, needMoreOff);
+    if (forcedRestDay != null && !offDays.includes(forcedRestDay)) {
+      offDays = offDays.slice(0, Math.max(0, needMoreOff - 1));
+      offDays.push(forcedRestDay);
+    }
+    offDays.forEach(d => { shifts[s.id][d] = '休'; });
   });
 
-  // ステップ2: 各日のシフトに割り当て
-  const shiftKeys = ['早責', '遅責', '早総', '遅総', '早', '遅'];
-  
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '夜勤'];
+
   for (let d = 1; d <= days; d++) {
-    // この日に勤務可能な（空きの）スタッフ
-    const availableStaff = staff
-      .filter(s => !locked[s.id][d] && shifts[s.id][d] === '')
-      .slice();
+    const availableStaff = staff.filter(s => !locked[s.id][d] && shifts[s.id][d] === '').slice();
     shuffleArray(availableStaff);
 
     shiftKeys.forEach(sh => {
-      const req = AppState.roleRequirements[sh] || 0;
+      const req = getDayReq(d, sh);
       let placed = 0;
       for (let i = 0; i < availableStaff.length && placed < req; i++) {
         const s = availableStaff[i];
@@ -186,15 +216,15 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
         if (allowedShifts[s.id].includes(sh)) {
           shifts[s.id][d] = sh;
           placed++;
+          if (sh === '夜勤' && d < days && !locked[s.id][d + 1]) {
+            shifts[s.id][d + 1] = '休';
+          }
         }
       }
     });
 
-    // 残りは「休」（必要人数を超えた分）
     staff.forEach(s => {
-      if (shifts[s.id][d] === '' && !locked[s.id][d]) {
-        shifts[s.id][d] = '休';
-      }
+      if (shifts[s.id][d] === '' && !locked[s.id][d]) shifts[s.id][d] = '休';
     });
   }
 }
@@ -206,9 +236,6 @@ function shuffleArray(arr) {
   }
 }
 
-/**
- * 同一スタッフの2日間でシフトを入替（休⇔勤も含む）
- */
 function trySwapInOneStaff(shifts, locked, staff, days) {
   const s = staff[Math.floor(Math.random() * staff.length)];
   if (!s) return null;
@@ -221,15 +248,9 @@ function trySwapInOneStaff(shifts, locked, staff, days) {
   if (v1 === v2) return null;
   shifts[s.id][d1] = v2;
   shifts[s.id][d2] = v1;
-  return () => {
-    shifts[s.id][d1] = v1;
-    shifts[s.id][d2] = v2;
-  };
+  return () => { shifts[s.id][d1] = v1; shifts[s.id][d2] = v2; };
 }
 
-/**
- * 2スタッフの同一日のシフトを入替
- */
 function trySwapBetweenStaff(shifts, locked, staff, days) {
   if (staff.length < 2) return null;
   const i1 = Math.floor(Math.random() * staff.length);
@@ -244,34 +265,22 @@ function trySwapBetweenStaff(shifts, locked, staff, days) {
   if (v1 === v2) return null;
   shifts[s1.id][d] = v2;
   shifts[s2.id][d] = v1;
-  return () => {
-    shifts[s1.id][d] = v1;
-    shifts[s2.id][d] = v2;
-  };
+  return () => { shifts[s1.id][d] = v1; shifts[s2.id][d] = v2; };
 }
 
-/**
- * あるスタッフの1日のシフトを別の許容シフトに変更
- */
 function tryChangeShift(shifts, locked, staff, days, allowedShifts) {
   const s = staff[Math.floor(Math.random() * staff.length)];
   if (!s) return null;
   const d = Math.floor(Math.random() * days) + 1;
   if (locked[s.id][d]) return null;
   const cur = shifts[s.id][d];
-  // 候補: 許容シフト + 休
   const candidates = allowedShifts[s.id].concat(['休']);
   const next = candidates[Math.floor(Math.random() * candidates.length)];
   if (cur === next) return null;
   shifts[s.id][d] = next;
-  return () => {
-    shifts[s.id][d] = cur;
-  };
+  return () => { shifts[s.id][d] = cur; };
 }
 
-/**
- * 2スタッフ間で異なる日のシフトを交換（より大きな摂動）
- */
 function trySwapDayBetweenStaff(shifts, locked, staff, days) {
   if (staff.length < 2) return null;
   const i1 = Math.floor(Math.random() * staff.length);
@@ -283,27 +292,20 @@ function trySwapDayBetweenStaff(shifts, locked, staff, days) {
   const d2 = Math.floor(Math.random() * days) + 1;
   if (d1 === d2) return null;
   if (locked[s1.id][d1] || locked[s1.id][d2] || locked[s2.id][d1] || locked[s2.id][d2]) return null;
-  const v11 = shifts[s1.id][d1], v12 = shifts[s1.id][d2];
-  const v21 = shifts[s2.id][d1], v22 = shifts[s2.id][d2];
+  const v11 = shifts[s1.id][d1];
+  const v21 = shifts[s2.id][d1];
   shifts[s1.id][d1] = v21;
   shifts[s2.id][d1] = v11;
-  return () => {
-    shifts[s1.id][d1] = v11;
-    shifts[s2.id][d1] = v21;
-  };
+  return () => { shifts[s1.id][d1] = v11; shifts[s2.id][d1] = v21; };
 }
 
-/**
- * スコア計算（小さいほど良い、0が完璧）
- */
-function calculateScore(shifts, allowedShifts, days) {
+function calculateScore(shifts, allowedShifts, days, substitutePriority) {
   let score = 0;
   const staff = AppState.staff;
   const settings = AppState.settings;
   const maxCons = settings.maxConsecutive;
 
-  // ===== 縦のルール: 各日に必要人数を確保 =====
-  const shiftKeys = ['早責', '遅責', '早総', '遅総', '早', '遅'];
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '夜勤'];
   for (let d = 1; d <= days; d++) {
     const counts = {};
     shiftKeys.forEach(k => counts[k] = 0);
@@ -312,57 +314,72 @@ function calculateScore(shifts, allowedShifts, days) {
       if (counts[sh] !== undefined) counts[sh]++;
     });
     shiftKeys.forEach(k => {
-      const req = AppState.roleRequirements[k] || 0;
+      const req = getDayReq(d, k);
       if (req === 0) return;
       const diff = req - counts[k];
-      if (diff > 0) score += diff * 10000; // 不足は重ペナルティ
-      else if (diff < 0) score += Math.abs(diff) * 200; // 過剰
+      if (diff > 0) score += diff * 10000;
+      else if (diff < 0) score += Math.abs(diff) * 200;
     });
   }
 
-  // ===== 横のルール: 各スタッフごと =====
   staff.forEach(s => {
     let consecutiveWork = s.prevConsecutive || 0;
     let prevShift = '';
+    if (consecutiveWork > 0 && s.prevLastShift) prevShift = s.prevLastShift;
     let offCount = 0;
+    let earlyCount = 0;
+    let lateCount = 0;
 
     for (let d = 1; d <= days; d++) {
       const cur = shifts[s.id][d];
 
       if (isWork(cur)) {
-        // 入れないシフトを割り当てている
-        if (!allowedShifts[s.id].includes(cur)) {
-          score += 5000;
+        if (!isTraining(cur)) {
+          if (!allowedShifts[s.id].includes(cur)) score += 50000;
+          if (substitutePriority && substitutePriority[s.id]) {
+            const prio = substitutePriority[s.id][cur];
+            if (prio === 1) score += 20;
+            else if (prio === 2) score += 50;
+            else if (prio === 3) score += 100;
+            else if (prio === 4) score += 300;
+          }
         }
 
         consecutiveWork++;
         if (consecutiveWork > maxCons) {
-          // 連勤超過は段階的に重く
           const over = consecutiveWork - maxCons;
           score += 800 * over + 200 * over * over;
         }
 
-        // 遅→早禁止
-        if (settings.forbidLateEarly && isLate(prevShift) && isEarly(cur)) {
+        if (settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
           score += 1500;
         }
+
+        if (consecutiveWork >= 2 && isWork(prevShift)) {
+          const prevCat = getShiftCategory(prevShift);
+          const curCat = getShiftCategory(cur);
+          if (prevCat && curCat && prevCat !== curCat) score += 600;
+        }
+
+        if (isNight(cur) && d < days) {
+          const next = shifts[s.id][d + 1];
+          if (!isOff(next)) score += 5000;
+        }
+
+        if (isEarly(cur)) earlyCount++;
+        else if (isLate(cur)) lateCount++;
 
         prevShift = cur;
       } else {
         if (isOff(cur)) offCount++;
         consecutiveWork = 0;
 
-        // 単発休みペナルティ (勤→休→勤)
         if (settings.penaltySingleOff && d > 1 && d < days) {
           const prev = shifts[s.id][d - 1];
           const next = shifts[s.id][d + 1];
           if (isWork(prev) && isWork(next)) {
-            // 遅→休→早 は最悪
-            if (isLate(prev) && isEarly(next)) {
-              score += 200;
-            } else {
-              score += 50;
-            }
+            if (isLate(prev) && isEarlyCategory(next)) score += 200;
+            else score += 50;
           }
         }
 
@@ -370,7 +387,16 @@ function calculateScore(shifts, allowedShifts, days) {
       }
     }
 
-    // 単発出勤チェック (休→勤→休)
+    const balance = SHIFT_BALANCE[s.balance || 'balanced'];
+    const totalShifts = earlyCount + lateCount;
+    if (balance && totalShifts > 0) {
+      const targetEarly = totalShifts * balance.earlyRatio;
+      const targetLate = totalShifts * balance.lateRatio;
+      const earlyDiff = Math.abs(earlyCount - targetEarly);
+      const lateDiff = Math.abs(lateCount - targetLate);
+      score += (earlyDiff + lateDiff) * 80;
+    }
+
     if (settings.penaltySingleOff) {
       for (let d = 1; d <= days; d++) {
         const cur = shifts[s.id][d];
@@ -379,26 +405,19 @@ function calculateScore(shifts, allowedShifts, days) {
         const next = d < days ? shifts[s.id][d + 1] : '';
         const prevOff = d === 1 ? ((s.prevConsecutive || 0) === 0) : (!isWork(prev));
         const nextOff = d === days ? false : (!isWork(next));
-        if (prevOff && nextOff && d > 1 && d < days) {
-          score += 80; // 単発出勤
-        }
+        if (prevOff && nextOff && d > 1 && d < days) score += 80;
       }
     }
 
-    // 公休数の上限/下限（maxOff）- ピッタリ目標に
     const maxOff = s.maxOff || 0;
     const offDiff = offCount - maxOff;
-    if (offDiff !== 0) {
-      score += Math.abs(offDiff) * 300;
-    }
+    if (offDiff < 0) score += Math.abs(offDiff) * 1500;
+    else if (offDiff > 0) score += offDiff * 150;
   });
 
   return score;
 }
 
-/**
- * ルール違反のリストアップ（人間が読める形）
- */
 function checkViolations(shifts) {
   const violations = [];
   const staff = AppState.staff;
@@ -406,13 +425,28 @@ function checkViolations(shifts) {
   const days = getDaysInMonth(settings.targetMonth);
   const maxCons = settings.maxConsecutive;
 
-  // 各スタッフの違反
   staff.forEach(s => {
     let consecutiveWork = s.prevConsecutive || 0;
     let prevShift = '';
+    if (consecutiveWork > 0 && s.prevLastShift) prevShift = s.prevLastShift;
     let offCount = 0;
-    const allowedShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts;
-    const consecutiveReportedDays = new Set(); // 重複報告を避ける
+    const baseRoleShifts = (ROLE_TYPES[s.roleType] || ROLE_TYPES.normal).shifts.slice();
+    const effectiveAllowed = baseRoleShifts.slice();
+    if (s.positionType === 'viceManager' || s.positionType === 'chief') {
+      if (!effectiveAllowed.includes('早責')) effectiveAllowed.push('早責');
+      if (!effectiveAllowed.includes('遅責')) effectiveAllowed.push('遅責');
+    }
+    const canSubAffairs =
+      (s.positionType === 'leader' && s.roleType === 'normal') ||
+      (s.positionType === 'staff'  && s.roleType === 'normal') ||
+      (s.positionType === 'leader' && s.roleType === 'normalSales') ||
+      (s.positionType === 'chief');
+    if (canSubAffairs) {
+      if (!effectiveAllowed.includes('早総務')) effectiveAllowed.push('早総務');
+      if (!effectiveAllowed.includes('遅総務')) effectiveAllowed.push('遅総務');
+    }
+    if (!effectiveAllowed.includes('研')) effectiveAllowed.push('研');
+    const consecutiveReportedDays = new Set();
 
     for (let d = 1; d <= days; d++) {
       const cur = (shifts[s.id] || {})[d] || '';
@@ -426,21 +460,32 @@ function checkViolations(shifts) {
           });
           consecutiveReportedDays.add(d);
         }
-        if (settings.forbidLateEarly && isLate(prevShift) && isEarly(cur)) {
+        if (settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
+          const label = isTraining(cur) ? '遅→研' : '遅→早';
           violations.push({
             staffId: s.id, day: d, type: 'late-early',
-            message: `🚨 遅→早（インターバル不足）`,
+            message: `🚨 ${label}（インターバル不足）`,
             action: '順序を入れ替えてください',
           });
         }
-        if (!allowedShifts.includes(cur)) {
+        if (consecutiveWork >= 2 && isWork(prevShift)) {
+          const prevCat = getShiftCategory(prevShift);
+          const curCat = getShiftCategory(cur);
+          if (prevCat && curCat && prevCat !== curCat) {
+            violations.push({
+              staffId: s.id, day: d, type: 'category-switch',
+              message: `⚠️ 連勤中の時間帯切替（${prevShift}→${cur}）`,
+              action: '連続勤務は同じ時間帯で揃えてください',
+            });
+          }
+        }
+        if (!effectiveAllowed.includes(cur)) {
           violations.push({
             staffId: s.id, day: d, type: 'role-mismatch',
             message: `🚨 役割タイプに合わないシフト（${cur}）`,
             action: '別のスタッフと交換してください',
           });
         }
-        // 早遅希望チェック
         if (s.prefs && s.prefs.length > 0) {
           if (isEarly(cur) && !s.prefs.includes('早可')) {
             violations.push({
@@ -464,10 +509,11 @@ function checkViolations(shifts) {
         if (settings.penaltySingleOff && d > 1 && d < days) {
           const prev = (shifts[s.id] || {})[d - 1] || '';
           const next = (shifts[s.id] || {})[d + 1] || '';
-          if (isLate(prev) && isEarly(next)) {
+          if (isLate(prev) && isEarlyCategory(next)) {
+            const label = isTraining(next) ? '遅→休→研' : '遅→休→早';
             violations.push({
               staffId: s.id, day: d, type: 'bad-rest',
-              message: `⚠️ 遅→休→早（リズムが悪い）`,
+              message: `⚠️ ${label}（リズムが悪い）`,
               action: '時間帯を揃えてください',
             });
           }
@@ -476,19 +522,39 @@ function checkViolations(shifts) {
       }
     }
 
-    // 公休数チェック（目標との差）
     const diff = offCount - (s.maxOff || 0);
-    if (diff !== 0) {
+    if (diff < 0) {
       violations.push({
         staffId: s.id, day: 0, type: 'off-count',
-        message: `⚠️ 休日数 ${offCount}日（目標${s.maxOff}日, 差${diff > 0 ? '+' : ''}${diff}）`,
-        action: '休日数を調整してください',
+        message: `🚨 休日数 ${offCount}日（目標${s.maxOff}日, 差${diff}）`,
+        action: '休日数を増やしてください',
+      });
+    } else if (diff > 0) {
+      violations.push({
+        staffId: s.id, day: 0, type: 'off-count-over',
+        message: `ℹ️ 休日数 ${offCount}日（目標${s.maxOff}日, 差+${diff}）人員余剰`,
+        action: '余剰人員のため休日が増えています',
       });
     }
   });
 
-  // 各日の必要人数チェック
-  const shiftKeys = ['早責', '遅責', '早総', '遅総', '早', '遅'];
+  staff.forEach(s => {
+    for (let d = 1; d < days; d++) {
+      const cur = (shifts[s.id] || {})[d] || '';
+      if (isNight(cur)) {
+        const next = (shifts[s.id] || {})[d + 1] || '';
+        if (!isOff(next)) {
+          violations.push({
+            staffId: s.id, day: d + 1, type: 'night-rest',
+            message: `🚨 夜勤明け（${d + 1}日）が休みになっていません`,
+            action: '夜勤の翌日は必ず休みにしてください',
+          });
+        }
+      }
+    }
+  });
+
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '夜勤'];
   for (let d = 1; d <= days; d++) {
     const counts = {};
     shiftKeys.forEach(k => counts[k] = 0);
@@ -497,7 +563,7 @@ function checkViolations(shifts) {
       if (counts[sh] !== undefined) counts[sh]++;
     });
     shiftKeys.forEach(k => {
-      const req = AppState.roleRequirements[k] || 0;
+      const req = getDayReq(d, k);
       if (req === 0) return;
       if (counts[k] < req) {
         violations.push({
@@ -510,4 +576,33 @@ function checkViolations(shifts) {
   }
 
   return violations;
+}
+
+function applySpecialDaysLogic(shifts, locked, staff, days) {
+  const viceManagers = staff.filter(s => s.positionType === 'viceManager');
+  for (let d = 1; d <= days; d++) {
+    const specialType = AppState.specialDays[d];
+    if (!specialType) continue;
+    viceManagers.forEach(vm => {
+      if (locked[vm.id][d]) return;
+      if (specialType === 'replacement') {
+        shifts[vm.id][d] = '遅責';
+        locked[vm.id][d] = true;
+      } else if (specialType === 'renewal') {
+        shifts[vm.id][d] = '早責';
+        locked[vm.id][d] = true;
+      }
+    });
+  }
+}
+
+function applySubstituteResponsible(shifts, staff, day, shiftType) {
+  const viceManagers = staff.filter(s => s.positionType === 'viceManager' && shifts[s.id][day] === shiftType);
+  if (viceManagers.length > 0) return viceManagers[0];
+  const chiefs = staff.filter(s => s.positionType === 'chief' && !isOff(shifts[s.id][day]) && shifts[s.id][day] !== shiftType);
+  if (chiefs.length > 0) {
+    chiefs[0].tempResponsible = true;
+    return chiefs[0];
+  }
+  return null;
 }
