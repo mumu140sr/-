@@ -123,6 +123,7 @@
               <th>カテゴリ</th>
               <th>集計対象</th>
               <th>研修扱い</th>
+              <th>夜勤</th>
               <th>色</th>
               <th>労働時間<br><small>(h/コマ)</small></th>
               <th>必要人数/日<br><small>(社員)</small></th>
@@ -132,6 +133,14 @@
           </thead>
           <tbody id="roleTableBody"></tbody>
         </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="cursor:pointer" onclick="toggleDailyReqPanel()">📅 日別必要人数（上書き設定） <span id="dailyReqToggle">▶ 展開</span></h3>
+      <div id="dailyReqPanel" style="display:none">
+        <p class="hint">特定の日だけ必要人数を変えたい場合に入力してください。空欄または「-」の日はデフォルト値を使用します。</p>
+        <div id="dailyReqContent"></div>
       </div>
     </div>
   </section>

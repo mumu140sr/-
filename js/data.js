@@ -52,13 +52,13 @@ const _LEGACY_ROLE_SHIFTS = {
 // workHours: 1コマあたりの労働時間（総労働時間の集計に使用）
 function getDefaultShiftTypes() {
   return [
-    { key: '早責',  label: '早番責任者', color: '#fde2e2', category: 'A', countForStaff: true,  isTraining: false, workHours: 8 },
-    { key: '遅責',  label: '遅番責任者', color: '#d1c4e9', category: 'B', countForStaff: true,  isTraining: false, workHours: 8 },
-    { key: '早総務', label: '早番総務',  color: '#fce4b6', category: 'A', countForStaff: true,  isTraining: false, workHours: 8 },
-    { key: '遅総務', label: '遅番総務',  color: '#c8e6c9', category: 'B', countForStaff: true,  isTraining: false, workHours: 8 },
-    { key: '早',    label: '早番',       color: '#d4eaf7', category: 'A', countForStaff: true,  isTraining: false, workHours: 8 },
-    { key: '遅',    label: '遅番',       color: '#ffe0b2', category: 'B', countForStaff: true,  isTraining: false, workHours: 8 },
-    { key: '研',    label: '研修',       color: '#e0f7fa', category: 'A', countForStaff: false, isTraining: true,  workHours: 8 },
+    { key: '早責',  label: '早番責任者', color: '#fde2e2', category: 'A', countForStaff: true,  isTraining: false, isNight: false, workHours: 8 },
+    { key: '遅責',  label: '遅番責任者', color: '#d1c4e9', category: 'B', countForStaff: true,  isTraining: false, isNight: false, workHours: 8 },
+    { key: '早総務', label: '早番総務',  color: '#fce4b6', category: 'A', countForStaff: true,  isTraining: false, isNight: false, workHours: 8 },
+    { key: '遅総務', label: '遅番総務',  color: '#c8e6c9', category: 'B', countForStaff: true,  isTraining: false, isNight: false, workHours: 8 },
+    { key: '早',    label: '早番',       color: '#d4eaf7', category: 'A', countForStaff: true,  isTraining: false, isNight: false, workHours: 8 },
+    { key: '遅',    label: '遅番',       color: '#ffe0b2', category: 'B', countForStaff: true,  isTraining: false, isNight: false, workHours: 8 },
+    { key: '研',    label: '研修',       color: '#e0f7fa', category: 'A', countForStaff: false, isTraining: true,  isNight: false, workHours: 8 },
   ];
 }
 
@@ -84,6 +84,7 @@ const DEFAULT_PENALTIES = {
   prefMismatch:      12000, // prefs希望違反（早可/遅可 に反するシフト）
   eventAbsent:       20000, // イベント日に対象スタッフが休んでいる
   restPairBonus:       100, // 2連休以上のまとまった休みへのボーナス（スコアから減算）
+  nightAfterWork:     8000, // 夜勤翌日に休みでない（夜勤明けは必ず休み）
 };
 
 // アプリケーションの状態
@@ -104,6 +105,10 @@ const AppState = {
   },
   // キャスト部門の1日の必要人数 { shiftKey: 人数 }
   roleRequirementsCast: {},
+  // 日別必要人数（上書き設定）{ shiftKey: { day: 人数 } } 空なら roleRequirements を使用
+  dailyRequirements: {},
+  // キャスト部門の日別必要人数
+  dailyRequirementsCast: {},
   // スタッフ一覧
   // 各スタッフ: { id, name, department, positionType, allowedShifts[], maxOff, prefs[], balance, prevConsecutive, prevLastShift, note }
   staff: [],
@@ -176,8 +181,8 @@ function getDepartmentGroups(staffList) {
   const groups = [];
   const emp  = all.filter(s => getStaffDepartment(s) === 'employee');
   const cast = all.filter(s => getStaffDepartment(s) === 'cast');
-  if (emp.length)  groups.push({ key: 'employee', label: '社員',     staff: emp,  reqs: AppState.roleRequirements });
-  if (cast.length) groups.push({ key: 'cast',     label: 'キャスト', staff: cast, reqs: AppState.roleRequirementsCast || {} });
+  if (emp.length)  groups.push({ key: 'employee', label: '社員',     staff: emp,  reqs: AppState.roleRequirements,     dailyReqs: AppState.dailyRequirements     || {} });
+  if (cast.length) groups.push({ key: 'cast',     label: 'キャスト', staff: cast, reqs: AppState.roleRequirementsCast || {}, dailyReqs: AppState.dailyRequirementsCast || {} });
   return groups;
 }
 
@@ -194,6 +199,18 @@ function isLate(shift) {
 function isTraining(shift) {
   const t = getShiftType(shift);
   return t ? t.isTraining : false;
+}
+
+function isNight(shift) {
+  const t = getShiftType(shift);
+  return t ? !!t.isNight : false;
+}
+
+// 日別必要人数を取得（per-day override がなければデフォルト値を返す）
+function getDayReq(reqs, dailyReqs, shiftKey, day) {
+  const override = (dailyReqs || {})[shiftKey];
+  if (override && override[day] != null) return override[day];
+  return reqs[shiftKey] || 0;
 }
 
 // 研修も早番カテゴリ（A）として扱う
@@ -237,6 +254,8 @@ function saveToStorage() {
       shiftTypes:           AppState.shiftTypes,
       roleRequirements:     AppState.roleRequirements,
       roleRequirementsCast: AppState.roleRequirementsCast,
+      dailyRequirements:    AppState.dailyRequirements,
+      dailyRequirementsCast: AppState.dailyRequirementsCast,
       staff:                AppState.staff,
       requests:             AppState.requests,
       shifts:               AppState.shifts,
@@ -265,13 +284,15 @@ function loadFromStorage() {
     const penalties = Object.assign({ ...DEFAULT_PENALTIES }, (data.settings || {}).penalties || {});
     Object.assign(AppState.settings, data.settings || {}, { penalties });
 
-    // shiftTypes（v3以降）。workHours 未設定の旧データは 8h で補完
+    // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
     AppState.shiftTypes = (data.shiftTypes || getDefaultShiftTypes()).map(t =>
-      Object.assign({ workHours: 8 }, t));
+      Object.assign({ workHours: 8, isNight: false }, t));
 
     // roleRequirements
     Object.assign(AppState.roleRequirements, data.roleRequirements || {});
-    AppState.roleRequirementsCast = data.roleRequirementsCast || {};
+    AppState.roleRequirementsCast  = data.roleRequirementsCast  || {};
+    AppState.dailyRequirements     = data.dailyRequirements     || {};
+    AppState.dailyRequirementsCast = data.dailyRequirementsCast || {};
 
     // events（v4以降）
     AppState.events = Array.isArray(data.events) ? data.events : [];
@@ -336,7 +357,9 @@ function resetAll() {
   AppState.roleRequirements = {
     '早責': 1, '遅責': 1, '早総務': 1, '遅総務': 1, '早': 2, '遅': 2,
   };
-  AppState.roleRequirementsCast = {};
+  AppState.roleRequirementsCast  = {};
+  AppState.dailyRequirements     = {};
+  AppState.dailyRequirementsCast = {};
   AppState.settings.penalties = { ...DEFAULT_PENALTIES };
   _staffIdCounter = 1;
   localStorage.removeItem('shiftAppData');

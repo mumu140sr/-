@@ -29,9 +29,12 @@ const SOLO_SHIFT_KEYS = ['早責', '遅責', '早総', '遅総'];
 
 // 部門別最適化中のスタッフ・必要人数（AppState を書き換えると実行中の保存で
 // データが破損するため、optimizer 内部変数で切り替える）
-let _optStaff = null, _optReqs = null;
-function optStaff() { return _optStaff || AppState.staff; }
-function optReqs()  { return _optReqs  || AppState.roleRequirements; }
+let _optStaff = null, _optReqs = null, _optDailyReqs = null;
+function optStaff()      { return _optStaff      || AppState.staff; }
+function optReqs()       { return _optReqs       || AppState.roleRequirements; }
+function optDailyReqs()  { return _optDailyReqs  || AppState.dailyRequirements || {}; }
+// 日別必要人数（per-day override → デフォルト req の順で参照）
+function optDayReq(sh, d) { return getDayReq(optReqs(), optDailyReqs(), sh, d); }
 
 /**
  * シフト最適化のメインエントリ
@@ -48,8 +51,9 @@ async function optimizeSchedule(progressCallback) {
     for (let gi = 0; gi < groups.length; gi++) {
       const g = groups[gi];
       // 部門のスタッフ・必要人数を optimizer 内部変数に設定して既存パイプラインを実行
-      _optStaff = g.staff;
-      _optReqs  = g.reqs;
+      _optStaff     = g.staff;
+      _optReqs      = g.reqs;
+      _optDailyReqs = g.dailyReqs;
       const groupProgress = (pct, msg) => {
         const mapped = Math.floor((gi * 100 + pct) / groups.length);
         const label  = groups.length > 1 ? `【${g.label}】${msg}` : msg;
@@ -60,8 +64,9 @@ async function optimizeSchedule(progressCallback) {
       totalScore += res.score;
     }
   } finally {
-    _optStaff = null;
-    _optReqs  = null;
+    _optStaff     = null;
+    _optReqs      = null;
+    _optDailyReqs = null;
   }
 
   AppState.shifts     = mergedShifts;
@@ -280,7 +285,7 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
     shuffleArray(avail);
 
     shiftKeys.forEach(sh => {
-      const req = reqs[sh] || 0;
+      const req = optDayReq(sh, d);
       let placed = 0;
       // 早責・遅責は役職優先度順（上位者を優先的に責任者に据える）
       const isRespShift = sh === '早責' || sh === '遅責';
@@ -291,6 +296,10 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
         if (shifts[s.id][d] !== '') continue;
         shifts[s.id][d] = sh;
         placed++;
+        // 夜勤翌日は必ず休み（未ロックの場合のみ）
+        if (isNight(sh) && d < days && !locked[s.id][d + 1]) {
+          shifts[s.id][d + 1] = '休';
+        }
       }
     });
 
@@ -302,7 +311,7 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
   // Step3: 人員不足を修復
   for (let d = 1; d <= days; d++) {
     shiftKeys.forEach(sh => {
-      const req = reqs[sh] || 0;
+      const req = optDayReq(sh, d);
       if (!req) return;
       let count = staff.filter(s => shifts[s.id][d] === sh).length;
       if (count >= req) return;
@@ -1175,7 +1184,7 @@ function calculateScore(shifts, allowedShifts, days, P) {
     // 毎日、副店長が1人以上出勤していること（早番か遅番にいる）
     if (hasVice && viceWorking === 0) score += (P.viceManagerDailyAbsent || 9000);
     shiftKeys.forEach(k => {
-      const req = reqs[k] || 0;
+      const req = optDayReq(k, d);
       if (!req) return;
       const diff = req - counts[k];
       if (diff > 0) score += diff * P.understaff;
@@ -1245,6 +1254,9 @@ function calculateScore(shifts, allowedShifts, days, P) {
           if (isEarlyCategory(cur) && !s.prefs.includes('早可')) score += (P.prefMismatch || 12000);
           if (isLate(cur)          && !s.prefs.includes('遅可')) score += (P.prefMismatch || 12000);
         }
+
+        // 夜勤翌日は必ず休み
+        if (isNight(prevShift)) score += (P.nightAfterWork || 8000);
 
         // 連勤中の時間帯切替
         if (consWork >= 2 && isWork(prevShift)) {
@@ -1356,6 +1368,15 @@ function checkViolations(shifts) {
             staffId: s.id, day: d, type: 'late-early',
             message: `🚨 ${isTraining(cur) ? '遅→研' : '遅→早'}（インターバル不足）`,
             action:  '順序を入れ替えてください',
+          });
+        }
+
+        // 夜勤翌日は必ず休み
+        if (isNight(prevShift)) {
+          violations.push({
+            staffId: s.id, day: d, type: 'night-after-work',
+            message: `🚨 夜勤翌日に出勤（夜勤明けは休み必須）`,
+            action:  '夜勤翌日を休みに変更してください',
           });
         }
 
@@ -1476,7 +1497,7 @@ function checkViolations(shifts) {
         if (counts[sh] !== undefined) counts[sh]++;
       });
       shiftKeys.forEach(k => {
-        const req = g.reqs[k] || 0;
+        const req = getDayReq(g.reqs, g.dailyReqs || {}, k, d);
         if (req && counts[k] < req) {
           violations.push({
             staffId: null, day: d, type: 'understaff',

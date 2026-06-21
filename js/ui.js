@@ -370,6 +370,13 @@ function renderRoleTable() {
           <span></span>
         </label>
       </td>
+      <td>
+        <label class="switch">
+          <input type="checkbox" data-idx="${idx}" data-field="isNight"
+                 ${type.isNight ? 'checked' : ''}/>
+          <span></span>
+        </label>
+      </td>
       <td style="white-space:nowrap">
         <input type="color" value="${type.color}" data-idx="${idx}" data-field="color"
                style="width:46px;height:28px;border:none;cursor:pointer;border-radius:4px;vertical-align:middle"/>
@@ -416,12 +423,20 @@ function renderRoleTable() {
             AppState.roleRequirementsCast[newKey] = AppState.roleRequirementsCast[oldKey];
             delete AppState.roleRequirementsCast[oldKey];
           }
+          if (AppState.dailyRequirements && AppState.dailyRequirements[oldKey] !== undefined) {
+            AppState.dailyRequirements[newKey] = AppState.dailyRequirements[oldKey];
+            delete AppState.dailyRequirements[oldKey];
+          }
+          if (AppState.dailyRequirementsCast && AppState.dailyRequirementsCast[oldKey] !== undefined) {
+            AppState.dailyRequirementsCast[newKey] = AppState.dailyRequirementsCast[oldKey];
+            delete AppState.dailyRequirementsCast[oldKey];
+          }
           type.key = newKey;
           // プレビューセルのテキスト更新
           const prev = e.target.closest('tr').querySelector('.shift-preview');
           if (prev) prev.textContent = newKey;
         }
-      } else if (field === 'countForStaff' || field === 'isTraining') {
+      } else if (field === 'countForStaff' || field === 'isTraining' || field === 'isNight') {
         type[field] = e.target.checked;
       } else if (field === 'color') {
         type.color = e.target.value;
@@ -478,6 +493,8 @@ function renderRoleTable() {
       if (confirm(`シフト「${type.key}」を削除しますか？`)) {
         delete AppState.roleRequirements[type.key];
         if (AppState.roleRequirementsCast) delete AppState.roleRequirementsCast[type.key];
+        if (AppState.dailyRequirements) delete AppState.dailyRequirements[type.key];
+        if (AppState.dailyRequirementsCast) delete AppState.dailyRequirementsCast[type.key];
         AppState.shiftTypes.splice(idx, 1);
         renderRoleTable();
         autoSave();
@@ -486,6 +503,75 @@ function renderRoleTable() {
     });
   });
 }
+
+// ===== 日別必要人数パネル =====
+
+function toggleDailyReqPanel() {
+  const panel  = document.getElementById('dailyReqPanel');
+  const toggle = document.getElementById('dailyReqToggle');
+  if (!panel) return;
+  const open = panel.style.display === 'none';
+  panel.style.display = open ? '' : 'none';
+  if (toggle) toggle.textContent = open ? '▼ 折りたたむ' : '▶ 展開';
+  if (open) renderDailyReqPanel();
+}
+
+function renderDailyReqPanel() {
+  const container = document.getElementById('dailyReqContent');
+  if (!container) return;
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  if (!days) { container.innerHTML = '<p class="hint">先に対象年月を設定してください。</p>'; return; }
+
+  const countableTypes = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining);
+  if (!countableTypes.length) { container.innerHTML = '<p class="hint">集計対象のシフト種別がありません。</p>'; return; }
+
+  let html = '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px">';
+  html += '<thead><tr><th style="padding:4px 6px;border:1px solid #ccc;background:#f0f0f0">シフト / 部門</th>';
+  for (let d = 1; d <= days; d++) html += `<th style="padding:2px 4px;border:1px solid #ccc;background:#f0f0f0;text-align:center">${d}</th>`;
+  html += '</tr></thead><tbody>';
+
+  ['employee','cast'].forEach(dept => {
+    const baseReqs = dept === 'employee' ? AppState.roleRequirements : (AppState.roleRequirementsCast || {});
+    const dailyMap = dept === 'employee' ? (AppState.dailyRequirements || {}) : (AppState.dailyRequirementsCast || {});
+    const deptLabel = dept === 'employee' ? '社員' : 'キャスト';
+    countableTypes.forEach(type => {
+      const defaultVal = baseReqs[type.key] || 0;
+      if (!defaultVal && dept === 'cast') return;
+      html += `<tr><td style="padding:4px 6px;border:1px solid #ccc;white-space:nowrap">${escapeHtml(type.key)}（${deptLabel}・通常: ${defaultVal}）</td>`;
+      for (let d = 1; d <= days; d++) {
+        const override = (dailyMap[type.key] || {})[d];
+        html += `<td style="padding:1px;border:1px solid #ccc">
+          <input type="number" min="0" max="99" placeholder="${defaultVal}"
+            value="${override != null ? override : ''}"
+            data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}"
+            class="daily-req-input" style="width:42px;text-align:center;border:none;font-size:12px"/>
+        </td>`;
+      }
+      html += '</tr>';
+    });
+  });
+
+  html += '</tbody></table></div>';
+  container.innerHTML = html;
+
+  container.querySelectorAll('.daily-req-input').forEach(el => {
+    el.addEventListener('change', e => {
+      const sh   = e.target.dataset.shift;
+      const day  = parseInt(e.target.dataset.day);
+      const dept = e.target.dataset.dept;
+      const val  = e.target.value.trim();
+      const map  = dept === 'employee' ? AppState.dailyRequirements : AppState.dailyRequirementsCast;
+      if (!map[sh]) map[sh] = {};
+      if (val === '' || val === '-') {
+        delete map[sh][day];
+      } else {
+        map[sh][day] = parseInt(val) || 0;
+      }
+      autoSave();
+    });
+  });
+}
+
 
 // ===== ③ スタッフ管理 =====
 function setupStaffPanel() {
