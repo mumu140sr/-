@@ -3,32 +3,42 @@
    メインスレッドをブロックせずに最適化を実行する
    =========================================== */
 
+// data.js と optimizer.js を Worker スコープに取り込む
+// importScripts は Worker 専用 API
 self.importScripts('data.js', 'optimizer.js');
 
+/**
+ * メインスレッドからのリクエスト受信
+ *  payload: { type: 'optimize', appState: { settings, roleRequirements, staff, requests, fixedShifts, specialDays } }
+ */
 self.addEventListener('message', async (e) => {
   const msg = e.data || {};
   if (msg.type !== 'optimize') return;
 
   try {
+    // Worker 内の AppState を上書き
     const incoming = msg.appState || {};
     Object.assign(AppState.settings, incoming.settings || {});
-    AppState.roleRequirements = incoming.roleRequirements || AppState.roleRequirements;
-    AppState.dailyRequirements = incoming.dailyRequirements || {};
-    AppState.roleColors = incoming.roleColors || AppState.roleColors;
-    AppState.staff = incoming.staff || [];
-    AppState.requests = incoming.requests || {};
+    if (incoming.shiftTypes) AppState.shiftTypes = incoming.shiftTypes;
+    AppState.roleRequirements     = incoming.roleRequirements     || AppState.roleRequirements;
+    AppState.roleRequirementsCast = incoming.roleRequirementsCast || {};
+    AppState.staff       = incoming.staff       || [];
+    AppState.requests    = incoming.requests    || {};
     AppState.fixedShifts = incoming.fixedShifts || {};
     AppState.specialDays = incoming.specialDays || {};
+    AppState.events      = incoming.events      || [];
     AppState.shifts = {};
     AppState.violations = [];
     AppState.generated = false;
 
+    // 進捗コールバックは postMessage で代用
     const onProgress = (pct, label) => {
       self.postMessage({ type: 'progress', pct, label });
     };
 
     const result = await optimizeSchedule(onProgress);
 
+    // 完了通知（AppState.shifts と violations を返す）
     self.postMessage({
       type: 'done',
       result,

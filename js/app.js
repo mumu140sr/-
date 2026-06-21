@@ -3,19 +3,24 @@
    =========================================== */
 
 document.addEventListener('DOMContentLoaded', () => {
+  // データ読込
   const loaded = loadFromStorage();
   if (!loaded || AppState.staff.length === 0) {
     addSampleStaff();
   }
 
+  // UI初期化
   setupTabs();
   setupSettingsPanel();
+  setupEventsPanel();
+  setupRolePanel();
   setupStaffPanel();
   setupCalendarPanel();
   setupGeneratePanel();
   setupResultPanel();
   setupHeaderActions();
 
+  // 初期描画（設定パネルの入力値復元含む）
   refreshAllUI();
 
   if (loaded) {
@@ -25,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// ヘッダーアクション
 function setupHeaderActions() {
   document.getElementById('btnSave').addEventListener('click', () => {
     saveToStorage();
@@ -50,6 +56,7 @@ function setupHeaderActions() {
   });
 }
 
+// ⑤ 自動生成パネル
 function setupGeneratePanel() {
   const btn = document.getElementById('btnGenerate');
   const btnCancel = document.getElementById('btnCancelGenerate');
@@ -79,21 +86,60 @@ function setupGeneratePanel() {
 
     const startedAt = Date.now();
     try {
+      // Worker 版を使う（フォールバック付き）
       const runner = (typeof optimizeScheduleViaWorker === 'function')
         ? optimizeScheduleViaWorker
         : optimizeSchedule;
-      const result = await runner((pct, msg) => {
-        $bar.style.width = pct + '%';
-        $text.textContent = msg;
+
+      // 複数案を生成して最良案を採用
+      const numCand = Math.max(1, Math.min(5,
+        parseInt(document.getElementById('numCandidates')?.value) || 3));
+      AppState.settings.numCandidates = numCand;
+
+      const candidates = [];
+      for (let ci = 0; ci < numCand; ci++) {
+        const res = await runner((pct, msg) => {
+          const mapped = Math.floor((ci * 100 + pct) / numCand);
+          $bar.style.width = mapped + '%';
+          $text.textContent = numCand > 1 ? `案${ci + 1}/${numCand}: ${msg}` : msg;
+        });
+        candidates.push({
+          result:     res,
+          shifts:     AppState.shifts,
+          violations: AppState.violations,
+        });
+        // 全案違反ゼロなら早期終了
+        if (res.violations.length === 0) break;
+      }
+
+      // 最良案: 違反件数 → スコア の順で比較
+      let bestIdx = 0;
+      candidates.forEach((c, i) => {
+        const b = candidates[bestIdx];
+        if (c.violations.length < b.violations.length ||
+            (c.violations.length === b.violations.length && c.result.score < b.result.score)) {
+          bestIdx = i;
+        }
       });
+      const best = candidates[bestIdx];
+      AppState.shifts     = best.shifts;
+      AppState.violations = best.violations;
+      AppState.generated  = true;
+      const result = best.result;
+      result.candidateSummary = candidates.length > 1
+        ? candidates.map((c, i) =>
+            `案${i + 1}: 違反${c.violations.length}件 / スコア${c.result.score}${i === bestIdx ? ' ←採用' : ''}`).join('　')
+        : null;
 
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
       $text.textContent = `完了！ 最終スコア: ${result.score} (${elapsed}秒)`;
 
+      // レポート表示
       $report.style.display = 'block';
       renderReport(result);
 
+      // 自動でシフト表タブへ
       setTimeout(() => {
         document.querySelector('.tab[data-tab="result"]').click();
       }, 800);
@@ -119,6 +165,7 @@ function setupGeneratePanel() {
     }
   });
 
+  // キャンセルボタン
   if (btnCancel) {
     btnCancel.addEventListener('click', () => {
       if (typeof cancelActiveOptimization === 'function' && cancelActiveOptimization()) {
@@ -132,6 +179,7 @@ function setupGeneratePanel() {
     });
   }
 
+  // AI解説ボタン
   const btnAI = document.getElementById('btnAIExplain');
   if (btnAI) {
     btnAI.addEventListener('click', () => {
@@ -148,45 +196,67 @@ function setupGeneratePanel() {
 
 function renderReport(result) {
   const $c = document.getElementById('reportContent');
+
+  // ── AI 診断セクション ──────────────────────────────────────
+  const diagItems = (typeof runAIDiagnosis === 'function') ? runAIDiagnosis() : [];
+  const diagColors = {
+    error:   { bg: '#fff5f5', border: '#fc8181', title: '#742a2a', body: '#9b2335' },
+    warning: { bg: '#fffaf0', border: '#f6ad55', title: '#744210', body: '#975a16' },
+    info:    { bg: '#ebf8ff', border: '#63b3ed', title: '#2a4365', body: '#2c5282' },
+    ok:      { bg: '#f0fff4', border: '#68d391', title: '#22543d', body: '#276749' },
+  };
+  const diagIcons = { error: '🚨', warning: '⚠️', info: 'ℹ️', ok: '✅' };
+
+  let diagHtml = '';
+  if (result.candidateSummary) {
+    diagHtml += `<div class="diag-item" style="background:#ebf8ff;border-left:4px solid #63b3ed;margin-bottom:8px">
+      <div class="diag-title" style="color:#2a4365">🔀 複数案の比較</div>
+      <div class="diag-detail" style="color:#2c5282">${escapeHtml(result.candidateSummary)}</div>
+    </div>`;
+  }
+  diagHtml += '<div class="diag-section">';
+  diagItems.forEach(d => {
+    const c = diagColors[d.level] || diagColors.info;
+    const detailLines = escapeHtml(d.detail).replace(/\n/g, '<br>');
+    diagHtml += `
+      <div class="diag-item" style="background:${c.bg};border-left:4px solid ${c.border}">
+        <div class="diag-title" style="color:${c.title}">${diagIcons[d.level]} ${escapeHtml(d.title)}</div>
+        <div class="diag-detail" style="color:${c.body}">${detailLines}</div>
+        ${d.suggestion ? `<div class="diag-suggestion">💡 ${escapeHtml(d.suggestion)}</div>` : ''}
+      </div>`;
+  });
+  diagHtml += '</div>';
+
+  // ── 違反なし ────────────────────────────────────────────────
   if (result.success) {
-    $c.innerHTML = `
-      <div class="report-success">
-        ✨ 全てのMUSTルールがクリアされました！<br>
-        スコア: 0 / 違反: 0件
-      </div>
-    `;
+    $c.innerHTML = diagHtml + `
+      <div class="report-success">✨ 全てのMUSTルールがクリアされました！ スコア: 0 / 違反: 0件</div>`;
     return;
   }
 
-  const grouped = {};
-  result.violations.forEach(v => {
-    if (!grouped[v.type]) grouped[v.type] = [];
-    grouped[v.type].push(v);
-  });
-
-  let html = `
+  // ── 違反リスト ───────────────────────────────────────────────
+  let html = diagHtml + `
     <div class="report-warning">
       ⚠️ 違反件数: ${result.violations.length}件 / スコア: ${result.score}
     </div>
     <div class="violation-list">
   `;
-
-  result.violations.forEach((v, idx) => {
-    const staff = AppState.staff.find(s => s.id === v.staffId);
-    const targetName = staff ? staff.name : '全体';
-    const dayStr = v.day > 0 ? ` (${v.day}日)` : '';
+  result.violations.forEach(v => {
+    const s          = AppState.staff.find(m => m.id === v.staffId);
+    const targetName = s ? s.name : '全体';
+    const dayStr     = v.day > 0 ? ` (${v.day}日)` : '';
     html += `
       <div class="violation-item">
         <span class="v-target">${escapeHtml(targetName)}${dayStr}</span>
         ${escapeHtml(v.message)}
         <span class="v-action">💡 ${escapeHtml(v.action)}</span>
-      </div>
-    `;
+      </div>`;
   });
   html += '</div>';
   $c.innerHTML = html;
 }
 
+// ⑥ 結果パネル
 function setupResultPanel() {
   document.getElementById('btnExportExcel').addEventListener('click', exportToExcel);
   document.getElementById('btnExportCSV').addEventListener('click', exportToCSV);
@@ -202,8 +272,25 @@ function setupResultPanel() {
     renderReport(result);
     toast(`ルールチェック完了: ${AppState.violations.length}件の違反`, 'info');
   });
+
+  document.getElementById('btnClearFixed').addEventListener('click', () => {
+    let count = 0;
+    for (const sid in AppState.fixedShifts) {
+      count += Object.keys(AppState.fixedShifts[sid] || {}).length;
+    }
+    if (count === 0) {
+      toast('固定されているシフトはありません', 'info');
+      return;
+    }
+    if (!confirm(`固定（🔒）されている ${count}件 のシフトをすべて解除しますか？\n※シフトの内容はそのまま残り、再生成で動かせるようになります。`)) return;
+    AppState.fixedShifts = {};
+    renderResultTable();
+    saveToStorage();
+    toast(`${count}件 の固定を解除しました`, 'success');
+  });
 }
 
+// Excel エクスポート
 function exportToExcel() {
   if (!AppState.generated) {
     toast('シフトを生成してから実行してください', 'error');
@@ -211,58 +298,74 @@ function exportToExcel() {
   }
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const data = [];
+  const groups = getDepartmentGroups();
+  const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
 
+  // ヘッダー
   const header = ['名前'];
   for (let d = 1; d <= days; d++) {
     const w = getWeekday(AppState.settings.targetMonth, d);
     header.push(`${d}(${getWeekdayLabel(w)})`);
   }
-  header.push('勤務日数', '休日数');
+  header.push('公休', '有給他', '出勤日数', '差', '総労働時間');
   data.push(header);
 
-  AppState.staff.forEach(s => {
-    const row = [s.name];
-    let work = 0, off = 0;
-    for (let d = 1; d <= days; d++) {
-      const sh = (AppState.shifts[s.id] || {})[d] || '';
-      row.push(sh);
-      if (isWork(sh)) work++;
-      else if (isOff(sh)) off++;
-    }
-    row.push(work, off);
-    data.push(row);
-  });
+  groups.forEach(g => {
+    if (groups.length > 1) data.push([`【${g.label}】`]);
 
-  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '夜勤'];
-  shiftKeys.forEach(key => {
-    const req = AppState.roleRequirements[key] || 0;
-    if (req === 0) return;
-    const row = [`${key}(${req})`];
-    for (let d = 1; d <= days; d++) {
-      let count = 0;
-      AppState.staff.forEach(s => {
-        if ((AppState.shifts[s.id] || {})[d] === key) count++;
-      });
-      row.push(count);
-    }
-    data.push(row);
+    // 各スタッフ
+    g.staff.forEach(s => {
+      const row = [s.name];
+      let work = 0, publicOff = 0, otherOff = 0, hours = 0;
+      for (let d = 1; d <= days; d++) {
+        const sh = (AppState.shifts[s.id] || {})[d] || '';
+        row.push(sh);
+        if (isWork(sh)) { work++; hours += getShiftHours(sh); }
+        else if (isPublicOff(sh)) publicOff++;
+        else if (isOff(sh)) otherOff++;
+      }
+      const diff = publicOff - (s.maxOff || 0);
+      row.push(publicOff, otherOff, work, diff, Math.round(hours * 10) / 10);
+      data.push(row);
+    });
+
+    // 集計行（部門の必要人数 > 0 のシフト種別）
+    workKeys.forEach(key => {
+      const req = g.reqs[key] || 0;
+      if (req === 0) return;
+      const row = [`${key}(${req})`];
+      for (let d = 1; d <= days; d++) {
+        let count = 0;
+        g.staff.forEach(s => {
+          if ((AppState.shifts[s.id] || {})[d] === key) count++;
+        });
+        row.push(count);
+      }
+      data.push(row);
+    });
   });
 
   const ws = XLSX.utils.aoa_to_sheet(data);
 
+  // 列幅設定
   const colWidths = [{ wch: 16 }];
   for (let d = 1; d <= days; d++) colWidths.push({ wch: 6 });
-  colWidths.push({ wch: 8 }, { wch: 8 });
+  colWidths.push({ wch: 6 }, { wch: 7 }, { wch: 9 }, { wch: 5 }, { wch: 11 });
   ws['!cols'] = colWidths;
 
-  const colorMap = {
-    '早責': 'FDE2E2', '遅責': 'D1C4E9',
-    '早総務': 'FCE4B6', '遅総務': 'C8E6C9',
-    '早':   'D4EAF7', '遅':   'FFE0B2',
-    '休':   'EEEEEE', '公':   'F5F5F5',
-    '有':   'FFF9C4', '研':   'E0F7FA',
-  };
-  for (let r = 1; r <= AppState.staff.length; r++) {
+  // セル色を設定（動的 shiftTypes + 固定 off 系）
+  const colorMap = {};
+  AppState.shiftTypes.forEach(t => {
+    // Excelの色形式: RRGGBB (# を除く6桁)
+    colorMap[t.key] = t.color.replace('#', '').toUpperCase().padStart(6, '0');
+  });
+  // 固定の休み系
+  Object.assign(colorMap, {
+    '休': 'EEEEEE', '公': 'F5F5F5', '有': 'FFF9C4',
+    '☆': 'EEEEEE', '季': 'EEEEEE', '引': 'EEEEEE', '慶': 'EEEEEE',
+  });
+
+  for (let r = 1; r < data.length; r++) {
     for (let c = 1; c <= days; c++) {
       const cellAddr = XLSX.utils.encode_cell({ r, c });
       const cell = ws[cellAddr];
@@ -275,15 +378,23 @@ function exportToExcel() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'シフト表');
 
-  const summary = [['スタッフ', '早責', '遅責', '早総務', '遅総務', '早', '遅', '研', '休系', '合計勤務']];
-  AppState.staff.forEach(s => {
-    const counts = { '早責': 0, '遅責': 0, '早総務': 0, '遅総務': 0, '早': 0, '遅': 0, '研': 0, off: 0, work: 0 };
-    for (let d = 1; d <= days; d++) {
-      const sh = (AppState.shifts[s.id] || {})[d] || '';
-      if (counts[sh] !== undefined) { counts[sh]++; counts.work++; }
-      else if (isOff(sh)) counts.off++;
-    }
-    summary.push([s.name, counts['早責'], counts['遅責'], counts['早総務'], counts['遅総務'], counts['早'], counts['遅'], counts['研'], counts.off, counts.work]);
+  // 集計シート（動的・部門順）
+  const summaryHeader = ['部門', 'スタッフ', ...AppState.shiftTypes.map(t => t.key), '公休', '有給他', '出勤日数', '差', '総労働時間'];
+  const summary = [summaryHeader];
+  groups.forEach(g => {
+    g.staff.forEach(s => {
+      const counts = {};
+      AppState.shiftTypes.forEach(t => { counts[t.key] = 0; });
+      let publicOff = 0, otherOff = 0, workCount = 0, hours = 0;
+      for (let d = 1; d <= days; d++) {
+        const sh = (AppState.shifts[s.id] || {})[d] || '';
+        if (counts[sh] !== undefined) { counts[sh]++; workCount++; hours += getShiftHours(sh); }
+        else if (isPublicOff(sh)) publicOff++;
+        else if (isOff(sh)) otherOff++;
+      }
+      summary.push([g.label, s.name, ...AppState.shiftTypes.map(t => counts[t.key]),
+        publicOff, otherOff, workCount, publicOff - (s.maxOff || 0), Math.round(hours * 10) / 10]);
+    });
   });
   const ws2 = XLSX.utils.aoa_to_sheet(summary);
   XLSX.utils.book_append_sheet(wb, ws2, '集計');
@@ -293,6 +404,7 @@ function exportToExcel() {
   toast(`${filename} をダウンロードしました`, 'success');
 }
 
+// CSV エクスポート
 function exportToCSV() {
   if (!AppState.generated) {
     toast('シフトを生成してから実行してください', 'error');
@@ -301,28 +413,32 @@ function exportToCSV() {
   const days = getDaysInMonth(AppState.settings.targetMonth);
   let csv = '';
 
-  const header = ['名前'];
+  const header = ['部門', '名前'];
   for (let d = 1; d <= days; d++) {
     const w = getWeekday(AppState.settings.targetMonth, d);
     header.push(`${d}(${getWeekdayLabel(w)})`);
   }
-  header.push('勤務', '休');
+  header.push('公休', '有給他', '出勤日数', '差', '総労働時間');
   csv += header.map(escapeCSV).join(',') + '\n';
 
-  AppState.staff.forEach(s => {
-    const row = [s.name];
-    let work = 0, off = 0;
-    for (let d = 1; d <= days; d++) {
-      const sh = (AppState.shifts[s.id] || {})[d] || '';
-      row.push(sh);
-      if (isWork(sh)) work++;
-      else if (isOff(sh)) off++;
-    }
-    row.push(work, off);
-    csv += row.map(escapeCSV).join(',') + '\n';
+  getDepartmentGroups().forEach(g => {
+    g.staff.forEach(s => {
+      const row = [g.label, s.name];
+      let work = 0, publicOff = 0, otherOff = 0, hours = 0;
+      for (let d = 1; d <= days; d++) {
+        const sh = (AppState.shifts[s.id] || {})[d] || '';
+        row.push(sh);
+        if (isWork(sh)) { work++; hours += getShiftHours(sh); }
+        else if (isPublicOff(sh)) publicOff++;
+        else if (isOff(sh)) otherOff++;
+      }
+      row.push(publicOff, otherOff, work, publicOff - (s.maxOff || 0), Math.round(hours * 10) / 10);
+      csv += row.map(escapeCSV).join(',') + '\n';
+    });
   });
 
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  // BOM付き（Excel で文字化け回避）
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

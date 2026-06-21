@@ -22,7 +22,7 @@
 
 <nav class="tabs">
   <button class="tab active" data-tab="settings">① 基本設定</button>
-  <button class="tab" data-tab="roles">② 役職マスター</button>
+  <button class="tab" data-tab="roles">② シフト種別</button>
   <button class="tab" data-tab="staff">③ スタッフ管理</button>
   <button class="tab" data-tab="calendar">④ 希望休入力</button>
   <button class="tab" data-tab="generate">⑤ 自動生成</button>
@@ -47,7 +47,7 @@
       <div class="form-row">
         <label>遅→早の禁止</label>
         <label class="switch"><input type="checkbox" id="forbidLateEarly" checked /><span></span></label>
-        <span class="hint">前日が遅番、翌日が早番のパターンを禁止します</span>
+        <span class="hint">前日が遅番系、翌日が早番系のパターンを禁止します</span>
       </div>
       <div class="form-row">
         <label>単発休みのペナルティ</label>
@@ -56,8 +56,17 @@
       </div>
       <div class="form-row">
         <label>焼きなまし反復回数</label>
-        <input type="number" id="maxAttempts" min="10000" max="500000" step="10000" value="100000" />
-        <span class="hint">多いほど精度UP、時間も増えます（推奨: 100000）</span>
+        <input type="number" id="maxAttempts" min="10000" max="500000" step="10000" value="200000" />
+        <span class="hint">多いほど精度UP、時間も増えます（推奨: 200000）</span>
+      </div>
+    </div>
+
+    <!-- ペナルティ重み設定（詳細） -->
+    <div class="card">
+      <h3 style="cursor:pointer" onclick="togglePenaltyPanel()">⚙️ ペナルティ重み設定 <span id="penaltyToggle">▶ 展開</span></h3>
+      <div id="penaltyPanel" style="display:none">
+        <p class="hint">各ルール違反のペナルティ重みを調整できます。大きいほど強く避けます。</p>
+        <div id="penaltyInputs" class="penalty-grid"></div>
       </div>
     </div>
 
@@ -66,50 +75,63 @@
       <div class="form-row">
         <label>入れ替え日（副店長を遅番固定）</label>
         <input type="text" id="replacementDays" placeholder="例: 1,15,28" style="width:200px" />
-        <span class="hint">カンマ区切りで日付を入力（例: 1,15,28）</span>
+        <span class="hint">カンマ区切りで日付を入力</span>
       </div>
       <div class="form-row">
         <label>新装日（副店長を早番固定）</label>
         <input type="text" id="renewalDays" placeholder="例: 10,20" style="width:200px" />
-        <span class="hint">カンマ区切りで日付を入力（例: 10,20）</span>
+        <span class="hint">カンマ区切りで日付を入力</span>
       </div>
+    </div>
+
+    <div class="card">
+      <h3>📌 行事・イベント設定</h3>
+      <p class="hint">研修・健康診断・搬入などの行事を登録すると、対象スタッフはその日必ず出勤になります。</p>
+      <div class="toolbar" style="margin-bottom:8px">
+        <button class="btn btn-primary" id="btnAddEvent">＋ 行事追加</button>
+      </div>
+      <div id="eventList"></div>
     </div>
 
     <div class="card">
       <h3>📖 使い方</h3>
       <ol class="usage">
         <li><b>① 基本設定</b>で対象月・連勤上限などを決めます</li>
-        <li><b>② 役職マスター</b>で「早責」「遅責」「早」「遅」「早総務」「遅総務」など各役職の1日に必要な人数を設定</li>
-        <li><b>③ スタッフ管理</b>で各スタッフの役職、公休数、早遅の希望を登録</li>
-        <li><b>④ 希望休入力</b>で各スタッフの希望休（休/有/公など）をカレンダーに入力</li>
-        <li><b>⑤ 自動生成</b>ボタンで焼きなまし法による最適化を実行</li>
-        <li><b>⑥ シフト表</b>で結果を確認、ドラッグで手動修正もOK</li>
+        <li><b>② シフト種別</b>でシフト名・色・必要人数を自由に設定します</li>
+        <li><b>③ スタッフ管理</b>で各スタッフの担当シフト・公休数・希望を登録します</li>
+        <li><b>④ 希望休入力</b>で各スタッフの希望休をカレンダーに入力します</li>
+        <li><b>⑤ 自動生成</b>ボタンで最適化を実行します</li>
+        <li><b>⑥ シフト表</b>で結果を確認、ドラッグで手動修正もOKです</li>
       </ol>
     </div>
   </section>
 
-  <!-- ② 役職マスター -->
+  <!-- ② シフト種別マスター -->
   <section class="tab-panel" id="panel-roles">
-    <h2>② 役職マスター（各役職の1日あたり必要人数）</h2>
+    <h2>② シフト種別マスター</h2>
     <div class="card">
-      <p class="hint">各シフト種別ごとに、毎日必要な人数を設定します。0にすると不要扱いになります。</p>
-      <table class="role-table">
-        <thead>
-          <tr>
-            <th>シフト記号</th>
-            <th>意味</th>
-            <th>必要人数/日（デフォルト）</th>
-            <th>色</th>
-          </tr>
-        </thead>
-        <tbody id="roleTableBody"></tbody>
-      </table>
-    </div>
-    <div class="card">
-      <h3>📅 日別必要人数（任意・デフォルト値を上書き）</h3>
-      <p class="hint">特定の日だけ必要人数を変えたい場合に入力。空欄はデフォルト値を使用。</p>
-      <div id="dailyReqArea">
-        <p class="hint">対象年月を設定すると入力欄が表示されます。</p>
+      <p class="hint">シフトの種類を自由に追加・編集・削除できます。カテゴリ A = 早番系、B = 遅番系（連勤内の時間帯統一ルールで使用）。</p>
+      <div class="toolbar" style="margin-bottom:8px">
+        <button class="btn btn-primary" id="btnAddShiftType">＋ シフト追加</button>
+      </div>
+      <div class="table-wrap">
+        <table class="role-table">
+          <thead>
+            <tr>
+              <th>記号</th>
+              <th>名称</th>
+              <th>カテゴリ</th>
+              <th>集計対象</th>
+              <th>研修扱い</th>
+              <th>色</th>
+              <th>労働時間<br><small>(h/コマ)</small></th>
+              <th>必要人数/日<br><small>(社員)</small></th>
+              <th>必要人数/日<br><small>(キャスト)</small></th>
+              <th>削除</th>
+            </tr>
+          </thead>
+          <tbody id="roleTableBody"></tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -120,20 +142,20 @@
     <div class="card">
       <div class="toolbar">
         <button class="btn btn-primary" id="btnAddStaff">＋ スタッフ追加</button>
-        <span class="hint">最大20人まで登録できます</span>
       </div>
       <div class="table-wrap">
         <table class="staff-table">
           <thead>
             <tr>
               <th>名前</th>
-              <th>役職タイプ</th>
-              <th>役割タイプ</th>
+              <th>部門</th>
+              <th>役職</th>
+              <th>担当シフト</th>
               <th>公休数<br><small>(月の休み数)</small></th>
-              <th>シフト希望</th>
+              <th>希望<br><small>早可/遅可</small></th>
               <th>早遅バランス</th>
-              <th>前月末連勤<br><small>日数</small></th>
-              <th>前月末シフト<br><small>早/遅</small></th>
+              <th>前月末<br>連勤日数</th>
+              <th>前月末<br>シフト</th>
               <th>備考</th>
               <th>削除</th>
             </tr>
@@ -143,32 +165,11 @@
       </div>
     </div>
     <div class="card">
-      <h3>役職タイプと役割タイプ説明</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-        <div>
-          <h4>役職タイプ（組織上の地位）</h4>
-          <ul class="hint-list">
-            <li><b>副店長</b>: 最上位役職。責任者不在時に代行可能</li>
-            <li><b>チーフ</b>: 副店長不在時に責任者役割を担える</li>
-            <li><b>リーダー</b>: 中堅スタッフ</li>
-            <li><b>スタッフ</b>: 一般スタッフ</li>
-          </ul>
-        </div>
-        <div>
-          <h4>役割タイプ（業務上の役割）</h4>
-          <ul class="hint-list">
-            <li><b>責任者</b>: 早責・遅責に入る</li>
-            <li><b>総務</b>: 早総務・遅総務に入る</li>
-            <li><b>一般</b>: 早・遅に入る</li>
-            <li><b>一般（営業）</b>: 早・遅に入る</li>
-          </ul>
-        </div>
-      </div>
-      <div class="card" style="background:#fff9c4;margin-top:12px">
-        <h4>🔄 代替責任者ロジック</h4>
-        <p>副店長が休みで責任者シフトに入れない場合、役職優先順位に従って代替者が自動的に責任者役割を担います：<br>
-        <b>副店長 → チーフ → リーダー</b></p>
-      </div>
+      <h3>役職タイプ説明</h3>
+      <ul class="hint-list">
+        <li><b>副店長</b>: 毎日少なくとも1人が出勤します（全員が同じ日に休むことを禁止）。特別日は早責/遅責に固定</li>
+        <li><b>チーフ / リーダー / スタッフ</b>: 担当シフト欄で入れるシフトを直接指定してください</li>
+      </ul>
     </div>
   </section>
 
@@ -186,18 +187,11 @@
           <button class="chip-btn" data-mark="季">季</button>
           <button class="chip-btn" data-mark="引">引</button>
           <button class="chip-btn" data-mark="慶">慶</button>
-          <span style="margin-left:12px">出勤系: </span>
-          <button class="chip-btn" data-mark="研">研(研修)</button>
-          <button class="chip-btn" data-mark="早責">早責</button>
-          <button class="chip-btn" data-mark="遅責">遅責</button>
-          <button class="chip-btn" data-mark="早総務">早総務</button>
-          <button class="chip-btn" data-mark="遅総務">遅総務</button>
-          <button class="chip-btn" data-mark="早">早</button>
-          <button class="chip-btn" data-mark="遅">遅</button>
-          <button class="chip-btn" data-mark="夜勤">夜勤</button>
+          <span style="margin-left:12px">出勤系（固定）: </span>
+          <span id="shiftChipContainer"></span>
           <button class="chip-btn" data-mark="">クリア</button>
         </div>
-        <p class="hint" style="margin:8px 0 0">クリックで選択中の記号を入力、ダブルクリックで削除。出勤シフト指定（早/遅/研など）は最適化時にロックされます。</p>
+        <p class="hint" style="margin:8px 0 0">クリックで選択中の記号を入力、ダブルクリックで削除。出勤シフト指定は最適化でロックされます。</p>
       </div>
       <div class="table-wrap">
         <table id="calendarTable" class="calendar-table"></table>
@@ -210,6 +204,11 @@
     <h2>⑤ 自動生成</h2>
     <div class="card">
       <p>設定をもとに焼きなまし法による最適化を実行します。</p>
+      <div class="form-row">
+        <label>生成する案の数</label>
+        <input type="number" id="numCandidates" min="1" max="5" value="3" style="width:60px" />
+        <span class="hint">複数案を生成して最も違反が少ない案を自動採用します（多いほど時間がかかります）</span>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="btnGenerate" class="btn btn-large btn-primary">🚀 シフト自動生成を実行</button>
         <button id="btnCancelGenerate" class="btn btn-large" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button>
@@ -241,19 +240,11 @@
         <button class="btn btn-primary" id="btnExportExcel">📥 Excelエクスポート</button>
         <button class="btn" id="btnExportCSV">📥 CSVエクスポート</button>
         <button class="btn" id="btnRecheck">🔍 ルールチェック</button>
-        <span class="hint">セルをドラッグ&ドロップでスタッフ間/日付間のシフト交換ができます</span>
+        <button class="btn" id="btnClearFixed">🔓 固定をすべて解除</button>
+        <span class="hint">セルをドラッグ&ドロップでシフト交換、クリックで直接編集（編集すると🔒固定されます）</span>
       </div>
-      <div class="legend">
-        <span class="legend-item"><span class="legend-color" style="background:#fde2e2"></span>早責</span>
-        <span class="legend-item"><span class="legend-color" style="background:#fce4b6"></span>早総務</span>
-        <span class="legend-item"><span class="legend-color" style="background:#d4eaf7"></span>早</span>
-        <span class="legend-item"><span class="legend-color" style="background:#d1c4e9"></span>遅責</span>
-        <span class="legend-item"><span class="legend-color" style="background:#c8e6c9"></span>遅総務</span>
-        <span class="legend-item"><span class="legend-color" style="background:#ffe0b2"></span>遅</span>
-        <span class="legend-item"><span class="legend-color" style="background:#263238"></span>夜勤</span>
-        <span class="legend-item"><span class="legend-color" style="background:#eeeeee"></span>休</span>
-        <span class="legend-item"><span class="legend-color" style="background:#ffcdd2;border:2px solid #b71c1c"></span>ルール違反</span>
-      </div>
+      <!-- 凡例：シフト種別から動的生成 -->
+      <div class="legend" id="shiftLegend"></div>
       <div class="table-wrap">
         <table id="resultTable" class="result-table"></table>
       </div>
@@ -273,23 +264,8 @@
   <div class="modal-content">
     <h3>シフト編集</h3>
     <p id="modalTarget"></p>
-    <div class="shift-selector">
-      <button class="shift-option" data-shift="早責">早責</button>
-      <button class="shift-option" data-shift="遅責">遅責</button>
-      <button class="shift-option" data-shift="早総務">早総務</button>
-      <button class="shift-option" data-shift="遅総務">遅総務</button>
-      <button class="shift-option" data-shift="早">早</button>
-      <button class="shift-option" data-shift="遅">遅</button>
-      <button class="shift-option" data-shift="夜勤">夜勤</button>
-      <button class="shift-option" data-shift="休">休</button>
-      <button class="shift-option" data-shift="公">公</button>
-      <button class="shift-option" data-shift="有">有</button>
-      <button class="shift-option" data-shift="研">研</button>
-      <button class="shift-option" data-shift="☆">☆</button>
-      <button class="shift-option" data-shift="季">季</button>
-      <button class="shift-option" data-shift="引">引</button>
-      <button class="shift-option" data-shift="慶">慶</button>
-      <button class="shift-option" data-shift="">クリア</button>
+    <div class="shift-selector" id="shiftOptionContainer">
+      <!-- 出勤シフトは動的生成、休み系は固定 -->
     </div>
     <div class="modal-actions">
       <button id="modalCancel" class="btn">キャンセル</button>

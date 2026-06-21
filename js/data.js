@@ -2,28 +2,25 @@
    data.js - データモデルと定数定義
    =========================================== */
 
-// シフト種別の定義（出勤扱い）
-const SHIFT_TYPES = {
-  EARLY_RESP:  { key: '早責', label: '早番責任者', class: 's-early-resp',  category: 'early',   isResp: true,  isWork: true  },
-  LATE_RESP:   { key: '遅責', label: '遅番責任者', class: 's-late-resp',   category: 'late',    isResp: true,  isWork: true  },
-  EARLY_GEN:   { key: '早総務', label: '早番総務',   class: 's-early-gen',   category: 'early', isResp: false, isWork: true, isGeneral: true },
-  LATE_GEN:    { key: '遅総務', label: '遅番総務',   class: 's-late-gen',    category: 'late',  isResp: false, isWork: true, isGeneral: true },
-  EARLY:       { key: '早',   label: '早番',       class: 's-early',       category: 'early',   isResp: false, isWork: true  },
-  LATE:        { key: '遅',   label: '遅番',       class: 's-late',        category: 'late',    isResp: false, isWork: true  },
-  TRAINING:    { key: '研',   label: '研修',       class: 's-training',    category: 'training', isResp: false, isWork: true, isTraining: true },
-  NIGHT:       { key: '夜勤', label: '夜勤',       class: 's-night',       category: 'night',    isResp: false, isWork: true, isNight: true },
-};
-
+// 休み記号（固定）
+// countsAsPublic: 公休数（maxOff目標）にカウントするか。有給・季節休暇などは公休とは別枠。
 const OFF_TYPES = {
-  '休': { label: '公休',     class: 's-off',      isOff: true, isRequest: true },
-  '公': { label: '公休',     class: 's-public',   isOff: true, isRequest: true },
-  '有': { label: '有給',     class: 's-paid',     isOff: true, isRequest: true },
-  '☆': { label: '希望休',   class: 's-off',      isOff: true, isRequest: true },
-  '季': { label: '季節休暇', class: 's-off',      isOff: true, isRequest: true },
-  '引': { label: '引継',     class: 's-off',      isOff: true, isRequest: true },
-  '慶': { label: '慶弔休',   class: 's-off',      isOff: true, isRequest: true },
+  '休': { label: '公休',     class: 's-off',    isOff: true, countsAsPublic: true  },
+  '公': { label: '公休',     class: 's-public', isOff: true, countsAsPublic: true  },
+  '有': { label: '有給',     class: 's-paid',   isOff: true, countsAsPublic: false },
+  '☆': { label: '希望休',   class: 's-off',    isOff: true, countsAsPublic: true  },
+  '季': { label: '季節休暇', class: 's-off',    isOff: true, countsAsPublic: false },
+  '引': { label: '引継',     class: 's-off',    isOff: true, countsAsPublic: false },
+  '慶': { label: '慶弔休',   class: 's-off',    isOff: true, countsAsPublic: false },
 };
 
+// 部門（社員 / キャスト）
+const DEPARTMENTS = {
+  employee: { label: '社員'     },
+  cast:     { label: 'キャスト' },
+};
+
+// 役職タイプ（副店長の常勤ロジック等で使用）
 const POSITION_TYPES = {
   viceManager: { label: '副店長', priority: 1 },
   chief:       { label: 'チーフ', priority: 2 },
@@ -31,54 +28,100 @@ const POSITION_TYPES = {
   staff:       { label: 'スタッフ', priority: 4 },
 };
 
-const ROLE_TYPES = {
-  responsible: { label: '責任者',       shifts: ['早責', '遅責'] },
-  normal:      { label: '一般',         shifts: ['早', '遅'] },
-  normalSales: { label: '一般（営業）', shifts: ['早', '遅'] },
-  affairs:     { label: '総務',         shifts: ['早総務', '遅総務'] },
-  nightShift:  { label: '夜勤',         shifts: ['夜勤'] },
+// 早遅バランス比率
+const SHIFT_BALANCE = {
+  earlyHeavy: { label: '早番多め',     earlyRatio: 0.7, lateRatio: 0.3 },
+  earlyMore:  { label: '早番やや多め', earlyRatio: 0.6, lateRatio: 0.4 },
+  balanced:   { label: '均等',         earlyRatio: 0.5, lateRatio: 0.5 },
+  lateMore:   { label: '遅番やや多め', earlyRatio: 0.4, lateRatio: 0.6 },
+  lateHeavy:  { label: '遅番多め',     earlyRatio: 0.3, lateRatio: 0.7 },
 };
 
+// カテゴリ希望（早可 = カテゴリA可、遅可 = カテゴリB可）
 const SHIFT_PREFS = ['早可', '遅可'];
 
-const SHIFT_BALANCE = {
-  earlyHeavy:  { label: '早番多め',     earlyRatio: 0.7, lateRatio: 0.3 },
-  earlyMore:   { label: '早番やや多め', earlyRatio: 0.6, lateRatio: 0.4 },
-  balanced:    { label: '均等',         earlyRatio: 0.5, lateRatio: 0.5 },
-  lateMore:    { label: '遅番やや多め', earlyRatio: 0.4, lateRatio: 0.6 },
-  lateHeavy:   { label: '遅番多め',     earlyRatio: 0.3, lateRatio: 0.7 },
+// ---- 旧データ互換用 ROLE_TYPES（loadFromStorage のマイグレーションのみで使用） ----
+const _LEGACY_ROLE_SHIFTS = {
+  responsible: ['早責', '遅責'],
+  normal:      ['早', '遅'],
+  normalSales: ['早', '遅'],
+  affairs:     ['早総務', '遅総務'],
 };
 
+// デフォルトのシフト種別（ユーザーが自由に追加・編集・削除可能）
+// workHours: 1コマあたりの労働時間（総労働時間の集計に使用）
+function getDefaultShiftTypes() {
+  return [
+    { key: '早責',  label: '早番責任者', color: '#fde2e2', category: 'A', countForStaff: true,  isTraining: false, workHours: 8 },
+    { key: '遅責',  label: '遅番責任者', color: '#d1c4e9', category: 'B', countForStaff: true,  isTraining: false, workHours: 8 },
+    { key: '早総務', label: '早番総務',  color: '#fce4b6', category: 'A', countForStaff: true,  isTraining: false, workHours: 8 },
+    { key: '遅総務', label: '遅番総務',  color: '#c8e6c9', category: 'B', countForStaff: true,  isTraining: false, workHours: 8 },
+    { key: '早',    label: '早番',       color: '#d4eaf7', category: 'A', countForStaff: true,  isTraining: false, workHours: 8 },
+    { key: '遅',    label: '遅番',       color: '#ffe0b2', category: 'B', countForStaff: true,  isTraining: false, workHours: 8 },
+    { key: '研',    label: '研修',       color: '#e0f7fa', category: 'A', countForStaff: false, isTraining: true,  workHours: 8 },
+  ];
+}
+
+// デフォルトのペナルティ重み
+const DEFAULT_PENALTIES = {
+  understaff:      10000,  // 人員不足（1人あたり）
+  overstaff:         200,  // 人員超過（1人あたり）
+  respDuplicate:    8000,  // 責任者重複（早責/遅責が同じ時間帯に2人以上）
+  disallowedShift: 50000,  // 担当外シフト
+  consBase:          800,  // 連勤超過（1日超過あたり）
+  consSq:            200,  // 連勤超過（二乗項）
+  lateEarly:        1500,  // 遅→早インターバル不足
+  categorySwitch:    600,  // 連勤中の時間帯切替
+  badRest:           600,  // 遅→休→早
+  singleOff:          50,  // 単発休み
+  singleWork:        200,  // 単発出勤（高すぎると surplus-rest スタッフの圧力で他違反が増えるため抑制）
+  offShortage:       1500,  // 公休不足（1日あたり）
+  offSurplus:         400,  // 公休余剰（未使用 — tryConvertSurplusRest ムーブで自然削減）
+  balanceDiff:         80,  // 早遅バランスずれ（1日あたり）
+  viceManagerRest:   1200,  // 副店長が任意で休む
+  viceManagerDailyAbsent: 9000, // その日、副店長が1人も出勤していない（毎日1人は必須）
+  hierarchyViolation: 3000, // 責任者ヒエラルキー違反（より上位者が働いているのに下位者が責任者）
+  prefMismatch:      12000, // prefs希望違反（早可/遅可 に反するシフト）
+  eventAbsent:       20000, // イベント日に対象スタッフが休んでいる
+  restPairBonus:       100, // 2連休以上のまとまった休みへのボーナス（スコアから減算）
+};
+
+// アプリケーションの状態
 const AppState = {
   settings: {
     targetMonth: '',
     maxConsecutive: 4,
     forbidLateEarly: true,
     penaltySingleOff: true,
-    maxAttempts: 100000,
+    maxAttempts: 250000,
+    penalties: { ...DEFAULT_PENALTIES },
   },
+  // ユーザーが自由に定義・編集できるシフト種別
+  shiftTypes: getDefaultShiftTypes(),
+  // シフト種別ごとの1日の必要人数 { shiftKey: 人数 }（社員部門）
   roleRequirements: {
-    '早責': 1, '遅責': 1, '早総務': 1, '遅総務': 1, '早': 2, '遅': 2, '夜勤': 0,
+    '早責': 1, '遅責': 1, '早総務': 1, '遅総務': 1, '早': 2, '遅': 2,
   },
-  dailyRequirements: {},
-  roleColors: {
-    '早責': '#fde2e2', '遅責': '#d1c4e9', '早総務': '#fce4b6', '遅総務': '#c8e6c9',
-    '早': '#d4eaf7', '遅': '#ffe0b2', '夜勤': '#263238',
-  },
+  // キャスト部門の1日の必要人数 { shiftKey: 人数 }
+  roleRequirementsCast: {},
+  // スタッフ一覧
+  // 各スタッフ: { id, name, department, positionType, allowedShifts[], maxOff, prefs[], balance, prevConsecutive, prevLastShift, note }
   staff: [],
-  requests: {},
-  shifts: {},
-  fixedShifts: {},
-  specialDays: {},
-  violations: [],
-  generated: false,
+  requests:    {},  // 希望休 { staffId: { day: '休' } }
+  shifts:      {},  // 生成結果 { staffId: { day: '早' } }
+  fixedShifts: {},  // 手動固定 { staffId: { day: '早責' } }
+  specialDays: {},  // 特別日 { day: 'replacement' | 'renewal' }
+  events:      [],  // 行事 [{ day, name, staffIds: [] }] — 対象スタッフはその日必ず出勤
+  violations:  [],
+  generated:   false,
 };
 
 let _staffIdCounter = 1;
-
 function newStaffId() {
   return 'S' + (_staffIdCounter++).toString().padStart(3, '0');
 }
+
+// ===== ユーティリティ =====
 
 function getDaysInMonth(yearMonth) {
   if (!yearMonth) return 31;
@@ -96,73 +139,120 @@ function getWeekdayLabel(w) {
   return ['日', '月', '火', '水', '木', '金', '土'][w];
 }
 
+// シフト種別オブジェクトを取得（動的）
+function getShiftType(shift) {
+  return AppState.shiftTypes.find(t => t.key === shift) || null;
+}
+
+function isWork(shift) {
+  return AppState.shiftTypes.some(t => t.key === shift);
+}
+
+function isOff(shift) {
+  return !!OFF_TYPES[shift];
+}
+
+// 公休数（maxOff目標）にカウントされる休みか（有給・季節休暇などは対象外）
+function isPublicOff(shift) {
+  const t = OFF_TYPES[shift];
+  return t ? !!t.countsAsPublic : false;
+}
+
+// 1コマあたりの労働時間（未設定シフトは8h扱い）
+function getShiftHours(shift) {
+  const t = getShiftType(shift);
+  if (!t) return 0;
+  return t.workHours != null ? Number(t.workHours) : 8;
+}
+
+// スタッフの部門（未設定は社員）
+function getStaffDepartment(s) {
+  return s.department === 'cast' ? 'cast' : 'employee';
+}
+
+// 部門ごとのグループ（スタッフが存在する部門のみ返す）
+function getDepartmentGroups(staffList) {
+  const all = staffList || AppState.staff;
+  const groups = [];
+  const emp  = all.filter(s => getStaffDepartment(s) === 'employee');
+  const cast = all.filter(s => getStaffDepartment(s) === 'cast');
+  if (emp.length)  groups.push({ key: 'employee', label: '社員',     staff: emp,  reqs: AppState.roleRequirements });
+  if (cast.length) groups.push({ key: 'cast',     label: 'キャスト', staff: cast, reqs: AppState.roleRequirementsCast || {} });
+  return groups;
+}
+
+function isEarly(shift) {
+  const t = getShiftType(shift);
+  return t ? t.category === 'A' : false;
+}
+
+function isLate(shift) {
+  const t = getShiftType(shift);
+  return t ? t.category === 'B' : false;
+}
+
+function isTraining(shift) {
+  const t = getShiftType(shift);
+  return t ? t.isTraining : false;
+}
+
+// 研修も早番カテゴリ（A）として扱う
+function isEarlyCategory(shift) {
+  return isEarly(shift) || isTraining(shift);
+}
+
+// 連勤カテゴリ（'A' / 'B' / null）
+function getShiftCategory(shift) {
+  if (isLate(shift)) return 'B';
+  if (isEarlyCategory(shift)) return 'A';
+  return null;
+}
+
+function isCountableWork(shift) {
+  const t = getShiftType(shift);
+  return t ? (t.countForStaff && !t.isTraining) : false;
+}
+
+// シフトセルの CSS クラス（オフ系はクラスで色管理、出勤系はインラインスタイル）
 function getShiftClass(shift) {
   if (!shift) return 's-empty';
-  if (SHIFT_TYPES[shiftKeyToEnum(shift)]) return SHIFT_TYPES[shiftKeyToEnum(shift)].class;
+  if (getShiftType(shift)) return 's-work-cell'; // 出勤系（色はインラインスタイルで）
   if (OFF_TYPES[shift]) return OFF_TYPES[shift].class;
   return 's-empty';
 }
 
-function shiftKeyToEnum(key) {
-  for (const [k, v] of Object.entries(SHIFT_TYPES)) {
-    if (v.key === key) return k;
-  }
-  return null;
+// 出勤シフトのインラインスタイル文字列
+function getShiftStyle(shift) {
+  const t = getShiftType(shift);
+  return t ? `background-color:${t.color};` : '';
 }
 
-function isOff(shift)   { return !!OFF_TYPES[shift]; }
-function isWork(shift)  { return !!shiftKeyToEnum(shift); }
-
-function isEarly(shift) {
-  const e = shiftKeyToEnum(shift);
-  return e ? SHIFT_TYPES[e].category === 'early' : false;
-}
-
-function isLate(shift) {
-  const e = shiftKeyToEnum(shift);
-  return e ? SHIFT_TYPES[e].category === 'late' : false;
-}
-
-function isTraining(shift) { return shift === '研'; }
-function isNight(shift)    { return shift === '夜勤'; }
-
-function getDayReq(d, k) {
-  const dr = AppState.dailyRequirements;
-  if (dr && dr[d] && dr[d][k] !== undefined) return dr[d][k];
-  return AppState.roleRequirements[k] || 0;
-}
-
-function isCountableWork(shift)  { return isWork(shift) && !isTraining(shift); }
-function isEarlyCategory(shift)  { return isEarly(shift) || isTraining(shift); }
-
-function getShiftCategory(shift) {
-  if (isNight(shift)) return 'night';
-  if (isLate(shift))  return 'late';
-  if (isEarlyCategory(shift)) return 'early';
-  return null;
-}
+// ===== ローカルストレージ =====
 
 function saveToStorage() {
   try {
-    const data = {
-      version: 3,
-      settings: AppState.settings,
-      roleRequirements: AppState.roleRequirements,
-      dailyRequirements: AppState.dailyRequirements,
-      roleColors: AppState.roleColors,
-      staff: AppState.staff,
-      requests: AppState.requests,
-      shifts: AppState.shifts,
-      fixedShifts: AppState.fixedShifts,
-      specialDays: AppState.specialDays,
-      violations: AppState.violations,
-      generated: AppState.generated,
+    localStorage.setItem('shiftAppData', JSON.stringify({
+      version: 4,
+      settings:             AppState.settings,
+      shiftTypes:           AppState.shiftTypes,
+      roleRequirements:     AppState.roleRequirements,
+      roleRequirementsCast: AppState.roleRequirementsCast,
+      staff:                AppState.staff,
+      requests:             AppState.requests,
+      shifts:               AppState.shifts,
+      fixedShifts:          AppState.fixedShifts,
+      specialDays:          AppState.specialDays,
+      events:               AppState.events,
+      violations:           AppState.violations,
+      generated:            AppState.generated,
       _staffIdCounter,
       savedAt: new Date().toISOString(),
-    };
-    localStorage.setItem('shiftAppData', JSON.stringify(data));
+    }));
     return true;
-  } catch (e) { console.error('保存エラー', e); return false; }
+  } catch (e) {
+    console.error('保存エラー', e);
+    return false;
+  }
 }
 
 function loadFromStorage() {
@@ -170,74 +260,119 @@ function loadFromStorage() {
   if (!raw) return false;
   try {
     const data = JSON.parse(raw);
-    Object.assign(AppState.settings, data.settings || {});
+
+    // settings（penalties がなければデフォルトで補完）
+    const penalties = Object.assign({ ...DEFAULT_PENALTIES }, (data.settings || {}).penalties || {});
+    Object.assign(AppState.settings, data.settings || {}, { penalties });
+
+    // shiftTypes（v3以降）。workHours 未設定の旧データは 8h で補完
+    AppState.shiftTypes = (data.shiftTypes || getDefaultShiftTypes()).map(t =>
+      Object.assign({ workHours: 8 }, t));
+
+    // roleRequirements
     Object.assign(AppState.roleRequirements, data.roleRequirements || {});
-    AppState.dailyRequirements = data.dailyRequirements || {};
-    Object.assign(AppState.roleColors, data.roleColors || {});
-    AppState.staff = (data.staff || []).map(s => ({
-      id: s.id,
-      name: s.name || '',
-      positionType: s.positionType || 'staff',
-      roleType: s.roleType || 'normal',
-      maxOff: s.maxOff != null ? s.maxOff : 9,
-      prefs: Array.isArray(s.prefs) ? s.prefs : ['早可', '遅可'],
-      balance: s.balance || 'balanced',
-      prevConsecutive: s.prevConsecutive || 0,
-      prevLastShift: s.prevLastShift || '',
-      note: s.note || '',
-    }));
-    AppState.requests = data.requests || {};
-    AppState.shifts = data.shifts || {};
+    AppState.roleRequirementsCast = data.roleRequirementsCast || {};
+
+    // events（v4以降）
+    AppState.events = Array.isArray(data.events) ? data.events : [];
+
+    // スタッフ（旧データ v2: roleType → allowedShifts へマイグレーション）
+    AppState.staff = (data.staff || []).map(s => {
+      let allowedShifts = Array.isArray(s.allowedShifts) ? s.allowedShifts : null;
+      if (!allowedShifts) {
+        // 旧 roleType から allowedShifts を導出
+        allowedShifts = (_LEGACY_ROLE_SHIFTS[s.roleType] || ['早', '遅']).slice();
+        // 旧 positionType による代替追加
+        if (s.positionType === 'viceManager' || s.positionType === 'chief') {
+          if (!allowedShifts.includes('早責')) allowedShifts.push('早責');
+          if (!allowedShifts.includes('遅責')) allowedShifts.push('遅責');
+        }
+        if ((s.positionType === 'leader' && (s.roleType === 'normal' || s.roleType === 'normalSales')) ||
+            (s.positionType === 'staff'  &&  s.roleType === 'normal') ||
+             s.positionType === 'chief') {
+          if (!allowedShifts.includes('早総務')) allowedShifts.push('早総務');
+          if (!allowedShifts.includes('遅総務')) allowedShifts.push('遅総務');
+        }
+      }
+      return {
+        id:              s.id,
+        name:            s.name || '',
+        department:      s.department === 'cast' ? 'cast' : 'employee',
+        positionType:    s.positionType || 'staff',
+        allowedShifts,
+        maxOff:          s.maxOff != null ? s.maxOff : 9,
+        prefs:           Array.isArray(s.prefs) ? s.prefs : ['早可', '遅可'],
+        balance:         s.balance || 'balanced',
+        prevConsecutive: s.prevConsecutive || 0,
+        prevLastShift:   s.prevLastShift || '',
+        note:            s.note || '',
+      };
+    });
+
+    AppState.requests    = data.requests    || {};
+    AppState.shifts      = data.shifts      || {};
     AppState.fixedShifts = data.fixedShifts || {};
     AppState.specialDays = data.specialDays || {};
-    AppState.violations = data.violations || [];
-    AppState.generated = data.generated === true;
+    AppState.violations  = data.violations  || [];
+    AppState.generated   = data.generated === true;
     _staffIdCounter = data._staffIdCounter || (AppState.staff.length + 1);
     return true;
-  } catch (e) { console.error('読込エラー', e); return false; }
+  } catch (e) {
+    console.error('読込エラー', e);
+    return false;
+  }
 }
 
 function resetAll() {
-  AppState.staff = [];
-  AppState.requests = {};
-  AppState.shifts = {};
-  AppState.fixedShifts = {};
-  AppState.specialDays = {};
-  AppState.violations = [];
-  AppState.generated = false;
+  AppState.staff        = [];
+  AppState.requests     = {};
+  AppState.shifts       = {};
+  AppState.fixedShifts  = {};
+  AppState.specialDays  = {};
+  AppState.events       = [];
+  AppState.violations   = [];
+  AppState.generated    = false;
+  AppState.shiftTypes   = getDefaultShiftTypes();
+  AppState.roleRequirements = {
+    '早責': 1, '遅責': 1, '早総務': 1, '遅総務': 1, '早': 2, '遅': 2,
+  };
+  AppState.roleRequirementsCast = {};
+  AppState.settings.penalties = { ...DEFAULT_PENALTIES };
   _staffIdCounter = 1;
   localStorage.removeItem('shiftAppData');
 }
 
+// サンプルスタッフ（allowedShifts を直接指定）
 function addSampleStaff() {
   const samples = [
-    { name: '田中 太郎',   positionType: 'viceManager', roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
-    { name: '佐藤 花子',   positionType: 'chief',       roleType: 'responsible', maxOff: 9, prefs: ['早可', '遅可'], balance: 'earlyMore' },
-    { name: '鈴木 一郎',   positionType: 'chief',       roleType: 'affairs',     maxOff: 9, prefs: ['早可', '遅可'], balance: 'lateMore' },
-    { name: '高橋 美咲',   positionType: 'leader',      roleType: 'affairs',     maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
-    { name: '伊藤 健太',   positionType: 'leader',      roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'earlyHeavy' },
-    { name: '渡辺 由美',   positionType: 'leader',      roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'lateHeavy' },
-    { name: '山本 拓也',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
-    { name: '中村 さくら', positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'earlyMore' },
-    { name: '小林 健',     positionType: 'staff',       roleType: 'normalSales', maxOff: 9, prefs: ['早可', '遅可'], balance: 'lateMore' },
-    { name: '加藤 真理',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可'],         balance: 'earlyHeavy' },
-    { name: '吉田 翔',     positionType: 'staff',       roleType: 'normalSales', maxOff: 9, prefs: ['遅可'],         balance: 'lateHeavy' },
-    { name: '山田 恵子',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
-    { name: '松本 大輔',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
-    { name: '井上 千秋',   positionType: 'staff',       roleType: 'normal',      maxOff: 9, prefs: ['早可', '遅可'], balance: 'balanced' },
+    { name: '田中 太郎',   positionType: 'viceManager', allowedShifts: ['早責','遅責'],                                     maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: '佐藤 花子',   positionType: 'chief',       allowedShifts: ['早責','遅責','早総務','遅総務'],                    maxOff: 9, prefs: ['早可','遅可'], balance: 'earlyMore'  },
+    { name: '鈴木 一郎',   positionType: 'chief',       allowedShifts: ['早総務','遅総務','早責','遅責'],                    maxOff: 9, prefs: ['早可','遅可'], balance: 'lateMore'   },
+    { name: '高橋 美咲',   positionType: 'leader',      allowedShifts: ['早総務','遅総務'],                                  maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: '伊藤 健太',   positionType: 'leader',      allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'earlyHeavy' },
+    { name: '渡辺 由美',   positionType: 'leader',      allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'lateHeavy'  },
+    { name: '山本 拓也',   positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: '中村 さくら', positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'earlyMore'  },
+    { name: '小林 健',     positionType: 'staff',       allowedShifts: ['早','遅'],                                          maxOff: 9, prefs: ['早可','遅可'], balance: 'lateMore'   },
+    { name: '加藤 真理',   positionType: 'staff',       allowedShifts: ['早','早総務'],                                       maxOff: 9, prefs: ['早可'],         balance: 'earlyHeavy' },
+    { name: '吉田 翔',     positionType: 'staff',       allowedShifts: ['遅'],                                               maxOff: 9, prefs: ['遅可'],         balance: 'lateHeavy'  },
+    { name: '山田 恵子',   positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: '松本 大輔',   positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: '井上 千秋',   positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
   ];
   samples.forEach(s => {
     AppState.staff.push({
-      id: newStaffId(),
-      name: s.name,
-      positionType: s.positionType,
-      roleType: s.roleType,
-      maxOff: s.maxOff,
-      prefs: s.prefs,
-      balance: s.balance || 'balanced',
+      id:              newStaffId(),
+      name:            s.name,
+      department:      'employee',
+      positionType:    s.positionType,
+      allowedShifts:   s.allowedShifts,
+      maxOff:          s.maxOff,
+      prefs:           s.prefs,
+      balance:         s.balance,
       prevConsecutive: 0,
-      prevLastShift: '',
-      note: '',
+      prevLastShift:   '',
+      note:            '',
     });
   });
 }
