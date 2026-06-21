@@ -212,6 +212,7 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
 
   // ステップ1: 各スタッフに休日を配置
   // ロック済みの休日数を考慮する
+  const maxCons = AppState.settings.maxConsecutive || 4;
   staff.forEach(s => {
     let alreadyOff = 0;
     const unlockedDays = [];
@@ -220,10 +221,29 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
       if (!locked[s.id][d]) unlockedDays.push(d);
     }
     const needMoreOff = Math.max(0, (s.maxOff || 0) - alreadyOff);
-    
+
+    // === 月またぎ連勤の考慮（前月末連勤を初期解へ反映）===
+    // 前月末から prevConsecutive 日連勤している場合、月初は
+    // (maxCons - prevConsecutive) 日働くと連勤上限に達する。
+    // 上限を超える前に必ず休みが入るよう、早い位置に休日を1つ確保する。
+    const prevCons = s.prevConsecutive || 0;
+    let forcedRestDay = null;
+    if (prevCons > 0) {
+      const canWorkMore = Math.max(0, maxCons - prevCons); // あと何日働けるか
+      const restByDay = Math.min(canWorkMore + 1, days);   // この日までに休みが必要
+      for (let d = 1; d <= restByDay; d++) {
+        if (!locked[s.id][d]) { forcedRestDay = d; break; } // 最も早い空き日を休みに
+      }
+    }
+
     // 等間隔気味に休みを配置（連勤を避ける）
     shuffleArray(unlockedDays);
-    const offDays = unlockedDays.slice(0, needMoreOff);
+    let offDays = unlockedDays.slice(0, needMoreOff);
+    if (forcedRestDay != null && !offDays.includes(forcedRestDay)) {
+      // 強制休を加え、総休日数を保つため末尾の1つを落とす
+      offDays = offDays.slice(0, Math.max(0, needMoreOff - 1));
+      offDays.push(forcedRestDay);
+    }
     offDays.forEach(d => {
       shifts[s.id][d] = '休';
     });
@@ -500,11 +520,16 @@ function calculateScore(shifts, allowedShifts, days, substitutePriority) {
       }
     }
 
-    // 公休数の上限/下限（maxOff）- ピッタリ目標に
+    // 公休数の目標（maxOff）への一致
+    // 不足（働かせ過ぎ）は重く罰する。責任者など需要の高いスタッフほど
+    // 公休が削られて偏りやすいため、不足ペナルティを大きくして
+    // できる限り全員に目標公休数を確保する（人数不足10000は超えない範囲）。
     const maxOff = s.maxOff || 0;
     const offDiff = offCount - maxOff;
-    if (offDiff !== 0) {
-      score += Math.abs(offDiff) * 300;
+    if (offDiff < 0) {
+      score += Math.abs(offDiff) * 1500; // 公休不足は重い（偏り防止）
+    } else if (offDiff > 0) {
+      score += offDiff * 150;            // 余剰は軽め（人員過多なら自然に増える）
     }
   });
 
