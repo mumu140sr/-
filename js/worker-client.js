@@ -65,6 +65,7 @@ function optimizeScheduleViaWorker(progressCallback) {
       appState: {
         settings: AppState.settings,
         roleRequirements: AppState.roleRequirements,
+        dailyRequirements: AppState.dailyRequirements,
         roleColors: AppState.roleColors,
         staff: AppState.staff,
         requests: AppState.requests,

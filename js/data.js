@@ -12,6 +12,8 @@ const SHIFT_TYPES = {
   LATE:        { key: '遅',   label: '遅番',       class: 's-late',        category: 'late',    isResp: false, isWork: true  },
   // 研修: 出勤扱いだが特殊カテゴリ（必要人数には含めない・公休にも含めない）
   TRAINING:    { key: '研',   label: '研修',       class: 's-training',    category: 'training', isResp: false, isWork: true, isTraining: true },
+  // 夜勤: 翌日は必ず休み
+  NIGHT:       { key: '夜勤', label: '夜勤',       class: 's-night',       category: 'night',    isResp: false, isWork: true, isNight: true },
 };
 
 // 休み記号の定義
@@ -39,6 +41,7 @@ const ROLE_TYPES = {
   normal:      { label: '一般',         shifts: ['早', '遅'] },
   normalSales: { label: '一般（営業）', shifts: ['早', '遅'] },
   affairs:     { label: '総務',         shifts: ['早総務', '遅総務'] },
+  nightShift:  { label: '夜勤',         shifts: ['夜勤'] },
 };
 
 // シフト希望の選択肢
@@ -62,7 +65,7 @@ const AppState = {
     penaltySingleOff: true,
     maxAttempts: 100000,
   },
-  // 役職マスター: 各日に必要な人数
+  // 役職マスター: 各日に必要な人数（デフォルト）
   roleRequirements: {
     '早責': 1,
     '遅責': 1,
@@ -70,7 +73,10 @@ const AppState = {
     '遅総務': 1,
     '早':   2,
     '遅':   2,
+    '夜勤': 0,
   },
+  // 日別必要人数（上書き）: { day: { shiftKey: count } }
+  dailyRequirements: {},
   // 役職カラー（カスタマイズ用）
   roleColors: {
     '早責': '#fde2e2',
@@ -79,6 +85,7 @@ const AppState = {
     '遅総務': '#c8e6c9',
     '早':   '#d4eaf7',
     '遅':   '#ffe0b2',
+    '夜勤': '#263238',
   },
   // スタッフ: [{id, name, positionType, roleType, maxOff, prefs:[], prevConsecutive, note}]
   staff: [],
@@ -160,6 +167,18 @@ function isTraining(shift) {
   return shift === '研';
 }
 
+// 夜勤判定
+function isNight(shift) {
+  return shift === '夜勤';
+}
+
+// 日別必要人数（日ごとの上書き → なければデフォルト）
+function getDayReq(d, k) {
+  const dr = AppState.dailyRequirements;
+  if (dr && dr[d] && dr[d][k] !== undefined) return dr[d][k];
+  return AppState.roleRequirements[k] || 0;
+}
+
 // 通常の必要人数カウント対象シフトか（研修は除外）
 function isCountableWork(shift) {
   return isWork(shift) && !isTraining(shift);
@@ -170,10 +189,11 @@ function isEarlyCategory(shift) {
   return isEarly(shift) || isTraining(shift);
 }
 
-// 連続シフトの時間帯判定（早番カテゴリ or 遅番カテゴリ or null）
+// 連続シフトの時間帯判定
 function getShiftCategory(shift) {
+  if (isNight(shift)) return 'night';
   if (isLate(shift)) return 'late';
-  if (isEarlyCategory(shift)) return 'early';  // 早番・早責・早総務・研 を同一カテゴリに
+  if (isEarlyCategory(shift)) return 'early';
   return null;
 }
 
@@ -181,9 +201,10 @@ function getShiftCategory(shift) {
 function saveToStorage() {
   try {
     const data = {
-      version: 2,  // データスキーマバージョン
+      version: 3,
       settings: AppState.settings,
       roleRequirements: AppState.roleRequirements,
+      dailyRequirements: AppState.dailyRequirements,
       roleColors: AppState.roleColors,
       staff: AppState.staff,
       requests: AppState.requests,
@@ -210,6 +231,7 @@ function loadFromStorage() {
     const data = JSON.parse(raw);
     Object.assign(AppState.settings, data.settings || {});
     Object.assign(AppState.roleRequirements, data.roleRequirements || {});
+    AppState.dailyRequirements = data.dailyRequirements || {};
     Object.assign(AppState.roleColors, data.roleColors || {});
     AppState.staff = (data.staff || []).map(s => ({
       // 古いデータとの下位互換のためデフォルトを補完

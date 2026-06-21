@@ -20,6 +20,7 @@ self.addEventListener('message', async (e) => {
     const incoming = msg.appState || {};
     Object.assign(AppState.settings, incoming.settings || {});
     AppState.roleRequirements = incoming.roleRequirements || AppState.roleRequirements;
+    AppState.dailyRequirements = incoming.dailyRequirements || {};
     AppState.roleColors = incoming.roleColors || AppState.roleColors;
     AppState.staff = incoming.staff || [];
     AppState.requests = incoming.requests || {};

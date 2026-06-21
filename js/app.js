@@ -249,7 +249,7 @@ function exportToExcel() {
   });
 
   // 集計行
-  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅'];
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '夜勤'];
   shiftKeys.forEach(key => {
     const req = AppState.roleRequirements[key] || 0;
     if (req === 0) return;

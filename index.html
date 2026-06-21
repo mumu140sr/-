@@ -98,12 +98,19 @@
           <tr>
             <th>シフト記号</th>
             <th>意味</th>
-            <th>必要人数/日</th>
+            <th>必要人数/日（デフォルト）</th>
             <th>色</th>
           </tr>
         </thead>
         <tbody id="roleTableBody"></tbody>
       </table>
+    </div>
+    <div class="card">
+      <h3>📅 日別必要人数（任意・デフォルト値を上書き）</h3>
+      <p class="hint">特定の日だけ必要人数を変えたい場合に入力。空欄はデフォルト値を使用。</p>
+      <div id="dailyReqArea">
+        <p class="hint">対象年月を設定すると入力欄が表示されます。</p>
+      </div>
     </div>
   </section>
 
@@ -187,6 +194,7 @@
           <button class="chip-btn" data-mark="遅総務">遅総務</button>
           <button class="chip-btn" data-mark="早">早</button>
           <button class="chip-btn" data-mark="遅">遅</button>
+          <button class="chip-btn" data-mark="夜勤">夜勤</button>
           <button class="chip-btn" data-mark="">クリア</button>
         </div>
         <p class="hint" style="margin:8px 0 0">クリックで選択中の記号を入力、ダブルクリックで削除。出勤シフト指定（早/遅/研など）は最適化時にロックされます。</p>
@@ -242,6 +250,7 @@
         <span class="legend-item"><span class="legend-color" style="background:#d1c4e9"></span>遅責</span>
         <span class="legend-item"><span class="legend-color" style="background:#c8e6c9"></span>遅総務</span>
         <span class="legend-item"><span class="legend-color" style="background:#ffe0b2"></span>遅</span>
+        <span class="legend-item"><span class="legend-color" style="background:#263238"></span>夜勤</span>
         <span class="legend-item"><span class="legend-color" style="background:#eeeeee"></span>休</span>
         <span class="legend-item"><span class="legend-color" style="background:#ffcdd2;border:2px solid #b71c1c"></span>ルール違反</span>
       </div>
@@ -271,6 +280,7 @@
       <button class="shift-option" data-shift="遅総務">遅総務</button>
       <button class="shift-option" data-shift="早">早</button>
       <button class="shift-option" data-shift="遅">遅</button>
+      <button class="shift-option" data-shift="夜勤">夜勤</button>
       <button class="shift-option" data-shift="休">休</button>
       <button class="shift-option" data-shift="公">公</button>
       <button class="shift-option" data-shift="有">有</button>

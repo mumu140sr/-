@@ -250,8 +250,8 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
   });
 
   // ステップ2: 各日のシフトに割り当て
-  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅'];
-  
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '夜勤'];
+
   for (let d = 1; d <= days; d++) {
     // この日に勤務可能な（空きの）スタッフ
     const availableStaff = staff
@@ -260,7 +260,7 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
     shuffleArray(availableStaff);
 
     shiftKeys.forEach(sh => {
-      const req = AppState.roleRequirements[sh] || 0;
+      const req = getDayReq(d, sh);
       let placed = 0;
       for (let i = 0; i < availableStaff.length && placed < req; i++) {
         const s = availableStaff[i];
@@ -268,6 +268,10 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
         if (allowedShifts[s.id].includes(sh)) {
           shifts[s.id][d] = sh;
           placed++;
+          // 夜勤配置時は翌日を強制休に
+          if (sh === '夜勤' && d < days && !locked[s.id][d + 1]) {
+            shifts[s.id][d + 1] = '休';
+          }
         }
       }
     });
@@ -387,7 +391,7 @@ function calculateScore(shifts, allowedShifts, days, substitutePriority) {
   const maxCons = settings.maxConsecutive;
 
   // ===== 縦のルール: 各日に必要人数を確保 =====
-  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅'];
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '夜勤'];
   for (let d = 1; d <= days; d++) {
     const counts = {};
     shiftKeys.forEach(k => counts[k] = 0);
@@ -396,11 +400,11 @@ function calculateScore(shifts, allowedShifts, days, substitutePriority) {
       if (counts[sh] !== undefined) counts[sh]++;
     });
     shiftKeys.forEach(k => {
-      const req = AppState.roleRequirements[k] || 0;
+      const req = getDayReq(d, k);
       if (req === 0) return;
       const diff = req - counts[k];
-      if (diff > 0) score += diff * 10000; // 不足は重ペナルティ
-      else if (diff < 0) score += Math.abs(diff) * 200; // 過剰
+      if (diff > 0) score += diff * 10000;
+      else if (diff < 0) score += Math.abs(diff) * 200;
     });
   }
 
@@ -465,6 +469,12 @@ function calculateScore(shifts, allowedShifts, days, substitutePriority) {
           if (prevCat && curCat && prevCat !== curCat) {
             score += 600; // 連勤内での時間帯切り替えにペナルティ
           }
+        }
+
+        // 夜勤の翌日は必ず休み
+        if (isNight(cur) && d < days) {
+          const next = shifts[s.id][d + 1];
+          if (!isOff(next)) score += 5000;
         }
 
         // 早遅カウント（研修は早番カテゴリだが、バランス計算からは除外）
@@ -677,8 +687,25 @@ function checkViolations(shifts) {
     }
   });
 
+  // 夜勤翌日の必ず休みチェック
+  staff.forEach(s => {
+    for (let d = 1; d < days; d++) {
+      const cur = (shifts[s.id] || {})[d] || '';
+      if (isNight(cur)) {
+        const next = (shifts[s.id] || {})[d + 1] || '';
+        if (!isOff(next)) {
+          violations.push({
+            staffId: s.id, day: d + 1, type: 'night-rest',
+            message: `🚨 夜勤明け（${d + 1}日）が休みになっていません`,
+            action: '夜勤の翌日は必ず休みにしてください',
+          });
+        }
+      }
+    }
+  });
+
   // 各日の必要人数チェック
-  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅'];
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '夜勤'];
   for (let d = 1; d <= days; d++) {
     const counts = {};
     shiftKeys.forEach(k => counts[k] = 0);
@@ -687,7 +714,7 @@ function checkViolations(shifts) {
       if (counts[sh] !== undefined) counts[sh]++;
     });
     shiftKeys.forEach(k => {
-      const req = AppState.roleRequirements[k] || 0;
+      const req = getDayReq(d, k);
       if (req === 0) return;
       if (counts[k] < req) {
         violations.push({

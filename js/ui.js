@@ -106,6 +106,7 @@ function setupSettingsPanel() {
     AppState.settings.targetMonth = $month.value;
     renderCalendar();
     renderResultTable();
+    renderDailyReqTable();
   });
   $maxCons.addEventListener('change', () => {
     AppState.settings.maxConsecutive = parseInt($maxCons.value) || 4;
@@ -169,6 +170,61 @@ function renderRoleTable() {
     input.addEventListener('change', e => {
       const role = e.target.dataset.role;
       AppState.roleColors[role] = e.target.value;
+      autoSave();
+    });
+  });
+
+  // 日別必要人数テーブル
+  renderDailyReqTable();
+}
+
+function renderDailyReqTable() {
+  const area = document.getElementById('dailyReqArea');
+  if (!area) return;
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  if (!AppState.settings.targetMonth) {
+    area.innerHTML = '<p class="hint">対象年月を設定すると入力欄が表示されます。</p>';
+    return;
+  }
+
+  // シフトキー（研修・空カテゴリ除く）
+  const keys = Object.values(SHIFT_TYPES).map(v => v.key);
+
+  let html = '<div class="table-wrap"><table class="daily-req-table"><thead><tr><th>シフト</th>';
+  for (let d = 1; d <= days; d++) {
+    const w = getWeekday(AppState.settings.targetMonth, d);
+    const cls = w === 0 ? 'weekend-sun' : w === 6 ? 'weekend-sat' : '';
+    html += `<th class="${cls}">${d}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  keys.forEach(key => {
+    html += `<tr><th>${key}</th>`;
+    for (let d = 1; d <= days; d++) {
+      const dr = AppState.dailyRequirements;
+      const val = (dr[d] && dr[d][key] !== undefined) ? dr[d][key] : '';
+      html += `<td><input type="number" min="0" max="20" placeholder="${AppState.roleRequirements[key] || 0}" value="${val}" data-day="${d}" data-key="${key}" class="daily-req-input"/></td>`;
+    }
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  area.innerHTML = html;
+
+  area.querySelectorAll('.daily-req-input').forEach(input => {
+    input.addEventListener('change', e => {
+      const d = parseInt(e.target.dataset.day);
+      const key = e.target.dataset.key;
+      const val = e.target.value.trim();
+      if (!AppState.dailyRequirements[d]) AppState.dailyRequirements[d] = {};
+      if (val === '') {
+        delete AppState.dailyRequirements[d][key];
+        if (Object.keys(AppState.dailyRequirements[d]).length === 0) {
+          delete AppState.dailyRequirements[d];
+        }
+      } else {
+        AppState.dailyRequirements[d][key] = parseInt(val) || 0;
+      }
       autoSave();
     });
   });
@@ -412,19 +468,23 @@ function renderResultTable() {
   });
 
   // 集計行
-  const summaryShiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅'];
+  const summaryShiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '夜勤'];
   summaryShiftKeys.forEach(key => {
-    const required = AppState.roleRequirements[key] || 0;
-    if (required === 0) return;
+    // この月でいずれかの日に必要人数>0 なら行を表示
+    let hasAny = false;
+    for (let d = 1; d <= days; d++) { if (getDayReq(d, key) > 0) { hasAny = true; break; } }
+    if (!hasAny) return;
+    const defaultReq = AppState.roleRequirements[key] || 0;
     const tr = document.createElement('tr');
     tr.className = 'summary-row';
-    let cells = `<td>${key} (必要${required})</td>`;
+    let cells = `<td>${key} (必要${defaultReq})</td>`;
     for (let d = 1; d <= days; d++) {
       let count = 0;
       AppState.staff.forEach(s => {
         if ((AppState.shifts[s.id] || {})[d] === key) count++;
       });
-      const cls = count < required ? 'under' : (count > required ? 'over' : '');
+      const req = getDayReq(d, key);
+      const cls = count < req ? 'under' : (count > req ? 'over' : '');
       cells += `<td class="${cls}">${count}</td>`;
     }
     cells += '<td></td><td></td>';
