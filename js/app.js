@@ -3,13 +3,11 @@
    =========================================== */
 
 document.addEventListener('DOMContentLoaded', () => {
-  // データ読込
   const loaded = loadFromStorage();
   if (!loaded || AppState.staff.length === 0) {
     addSampleStaff();
   }
 
-  // UI初期化
   setupTabs();
   setupSettingsPanel();
   setupStaffPanel();
@@ -18,16 +16,15 @@ document.addEventListener('DOMContentLoaded', () => {
   setupResultPanel();
   setupHeaderActions();
 
-  // 初期描画
-  renderRoleTable();
-  renderStaffTable();
-  renderCalendar();
-  renderResultTable();
+  refreshAllUI();
 
-  toast('シフト自動生成アプリへようこそ！', 'success');
+  if (loaded) {
+    toast('前回のデータを読込みました', 'success');
+  } else {
+    toast('シフト自動生成アプリへようこそ！', 'success');
+  }
 });
 
-// ヘッダーアクション
 function setupHeaderActions() {
   document.getElementById('btnSave').addEventListener('click', () => {
     saveToStorage();
@@ -36,21 +33,7 @@ function setupHeaderActions() {
 
   document.getElementById('btnLoad').addEventListener('click', () => {
     if (loadFromStorage()) {
-      renderRoleTable();
-      renderStaffTable();
-      renderCalendar();
-      renderResultTable();
-      // settings欄も更新
-      const $month = document.getElementById('targetMonth');
-      const $maxCons = document.getElementById('maxConsecutive');
-      const $forbidLE = document.getElementById('forbidLateEarly');
-      const $penaltySO = document.getElementById('penaltySingleOff');
-      const $maxAtt = document.getElementById('maxAttempts');
-      $month.value = AppState.settings.targetMonth;
-      $maxCons.value = AppState.settings.maxConsecutive;
-      $forbidLE.checked = AppState.settings.forbidLateEarly;
-      $penaltySO.checked = AppState.settings.penaltySingleOff;
-      $maxAtt.value = AppState.settings.maxAttempts;
+      refreshAllUI();
       toast('設定を読込みました', 'success');
     } else {
       toast('保存されたデータがありません', 'error');
@@ -61,18 +44,17 @@ function setupHeaderActions() {
     if (confirm('全てのデータをリセットしますか？（保存データも削除されます）')) {
       resetAll();
       addSampleStaff();
-      renderRoleTable();
-      renderStaffTable();
-      renderCalendar();
-      renderResultTable();
+      refreshAllUI();
       toast('リセットしました', 'info');
     }
   });
 }
 
-// ⑤ 自動生成パネル
 function setupGeneratePanel() {
-  document.getElementById('btnGenerate').addEventListener('click', async () => {
+  const btn = document.getElementById('btnGenerate');
+  const btnCancel = document.getElementById('btnCancelGenerate');
+
+  btn.addEventListener('click', async () => {
     if (AppState.staff.length === 0) {
       toast('スタッフを登録してください', 'error');
       return;
@@ -82,32 +64,36 @@ function setupGeneratePanel() {
       return;
     }
 
-    const btn = document.getElementById('btnGenerate');
     const $area = document.getElementById('progressArea');
     const $bar = document.getElementById('progressBar');
     const $text = document.getElementById('progressText');
     const $report = document.getElementById('reportCard');
 
     btn.disabled = true;
+    btn.textContent = '⏳ 最適化中...';
+    if (btnCancel) btnCancel.style.display = 'inline-block';
     $area.style.display = 'block';
     $report.style.display = 'none';
     $bar.style.width = '0%';
-    $text.textContent = '初期解を生成中...';
+    $text.textContent = 'バックグラウンドで初期解を生成中...';
 
+    const startedAt = Date.now();
     try {
-      const result = await optimizeSchedule((pct, msg) => {
+      const runner = (typeof optimizeScheduleViaWorker === 'function')
+        ? optimizeScheduleViaWorker
+        : optimizeSchedule;
+      const result = await runner((pct, msg) => {
         $bar.style.width = pct + '%';
         $text.textContent = msg;
       });
 
+      const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
-      $text.textContent = `完了！ 最終スコア: ${result.score}`;
+      $text.textContent = `完了！ 最終スコア: ${result.score} (${elapsed}秒)`;
 
-      // レポート表示
       $report.style.display = 'block';
       renderReport(result);
 
-      // 自動でシフト表タブへ
       setTimeout(() => {
         document.querySelector('.tab[data-tab="result"]').click();
       }, 800);
@@ -120,11 +106,44 @@ function setupGeneratePanel() {
       saveToStorage();
     } catch (e) {
       console.error(e);
-      toast('エラーが発生しました: ' + e.message, 'error');
+      if (e && /terminated|cancel/i.test(e.message || '')) {
+        toast('最適化を中止しました', 'info');
+        $text.textContent = '中止しました';
+      } else {
+        toast('エラーが発生しました: ' + e.message, 'error');
+      }
     } finally {
       btn.disabled = false;
+      btn.textContent = '🚀 シフト自動生成を実行';
+      if (btnCancel) btnCancel.style.display = 'none';
     }
   });
+
+  if (btnCancel) {
+    btnCancel.addEventListener('click', () => {
+      if (typeof cancelActiveOptimization === 'function' && cancelActiveOptimization()) {
+        toast('中止リクエストを送りました', 'info');
+        btnCancel.style.display = 'none';
+        btn.disabled = false;
+        btn.textContent = '🚀 シフト自動生成を実行';
+        const $text = document.getElementById('progressText');
+        if ($text) $text.textContent = '中止しました';
+      }
+    });
+  }
+
+  const btnAI = document.getElementById('btnAIExplain');
+  if (btnAI) {
+    btnAI.addEventListener('click', () => {
+      if (!AppState.generated) {
+        toast('シフトを生成してから実行してください', 'error');
+        return;
+      }
+      if (typeof showAIExplanationModal === 'function') {
+        showAIExplanationModal();
+      }
+    });
+  }
 }
 
 function renderReport(result) {
@@ -139,7 +158,6 @@ function renderReport(result) {
     return;
   }
 
-  // 違反を種別ごとに集計
   const grouped = {};
   result.violations.forEach(v => {
     if (!grouped[v.type]) grouped[v.type] = [];
@@ -169,7 +187,6 @@ function renderReport(result) {
   $c.innerHTML = html;
 }
 
-// ⑥ 結果パネル
 function setupResultPanel() {
   document.getElementById('btnExportExcel').addEventListener('click', exportToExcel);
   document.getElementById('btnExportCSV').addEventListener('click', exportToCSV);
@@ -187,7 +204,6 @@ function setupResultPanel() {
   });
 }
 
-// Excel エクスポート
 function exportToExcel() {
   if (!AppState.generated) {
     toast('シフトを生成してから実行してください', 'error');
@@ -196,7 +212,6 @@ function exportToExcel() {
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const data = [];
 
-  // ヘッダー
   const header = ['名前'];
   for (let d = 1; d <= days; d++) {
     const w = getWeekday(AppState.settings.targetMonth, d);
@@ -205,7 +220,6 @@ function exportToExcel() {
   header.push('勤務日数', '休日数');
   data.push(header);
 
-  // 各スタッフ
   AppState.staff.forEach(s => {
     const row = [s.name];
     let work = 0, off = 0;
@@ -219,8 +233,7 @@ function exportToExcel() {
     data.push(row);
   });
 
-  // 集計行
-  const shiftKeys = ['早責', '遅責', '早総', '遅総', '早', '遅'];
+  const shiftKeys = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '夜勤'];
   shiftKeys.forEach(key => {
     const req = AppState.roleRequirements[key] || 0;
     if (req === 0) return;
@@ -237,16 +250,14 @@ function exportToExcel() {
 
   const ws = XLSX.utils.aoa_to_sheet(data);
 
-  // 列幅設定
   const colWidths = [{ wch: 16 }];
   for (let d = 1; d <= days; d++) colWidths.push({ wch: 6 });
   colWidths.push({ wch: 8 }, { wch: 8 });
   ws['!cols'] = colWidths;
 
-  // セル色を設定（シフト種別ごと）
   const colorMap = {
     '早責': 'FDE2E2', '遅責': 'D1C4E9',
-    '早総': 'FCE4B6', '遅総': 'C8E6C9',
+    '早総務': 'FCE4B6', '遅総務': 'C8E6C9',
     '早':   'D4EAF7', '遅':   'FFE0B2',
     '休':   'EEEEEE', '公':   'F5F5F5',
     '有':   'FFF9C4', '研':   'E0F7FA',
@@ -264,16 +275,15 @@ function exportToExcel() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'シフト表');
 
-  // 集計シート
-  const summary = [['スタッフ', '早責', '遅責', '早総', '遅総', '早', '遅', '休系', '合計勤務']];
+  const summary = [['スタッフ', '早責', '遅責', '早総務', '遅総務', '早', '遅', '研', '休系', '合計勤務']];
   AppState.staff.forEach(s => {
-    const counts = { '早責': 0, '遅責': 0, '早総': 0, '遅総': 0, '早': 0, '遅': 0, off: 0, work: 0 };
+    const counts = { '早責': 0, '遅責': 0, '早総務': 0, '遅総務': 0, '早': 0, '遅': 0, '研': 0, off: 0, work: 0 };
     for (let d = 1; d <= days; d++) {
       const sh = (AppState.shifts[s.id] || {})[d] || '';
       if (counts[sh] !== undefined) { counts[sh]++; counts.work++; }
       else if (isOff(sh)) counts.off++;
     }
-    summary.push([s.name, counts['早責'], counts['遅責'], counts['早総'], counts['遅総'], counts['早'], counts['遅'], counts.off, counts.work]);
+    summary.push([s.name, counts['早責'], counts['遅責'], counts['早総務'], counts['遅総務'], counts['早'], counts['遅'], counts['研'], counts.off, counts.work]);
   });
   const ws2 = XLSX.utils.aoa_to_sheet(summary);
   XLSX.utils.book_append_sheet(wb, ws2, '集計');
@@ -283,7 +293,6 @@ function exportToExcel() {
   toast(`${filename} をダウンロードしました`, 'success');
 }
 
-// CSV エクスポート
 function exportToCSV() {
   if (!AppState.generated) {
     toast('シフトを生成してから実行してください', 'error');
@@ -313,8 +322,7 @@ function exportToCSV() {
     csv += row.map(escapeCSV).join(',') + '\n';
   });
 
-  // BOM付き（Excel で文字化け回避）
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
