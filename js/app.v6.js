@@ -135,6 +135,9 @@ function setupGeneratePanel() {
       $bar.style.width = '100%';
       $text.textContent = `完了！ 最終スコア: ${result.score} (${elapsed}秒)`;
 
+      // 生成直後の状態を履歴の出発点にする（以後の手動編集を Ctrl+Z で戻せる）
+      if (typeof resetShiftHistory === 'function') resetShiftHistory();
+
       // レポート表示
       $report.style.display = 'block';
       renderReport(result);
@@ -287,6 +290,89 @@ function setupResultPanel() {
     renderResultTable();
     saveToStorage();
     toast(`${count}件 の固定を解除しました`, 'success');
+  });
+
+  // 🛠 エラー自動修正（悪化させない安全装置つき）
+  const btnRepair = document.getElementById('btnRepair');
+  if (btnRepair) {
+    btnRepair.addEventListener('click', async () => {
+      if (!AppState.generated) {
+        toast('シフトを生成してから実行してください', 'error');
+        return;
+      }
+      AppState.violations = checkViolations(AppState.shifts);
+      if (AppState.violations.length === 0) {
+        toast('エラーはありません 🎉', 'success');
+        return;
+      }
+
+      // 修復前の状態を履歴に積む → 気に入らなければ Ctrl+Z で戻せる
+      if (typeof recordShiftHistory === 'function') recordShiftHistory();
+
+      const $area = document.getElementById('progressArea');
+      const $bar  = document.getElementById('progressBar');
+      const $text = document.getElementById('progressText');
+      const orig  = btnRepair.textContent;
+      btnRepair.disabled = true;
+      btnRepair.textContent = '⏳ 修復中...';
+      if ($area) $area.style.display = 'block';
+      if ($bar)  $bar.style.width = '0%';
+      if ($text) $text.textContent = 'エラー箇所を修復中...';
+
+      try {
+        const runner = (typeof repairScheduleViaWorker === 'function')
+          ? repairScheduleViaWorker : repairSchedule;
+        const res = await runner((pct, msg) => {
+          if ($bar)  $bar.style.width = pct + '%';
+          if ($text) $text.textContent = msg;
+        });
+
+        if ($bar) $bar.style.width = '100%';
+        renderResultTable();
+        document.getElementById('reportCard').style.display = 'block';
+        renderReport({ success: res.success, score: res.violations.length, violations: res.violations });
+
+        if (res.improved) {
+          if ($text) $text.textContent = `修復完了: 違反 ${res.before}件 → ${res.after}件`;
+          toast(`✅ エラーを ${res.before - res.after}件 減らしました（${res.before}→${res.after}件）`, 'success', 5000);
+        } else {
+          // 悪化させないので元のまま。積んだ履歴は無駄なので捨てる
+          if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
+          if ($text) $text.textContent = `自動では改善できませんでした（違反 ${res.before}件）`;
+          toast('自動では改善できませんでした。残りは手動修正が必要です', 'info', 5000);
+        }
+        saveToStorage();
+      } catch (e) {
+        console.error(e);
+        if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
+        toast('修復中にエラーが発生しました: ' + e.message, 'error');
+      } finally {
+        btnRepair.disabled = false;
+        btnRepair.textContent = orig;
+      }
+    });
+  }
+
+  // ↩ 元に戻す / ↪ やり直す
+  const btnUndo = document.getElementById('btnUndo');
+  const btnRedo = document.getElementById('btnRedo');
+  if (btnUndo) btnUndo.addEventListener('click', () => { if (typeof undoShiftEdit === 'function') undoShiftEdit(); });
+  if (btnRedo) btnRedo.addEventListener('click', () => { if (typeof redoShiftEdit === 'function') redoShiftEdit(); });
+
+  // キーボードショートカット（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName) || '';
+    if (/INPUT|TEXTAREA|SELECT/.test(tag)) return; // 入力欄では既定動作を尊重
+    const resultPanel = document.getElementById('panel-result');
+    if (!resultPanel || !resultPanel.classList.contains('active')) return;
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      if (typeof undoShiftEdit === 'function') undoShiftEdit();
+    } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' ||
+               (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+      e.preventDefault();
+      if (typeof redoShiftEdit === 'function') redoShiftEdit();
+    }
   });
 }
 

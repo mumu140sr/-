@@ -1122,6 +1122,7 @@ function setupDragAndDrop() {
     td.addEventListener('drop', e => {
       e.preventDefault();
       if (!dragSource || dragSource === td) return;
+      recordShiftHistory();
       const sid1 = dragSource.dataset.sid, d1 = parseInt(dragSource.dataset.day);
       const sid2 = td.dataset.sid,         d2 = parseInt(td.dataset.day);
       const v1 = (AppState.shifts[sid1] || {})[d1] || '';
@@ -1217,6 +1218,7 @@ function setupManualEdit() {
     e.stopPropagation();
     const btn = e.target.closest('.shift-option');
     if (!btn || !editingCell) return;
+    recordShiftHistory();
     const sid      = editingCell.dataset.sid;
     const d        = parseInt(editingCell.dataset.day);
     const newShift = btn.dataset.shift;
@@ -1251,6 +1253,73 @@ function setupManualEdit() {
       editingCell = null;
     }
   });
+}
+
+/* ===== 編集履歴（Excel ライクな 元に戻す／やり直し） ===== */
+let _undoStack = [];
+let _redoStack = [];
+
+function _snapshotShiftState() {
+  return {
+    shifts: JSON.parse(JSON.stringify(AppState.shifts || {})),
+    fixed:  JSON.parse(JSON.stringify(AppState.fixedShifts || {})),
+  };
+}
+
+/** 編集を加える「直前」の状態を履歴に積む（手動編集ハンドラの先頭で呼ぶ） */
+function recordShiftHistory() {
+  _undoStack.push(_snapshotShiftState());
+  if (_undoStack.length > 100) _undoStack.shift();
+  _redoStack = []; // 新しい編集をしたら やり直し履歴は破棄
+  updateHistoryButtons();
+}
+
+/** 生成直後などに履歴をリセット（この状態が一番最初の戻り先になる） */
+function resetShiftHistory() {
+  _undoStack = [];
+  _redoStack = [];
+  updateHistoryButtons();
+}
+
+function _applyShiftState(st) {
+  AppState.shifts      = JSON.parse(JSON.stringify(st.shifts));
+  AppState.fixedShifts = JSON.parse(JSON.stringify(st.fixed));
+  AppState.violations  = checkViolations(AppState.shifts);
+  renderResultTable();
+  const reportCard = document.getElementById('reportCard');
+  if (reportCard && reportCard.style.display !== 'none' && typeof renderReport === 'function') {
+    renderReport({ success: AppState.violations.length === 0,
+      score: AppState.violations.length, violations: AppState.violations });
+  }
+  if (typeof saveToStorage === 'function') saveToStorage();
+  updateHistoryButtons();
+}
+
+function undoShiftEdit() {
+  if (_undoStack.length === 0) { toast('これ以上 戻せません', 'info', 1200); return; }
+  _redoStack.push(_snapshotShiftState());
+  _applyShiftState(_undoStack.pop());
+  toast('元に戻しました', 'info', 1200);
+}
+
+function redoShiftEdit() {
+  if (_redoStack.length === 0) { toast('やり直す操作がありません', 'info', 1200); return; }
+  _undoStack.push(_snapshotShiftState());
+  _applyShiftState(_redoStack.pop());
+  toast('やり直しました', 'info', 1200);
+}
+
+/** 直前に積んだ履歴を取り消す（修復が改善しなかった場合などに使う） */
+function discardLastShiftHistory() {
+  if (_undoStack.length > 0) _undoStack.pop();
+  updateHistoryButtons();
+}
+
+function updateHistoryButtons() {
+  const u = document.getElementById('btnUndo');
+  const r = document.getElementById('btnRedo');
+  if (u) u.disabled = _undoStack.length === 0;
+  if (r) r.disabled = _redoStack.length === 0;
 }
 
 /**

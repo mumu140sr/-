@@ -78,9 +78,85 @@ async function optimizeSchedule(progressCallback) {
 }
 
 /**
- * 1部門分の最適化（_optStaff / _optReqs に部門のスタッフ・必要人数が設定済みの前提）
+ * エラー箇所だけを再最適化する「修復」エントリ
+ * - 現在の AppState.shifts を種（seed）にする
+ * - 違反に関係するセル（＋前後日）だけロックを外し、それ以外は固定して動かさない
+ * - 違反件数が減った時だけ採用し、悪化した場合は元に戻す（絶対に悪くしない）
  */
-async function optimizeGroupSchedule(progressCallback) {
+async function repairSchedule(progressCallback) {
+  const baseShifts     = deepCopyShifts(AppState.shifts || {});
+  const baseViolations = checkViolations(baseShifts);
+  if (baseViolations.length === 0) {
+    AppState.violations = baseViolations;
+    return { score: 0, violations: [], success: true, improved: false, before: 0, after: 0 };
+  }
+
+  const days   = getDaysInMonth(AppState.settings.targetMonth);
+  const groups = getDepartmentGroups(AppState.staff);
+  const mergedShifts = deepCopyShifts(baseShifts);
+
+  try {
+    for (let gi = 0; gi < groups.length; gi++) {
+      const g       = groups[gi];
+      const groupIds = new Set(g.staff.map(s => s.id));
+
+      // この部門に関係するエラー箇所を集める（前後日も対象にして入れ替え余地を作る）
+      const cells    = new Set();
+      const staffAll = new Set();
+      const addCell  = (sid, d) => {
+        for (let dd = d - 1; dd <= d + 1; dd++) {
+          if (dd >= 1 && dd <= days) cells.add(sid + ':' + dd);
+        }
+      };
+      baseViolations.forEach(v => {
+        if (v.staffId && groupIds.has(v.staffId)) {
+          if (v.day === 0) staffAll.add(v.staffId); // 公休数不足 → その人の全日を対象
+          else addCell(v.staffId, v.day);
+        } else if (!v.staffId && v.day >= 1) {
+          // 日単位エラー（人員不足・副店長不在など）→ その日の部門全員を対象
+          g.staff.forEach(s => addCell(s.id, v.day));
+        }
+      });
+
+      if (cells.size === 0 && staffAll.size === 0) continue; // この部門は問題なし
+
+      _optStaff     = g.staff;
+      _optReqs      = g.reqs;
+      _optDailyReqs = g.dailyReqs;
+      const groupProgress = (pct, msg) => {
+        const mapped = Math.floor((gi * 100 + pct) / groups.length);
+        progressCallback && progressCallback(mapped, '修復中... ' + msg);
+      };
+      const res = await optimizeGroupSchedule(groupProgress, { seedShifts: baseShifts, cells, staffAll });
+      Object.assign(mergedShifts, res.shifts);
+    }
+  } finally {
+    _optStaff = null; _optReqs = null; _optDailyReqs = null;
+  }
+
+  const newViolations = checkViolations(mergedShifts);
+  // 悪化させない安全装置: 違反が減った時だけ採用、それ以外は元のまま
+  if (newViolations.length < baseViolations.length) {
+    AppState.shifts     = mergedShifts;
+    AppState.violations = newViolations;
+    AppState.generated  = true;
+    return { score: newViolations.length, violations: newViolations,
+             success: newViolations.length === 0, improved: true,
+             before: baseViolations.length, after: newViolations.length };
+  }
+  AppState.shifts     = baseShifts;
+  AppState.violations = baseViolations;
+  AppState.generated  = true;
+  return { score: baseViolations.length, violations: baseViolations,
+           success: baseViolations.length === 0, improved: false,
+           before: baseViolations.length, after: baseViolations.length };
+}
+
+/**
+ * 1部門分の最適化（_optStaff / _optReqs に部門のスタッフ・必要人数が設定済みの前提）
+ * @param {object} [repairCtx] 修復モード時のコンテキスト { seedShifts, cells, staffAll }
+ */
+async function optimizeGroupSchedule(progressCallback, repairCtx) {
   _shiftKeysCache = null; // 最適化開始時にリセット
   const days     = getDaysInMonth(AppState.settings.targetMonth);
   const staff    = optStaff();
@@ -132,11 +208,23 @@ async function optimizeGroupSchedule(progressCallback) {
     }
   });
 
-  // 2.5. 特別日の副店長固定
-  applySpecialDaysLogic(shifts, locked, staff, days);
+  if (repairCtx) {
+    // 修復モード: 現在のシフトを種にして、エラー箇所だけロックを外す
+    staff.forEach(s => {
+      for (let d = 1; d <= days; d++) {
+        shifts[s.id][d] = (repairCtx.seedShifts[s.id] || {})[d] || '';
+        if (locked[s.id][d]) continue; // 固定シフト・希望休はそのまま動かさない
+        const inError = repairCtx.cells.has(s.id + ':' + d) || repairCtx.staffAll.has(s.id);
+        locked[s.id][d] = !inError;
+      }
+    });
+  } else {
+    // 2.5. 特別日の副店長固定
+    applySpecialDaysLogic(shifts, locked, staff, days);
 
-  // 3. 初期解生成
-  generateInitialSolution(shifts, locked, allowedShifts, days);
+    // 3. 初期解生成
+    generateInitialSolution(shifts, locked, allowedShifts, days);
+  }
 
   // 4. 焼きなまし法
   let currentScore = calculateScore(shifts, allowedShifts, days, P);

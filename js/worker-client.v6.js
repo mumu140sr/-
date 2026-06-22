@@ -8,11 +8,12 @@
 let _activeWorker = null;
 
 /**
- * Worker 上で optimizer を実行する
+ * Worker 上で optimizer / repair を実行する共通処理
+ * @param {'optimize'|'repair'} mode
  * @param {(pct:number, msg:string)=>void} progressCallback
- * @returns {Promise<{score, violations, success}>}
+ * @returns {Promise<object>}
  */
-function optimizeScheduleViaWorker(progressCallback) {
+function _runViaWorker(mode, progressCallback) {
   return new Promise((resolve, reject) => {
     // 既存 Worker をクリーンアップ
     if (_activeWorker) {
@@ -20,13 +21,17 @@ function optimizeScheduleViaWorker(progressCallback) {
       _activeWorker = null;
     }
 
+    // メインスレッドのフォールバック関数
+    const fallback = () => (mode === 'repair'
+      ? repairSchedule(progressCallback)
+      : optimizeSchedule(progressCallback)).then(resolve, reject);
+
     let worker;
     try {
-      worker = new Worker('js/optimizer.worker.js?v=13');
+      worker = new Worker('js/optimizer.worker.js?v=14');
     } catch (e) {
       console.warn('[worker-client] Worker creation failed, falling back to main thread:', e);
-      // フォールバック: メインスレッドで実行
-      return optimizeSchedule(progressCallback).then(resolve, reject);
+      return fallback();
     }
 
     _activeWorker = worker;
@@ -54,29 +59,39 @@ function optimizeScheduleViaWorker(progressCallback) {
       console.error('[worker-client] worker error', e);
       worker.terminate();
       _activeWorker = null;
-      // フォールバック: メインスレッドで実行
       console.warn('[worker-client] Falling back to main thread');
-      optimizeSchedule(progressCallback).then(resolve, reject);
+      fallback();
     });
 
     // データを Worker に送る（postMessage は構造化クローン）
     worker.postMessage({
-      type: 'optimize',
+      type: mode,
       appState: {
-        settings:             AppState.settings,
-        shiftTypes:           AppState.shiftTypes,
-        roleRequirements:     AppState.roleRequirements,
-        roleRequirementsCast: AppState.roleRequirementsCast,
+        settings:              AppState.settings,
+        shiftTypes:            AppState.shiftTypes,
+        roleRequirements:      AppState.roleRequirements,
+        roleRequirementsCast:  AppState.roleRequirementsCast,
         dailyRequirements:     AppState.dailyRequirements,
         dailyRequirementsCast: AppState.dailyRequirementsCast,
-        staff:                AppState.staff,
-        requests:             AppState.requests,
-        fixedShifts:          AppState.fixedShifts,
-        specialDays:          AppState.specialDays,
-        events:               AppState.events,
+        staff:                 AppState.staff,
+        requests:              AppState.requests,
+        fixedShifts:           AppState.fixedShifts,
+        specialDays:           AppState.specialDays,
+        events:                AppState.events,
+        shifts:                AppState.shifts, // repair モードで使う現在のシフト
       },
     });
   });
+}
+
+/** Worker 上で最適化を実行 */
+function optimizeScheduleViaWorker(progressCallback) {
+  return _runViaWorker('optimize', progressCallback);
+}
+
+/** Worker 上でエラー箇所のみ修復 */
+function repairScheduleViaWorker(progressCallback) {
+  return _runViaWorker('repair', progressCallback);
 }
 
 /** 実行中の Worker を中止 */

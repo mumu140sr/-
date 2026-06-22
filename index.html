@@ -7,14 +7,14 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=13" />
+<link rel="stylesheet" href="css/style.css?v=14" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <header class="app-header">
   <div class="title">
     <h1>📅 シフト自動生成アプリ</h1>
-    <span class="subtitle">焼きなまし法による最適化エンジン搭載 ｜ 🆕 v13（日別人数 表示修正）</span>
+    <span class="subtitle">焼きなまし法による最適化エンジン搭載 ｜ 🆕 v14（エラー自動修正・元に戻す機能）</span>
   </div>
   <div class="header-actions">
     <button id="btnSave" class="btn btn-ghost">💾 保存</button>
@@ -254,8 +254,11 @@
         <button class="btn btn-primary" id="btnExportExcel">📥 Excelエクスポート</button>
         <button class="btn" id="btnExportCSV">📥 CSVエクスポート</button>
         <button class="btn" id="btnRecheck">🔍 ルールチェック</button>
+        <button class="btn btn-primary" id="btnRepair">🛠 エラーを自動修正</button>
+        <button class="btn" id="btnUndo" disabled>↩ 元に戻す</button>
+        <button class="btn" id="btnRedo" disabled>↪ やり直す</button>
         <button class="btn" id="btnClearFixed">🔓 固定をすべて解除</button>
-        <span class="hint">セルをドラッグ&ドロップでシフト交換、クリックで直接編集（編集すると🔒固定されます）</span>
+        <span class="hint">セルをドラッグ&ドロップでシフト交換、クリックで直接編集（編集すると🔒固定されます）。Ctrl+Z で元に戻す／Ctrl+Y でやり直し。</span>
       </div>
       <!-- 凡例：シフト種別から動的生成 -->
       <div class="legend" id="shiftLegend"></div>
@@ -287,11 +290,11 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=13"></script>
-<script src="js/optimizer.v6.js?v=13"></script>
-<script src="js/worker-client.v6.js?v=13"></script>
-<script src="js/ai-explain.v6.js?v=13"></script>
-<script src="js/ui.v6.js?v=13"></script>
-<script src="js/app.v6.js?v=13"></script>
+<script src="js/data.v6.js?v=14"></script>
+<script src="js/optimizer.v6.js?v=14"></script>
+<script src="js/worker-client.v6.js?v=14"></script>
+<script src="js/ai-explain.v6.js?v=14"></script>
+<script src="js/ui.v6.js?v=14"></script>
+<script src="js/app.v6.js?v=14"></script>
 </body>
 </html>
