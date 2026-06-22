@@ -256,7 +256,9 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
       if (locked[s.id][d] && isPublicOff(shifts[s.id][d])) vmRestByDay[d] = (vmRestByDay[d] || 0) + 1;
     }
   });
-  const maxVmRestPerDay = Math.max(0, vmList.length - 1);
+  // 副店長2人以上: 1日に休めるのは（人数-1）まで（毎日1人は出勤）
+  // 副店長1人: ルール自体がオフなので制限なし（maxOff通り休める）
+  const maxVmRestPerDay = vmList.length >= 2 ? vmList.length - 1 : vmList.length;
 
   // Step1: 各スタッフに休日を配置（ロック済みの公休のみ目標から差し引く。有給は別枠）
   staff.forEach(s => {
@@ -1163,8 +1165,10 @@ function calculateScore(shifts, allowedShifts, days, P) {
   const maxCons = AppState.settings.maxConsecutive;
   const shiftKeys = getWorkShiftKeys();
 
-  // この部門に副店長がいるか（毎日1人は出勤させる制約に使用）
-  const hasVice = staff.some(s => s.positionType === 'viceManager');
+  // 毎日1人出勤ルール: 副店長が2人以上いる場合のみ有効
+  // 1人の場合は公休目標と数学的に矛盾するため自動オフ
+  const vmCount = staff.filter(s => s.positionType === 'viceManager').length;
+  const hasVice = vmCount >= 2;
 
   // 縦: 各日の必要人数 + 責任者ヒエラルキー
   // staff を1回だけ走査してカウント・責任者特定・ヒエラルキー確認をまとめて行う
@@ -1455,9 +1459,10 @@ function checkViolations(shifts) {
     }
   });
 
-  // 毎日、副店長が1人以上出勤していること
+  // 毎日、副店長が1人以上出勤していること（副店長2人以上のときのみ有効）
+  // 1人の場合は公休目標と数学的に矛盾するためチェックしない
   const viceManagers = staff.filter(s => s.positionType === 'viceManager');
-  if (viceManagers.length > 0) {
+  if (viceManagers.length >= 2) {
     for (let d = 1; d <= days; d++) {
       const working = viceManagers.some(vm => isWork((shifts[vm.id] || {})[d] || ''));
       if (!working) {
