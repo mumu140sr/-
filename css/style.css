@@ -252,7 +252,7 @@ tbody tr:hover { background: #f7fafc; }
 /* ===== シフト種別テーブル ===== */
 /* 列が多いため幅を詰めて、横スクロールせず夜勤列まで見えるようにする（インライン幅を上書き） */
 .role-table th, .role-table td { padding: 4px 5px !important; font-size: 12px; }
-.role-table input[type="number"] { width: 44px !important; }
+.role-table input[type="number"] { width: 58px !important; }
 .role-table input[type="color"]  { width: 38px !important; height: 26px; border: none; cursor: pointer; border-radius: 4px; }
 .role-table input[type="text"]   { padding: 3px 4px; }
 .role-table input[data-field="label"] { width: 88px !important; }
