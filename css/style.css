@@ -271,6 +271,11 @@ tbody tr:hover { background: #f7fafc; }
   border: 1px solid rgba(0,0,0,0.1);
 }
 
+/* ===== 日別必要人数パネル ===== */
+/* デフォルト値はプレースホルダーで表示するため、薄すぎないよう濃さを上げる */
+.daily-req-input::placeholder { color: #888; opacity: 1; font-style: italic; }
+.daily-req-input { min-width: 40px; }
+
 /* ===== スタッフテーブル ===== */
 .staff-table input[type="text"]   { width: 100%; min-width: 80px; }
 .staff-table input[type="number"] { width: 50px; }

@@ -571,7 +571,7 @@ function renderDailyReqPanel() {
           <input type="number" min="0" max="99" placeholder="${defaultVal}"
             value="${override != null ? override : ''}"
             data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}"
-            class="daily-req-input" style="width:34px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${override != null ? '700' : '400'};color:${override != null ? '#000' : '#999'}"/>
+            class="daily-req-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${override != null ? '700' : '400'};color:${override != null ? '#000' : '#666'}"/>
         </td>`;
       }
       html += '</tr>';
