@@ -7,14 +7,14 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=15" />
+<link rel="stylesheet" href="css/style.css?v=16" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <header class="app-header">
   <div class="title">
     <h1>📅 シフト自動生成アプリ</h1>
-    <span class="subtitle">焼きなまし法による最適化エンジン搭載 ｜ 🆕 v15（日別必要人数クリア機能）</span>
+    <span class="subtitle"></span>
   </div>
   <div class="header-actions">
     <button id="btnSave" class="btn btn-ghost">💾 保存</button>
@@ -59,8 +59,8 @@
       </div>
       <div class="form-row">
         <label>焼きなまし反復回数</label>
-        <input type="number" id="maxAttempts" min="10000" max="500000" step="10000" value="200000" />
-        <span class="hint">多いほど精度UP、時間も増えます（推奨: 200000）</span>
+        <input type="number" id="maxAttempts" min="10000" max="1000000" step="10000" value="500000" />
+        <span class="hint">多いほど精度UP、時間も増えます（推奨: 500000）</span>
       </div>
     </div>
 
@@ -194,8 +194,9 @@
       <div id="requestMode" class="calendar-mode">
         <div class="toolbar" style="flex-wrap:wrap">
           <span>休系: </span>
+          <button class="chip-btn" data-mark="有">有給</button>
           <button class="chip-btn" data-mark="休">休</button>
-          <button class="chip-btn" data-mark="有">有</button>
+          <button class="chip-btn" data-mark="半">半休</button>
           <button class="chip-btn" data-mark="公">公</button>
           <button class="chip-btn" data-mark="☆">☆</button>
           <button class="chip-btn" data-mark="季">季</button>
@@ -290,11 +291,11 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=15"></script>
-<script src="js/optimizer.v6.js?v=15"></script>
-<script src="js/worker-client.v6.js?v=15"></script>
-<script src="js/ai-explain.v6.js?v=15"></script>
-<script src="js/ui.v6.js?v=15"></script>
-<script src="js/app.v6.js?v=15"></script>
+<script src="js/data.v6.js?v=16"></script>
+<script src="js/optimizer.v6.js?v=16"></script>
+<script src="js/worker-client.v6.js?v=16"></script>
+<script src="js/ai-explain.v6.js?v=16"></script>
+<script src="js/ui.v6.js?v=16"></script>
+<script src="js/app.v6.js?v=16"></script>
 </body>
 </html>

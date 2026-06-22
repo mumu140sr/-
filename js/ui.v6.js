@@ -1193,6 +1193,7 @@ function renderModalOptions() {
     { shift: '休', label: '公休',       bg: '#eeeeee', color: '#616161' },
     { shift: '公', label: '公休扱い',   bg: '#f5f5f5', color: '#424242' },
     { shift: '有', label: '有給',       bg: '#fff9c4', color: '#827717' },
+    { shift: '半', label: '半休',       bg: '#e8f5e9', color: '#2e7d32' },
     { shift: '☆', label: '希望休',     bg: '#eeeeee', color: '#616161' },
     { shift: '季', label: '季節休暇',   bg: '#eeeeee', color: '#616161' },
     { shift: '引', label: '引継',       bg: '#eeeeee', color: '#616161' },
