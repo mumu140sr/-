@@ -565,13 +565,14 @@ function renderDailyReqPanel() {
       for (let d = 1; d <= days; d++) {
         const w = getWeekday(AppState.settings.targetMonth, d);
         const override = (dailyMap[type.key] || {})[d];
-        // 上書きありは濃い文字＋黄背景、なしはデフォルト値を薄く表示
-        const cellBg = override != null ? '#fff7d6' : (w === 0 ? '#fff5f5' : (w === 6 ? '#f5f9ff' : '#fff'));
+        const isOv = override != null;
+        // 全セルに数字を表示（通常=グレー / 上書き=黒太字＋黄背景）
+        const cellBg = isOv ? '#fff7d6' : (w === 0 ? '#fff5f5' : (w === 6 ? '#f5f9ff' : '#fff'));
         html += `<td style="padding:1px;border:1px solid #ccc;background:${cellBg}">
-          <input type="number" min="0" max="99" placeholder="${defaultVal}"
-            value="${override != null ? override : ''}"
-            data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}"
-            class="daily-req-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${override != null ? '700' : '400'};color:${override != null ? '#000' : '#666'}"/>
+          <input type="number" min="0" max="99"
+            value="${isOv ? override : defaultVal}"
+            data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}" data-default="${defaultVal}"
+            class="daily-req-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${isOv ? '700' : '400'};color:${isOv ? '#000' : '#999'}"/>
         </td>`;
       }
       html += '</tr>';
@@ -586,14 +587,18 @@ function renderDailyReqPanel() {
       const sh   = e.target.dataset.shift;
       const day  = parseInt(e.target.dataset.day);
       const dept = e.target.dataset.dept;
+      const def  = parseInt(e.target.dataset.default) || 0;
       const val  = e.target.value.trim();
       const map  = dept === 'employee' ? AppState.dailyRequirements : AppState.dailyRequirementsCast;
       if (!map[sh]) map[sh] = {};
-      const hasOverride = !(val === '' || val === '-');
+      // 空欄・「-」・デフォルト値と同じ → 上書き解除。それ以外 → 上書き保存
+      const num = parseInt(val);
+      const hasOverride = !(val === '' || val === '-' || isNaN(num) || num === def);
       if (!hasOverride) {
         delete map[sh][day];
+        if (val === '' || val === '-') e.target.value = def; // 空なら通常値を表示に戻す
       } else {
-        map[sh][day] = parseInt(val) || 0;
+        map[sh][day] = num;
       }
       // 見た目を即反映（上書きあり=黒太字＋黄背景 / なし=薄字）
       const w = getWeekday(AppState.settings.targetMonth, day);

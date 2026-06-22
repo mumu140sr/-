@@ -273,7 +273,7 @@ tbody tr:hover { background: #f7fafc; }
 
 /* ===== 日別必要人数パネル ===== */
 /* デフォルト値はプレースホルダーで表示するため、薄すぎないよう濃さを上げる */
-.daily-req-input::placeholder { color: #888; opacity: 1; font-style: italic; }
+.daily-req-input::placeholder { color: #555; opacity: 1; }
 .daily-req-input { min-width: 40px; }
 
 /* ===== スタッフテーブル ===== */
