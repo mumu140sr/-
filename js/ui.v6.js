@@ -536,8 +536,22 @@ function renderDailyReqPanel() {
   if (!countableTypes.length) { container.innerHTML = '<p class="hint">集計対象のシフト種別がありません。</p>'; return; }
 
   let html = '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px">';
-  html += '<thead><tr><th style="padding:4px 6px;border:1px solid #ccc;background:#f0f0f0">シフト / 部門</th>';
-  for (let d = 1; d <= days; d++) html += `<th style="padding:2px 4px;border:1px solid #ccc;background:#f0f0f0;text-align:center">${d}</th>`;
+  // ヘッダー1段目: 日付（曜日で色分け）
+  html += '<thead><tr><th style="padding:4px 6px;border:1px solid #ccc;background:#f0f0f0;position:sticky;left:0;z-index:1">シフト / 部門</th>';
+  for (let d = 1; d <= days; d++) {
+    const w = getWeekday(AppState.settings.targetMonth, d);
+    const bg = w === 0 ? '#ffe0e0' : (w === 6 ? '#e0ecff' : '#f0f0f0');
+    html += `<th style="padding:2px 4px;border:1px solid #ccc;background:${bg};text-align:center">${d}</th>`;
+  }
+  html += '</tr>';
+  // ヘッダー2段目: 曜日
+  html += '<tr><th style="padding:2px 6px;border:1px solid #ccc;background:#f7f7f7;position:sticky;left:0;z-index:1"></th>';
+  for (let d = 1; d <= days; d++) {
+    const w = getWeekday(AppState.settings.targetMonth, d);
+    const color = w === 0 ? '#c0392b' : (w === 6 ? '#2c5fb3' : '#555');
+    const bg = w === 0 ? '#fff0f0' : (w === 6 ? '#f0f5ff' : '#f7f7f7');
+    html += `<th style="padding:2px 4px;border:1px solid #ccc;background:${bg};text-align:center;color:${color};font-weight:700">${getWeekdayLabel(w)}</th>`;
+  }
   html += '</tr></thead><tbody>';
 
   ['employee','cast'].forEach(dept => {
@@ -547,14 +561,17 @@ function renderDailyReqPanel() {
     countableTypes.forEach(type => {
       const defaultVal = baseReqs[type.key] || 0;
       if (!defaultVal && dept === 'cast') return;
-      html += `<tr><td style="padding:4px 6px;border:1px solid #ccc;white-space:nowrap">${escapeHtml(type.key)}（${deptLabel}・通常: ${defaultVal}）</td>`;
+      html += `<tr><td style="padding:4px 6px;border:1px solid #ccc;white-space:nowrap;position:sticky;left:0;background:#fff;z-index:1">${escapeHtml(type.key)}（${deptLabel}・通常: ${defaultVal}）</td>`;
       for (let d = 1; d <= days; d++) {
+        const w = getWeekday(AppState.settings.targetMonth, d);
         const override = (dailyMap[type.key] || {})[d];
-        html += `<td style="padding:1px;border:1px solid #ccc">
+        // 上書きありは濃い文字＋黄背景、なしはデフォルト値を薄く表示
+        const cellBg = override != null ? '#fff7d6' : (w === 0 ? '#fff5f5' : (w === 6 ? '#f5f9ff' : '#fff'));
+        html += `<td style="padding:1px;border:1px solid #ccc;background:${cellBg}">
           <input type="number" min="0" max="99" placeholder="${defaultVal}"
             value="${override != null ? override : ''}"
             data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}"
-            class="daily-req-input" style="width:42px;text-align:center;border:none;font-size:12px"/>
+            class="daily-req-input" style="width:34px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${override != null ? '700' : '400'};color:${override != null ? '#000' : '#999'}"/>
         </td>`;
       }
       html += '</tr>';
@@ -572,11 +589,19 @@ function renderDailyReqPanel() {
       const val  = e.target.value.trim();
       const map  = dept === 'employee' ? AppState.dailyRequirements : AppState.dailyRequirementsCast;
       if (!map[sh]) map[sh] = {};
-      if (val === '' || val === '-') {
+      const hasOverride = !(val === '' || val === '-');
+      if (!hasOverride) {
         delete map[sh][day];
       } else {
         map[sh][day] = parseInt(val) || 0;
       }
+      // 見た目を即反映（上書きあり=黒太字＋黄背景 / なし=薄字）
+      const w = getWeekday(AppState.settings.targetMonth, day);
+      e.target.style.fontWeight = hasOverride ? '700' : '400';
+      e.target.style.color      = hasOverride ? '#000' : '#999';
+      const cell = e.target.closest('td');
+      if (cell) cell.style.background = hasOverride ? '#fff7d6'
+        : (w === 0 ? '#fff5f5' : (w === 6 ? '#f5f9ff' : '#fff'));
       autoSave();
     });
   });
