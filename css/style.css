@@ -274,7 +274,20 @@ tbody tr:hover { background: #f7fafc; }
 /* ===== 日別必要人数パネル ===== */
 /* デフォルト値はプレースホルダーで表示するため、薄すぎないよう濃さを上げる */
 .daily-req-input::placeholder { color: #555; opacity: 1; }
-.daily-req-input { min-width: 40px; }
+/* 共通の input[type=number] の padding/border/width を打ち消して小セルに数字を収める */
+.daily-req-input {
+  width: 42px !important;
+  min-width: 42px;
+  padding: 4px 2px !important;
+  border: none !important;
+  border-radius: 0 !important;
+  font-size: 13px !important;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.daily-req-input::-webkit-outer-spin-button,
+.daily-req-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
 /* ===== スタッフテーブル ===== */
 .staff-table input[type="text"]   { width: 100%; min-width: 80px; }
