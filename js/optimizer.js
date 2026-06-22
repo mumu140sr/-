@@ -25,7 +25,7 @@ function getWorkShiftKeys() {
 }
 
 // 同じ時間帯に必要人数を超えて配置してはいけないシフト（責任者・総務）
-const SOLO_SHIFT_KEYS = ['早責', '遅責', '早総', '遅総'];
+const SOLO_SHIFT_KEYS = ['早責', '遅責', '早総務', '遅総務'];
 
 // 部門別最適化中のスタッフ・必要人数（AppState を書き換えると実行中の保存で
 // データが破損するため、optimizer 内部変数で切り替える）
@@ -677,7 +677,7 @@ function tryConvertSurplusRest(shifts, locked, staff, days, allowedShifts) {
 
       // 人員不足のシフトを優先、なければ担当可能な早/遅から選ぶ
       const needyShifts = earlyLateShifts.filter(sh => {
-        const req = optReqs()[sh] || 0;
+        const req = optDayReq(sh, d);
         if (!req) return false;
         const count = staff.filter(st => shifts[st.id][d] === sh).length;
         return count < req;
@@ -713,7 +713,7 @@ function tryCascadeSwapForRest(shifts, locked, staff, days, allowedShifts) {
   const offCountCache = {};
   staff.forEach(s => {
     let c = 0;
-    for (let d = 1; d <= days; d++) { if (isOff(shifts[s.id][d])) c++; }
+    for (let d = 1; d <= days; d++) { if (isPublicOff(shifts[s.id][d])) c++; }
     offCountCache[s.id] = c;
   });
 
@@ -810,7 +810,7 @@ function tryFixUnderstaffing(shifts, locked, staff, days, allowedShifts) {
   const shiftKeys = getWorkShiftKeys();
   for (let d = 1; d <= days; d++) {
     for (const sh of shiftKeys) {
-      const req   = optReqs()[sh] || 0;
+      const req   = optDayReq(sh, d);
       if (!req) continue;
       const count = staff.filter(s => shifts[s.id][d] === sh).length;
       if (count >= req) continue;
@@ -1335,6 +1335,7 @@ function calculateScore(shifts, allowedShifts, days, P) {
 // ===== 違反チェック =====
 
 function checkViolations(shifts) {
+  _shiftKeysCache = null; // キャッシュを毎回リセットして最新の shiftTypes を使う
   const violations = [];
   const staff      = AppState.staff;
   const settings   = AppState.settings;

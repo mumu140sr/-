@@ -320,6 +320,8 @@ function setupRolePanel() {
       category:     'A',
       countForStaff: true,
       isTraining:   false,
+      isNight:      false,
+      workHours:    8,
     });
     AppState.roleRequirements[newKey] = 1;
     renderRoleTable();
@@ -979,17 +981,18 @@ function renderResultTable() {
     // 集計行（部門の必要人数 > 0 のシフト種別）
     const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
     workKeys.forEach(key => {
-      const required = g.reqs[key] || 0;
-      if (required === 0) return;
+      const defaultReq = g.reqs[key] || 0;
+      if (defaultReq === 0) return;
       const tr = document.createElement('tr');
       tr.className = 'summary-row';
-      let cells = `<td>${escapeHtml(key)} (必要${required})</td>`;
+      let cells = `<td>${escapeHtml(key)} (必要${defaultReq})</td>`;
       for (let d = 1; d <= days; d++) {
         let count = 0;
         g.staff.forEach(s => {
           if ((AppState.shifts[s.id] || {})[d] === key) count++;
         });
-        const cls = count < required ? 'under' : (count > required ? 'over' : '');
+        const dayReq = getDayReq(g.reqs, g.dailyReqs || {}, key, d);
+        const cls = count < dayReq ? 'under' : (count > dayReq ? 'over' : '');
         cells += `<td class="${cls}">${count}</td>`;
       }
       cells += '<td></td><td></td><td></td><td></td><td></td>';
@@ -1059,7 +1062,7 @@ function setupDragAndDrop() {
     cell.addEventListener('dragend', e => {
       e.target.classList.remove('dragging');
       document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-      setTimeout(() => { dragSource = null; }, 50);
+      dragSource = null;
     });
   });
   document.querySelectorAll('.result-table td[data-sid]').forEach(td => {
