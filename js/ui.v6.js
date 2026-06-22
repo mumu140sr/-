@@ -535,7 +535,13 @@ function renderDailyReqPanel() {
   const countableTypes = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining);
   if (!countableTypes.length) { container.innerHTML = '<p class="hint">集計対象のシフト種別がありません。</p>'; return; }
 
-  let html = '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px">';
+  let html = '<div style="overflow-x:auto">';
+  // クリアボタン
+  html += `<div style="margin-bottom:8px">
+    <button id="btnClearDailyReq" class="btn" style="font-size:13px">🗑 上書き設定を全てクリア</button>
+    <span class="hint" style="margin-left:8px">上書きしたセルだけ削除し、デフォルト値に戻します</span>
+  </div>`;
+  html += '<table style="border-collapse:collapse;font-size:12px">';
   // ヘッダー1段目: 日付（曜日で色分け）
   html += '<thead><tr><th style="padding:4px 6px;border:1px solid #ccc;background:#f0f0f0;position:sticky;left:0;z-index:1">シフト / 部門</th>';
   for (let d = 1; d <= days; d++) {
@@ -581,6 +587,22 @@ function renderDailyReqPanel() {
 
   html += '</tbody></table></div>';
   container.innerHTML = html;
+
+  // 全クリアボタン
+  const btnClear = container.querySelector('#btnClearDailyReq');
+  if (btnClear) {
+    btnClear.addEventListener('click', () => {
+      const emp  = Object.keys(AppState.dailyRequirements || {}).some(k => Object.keys(AppState.dailyRequirements[k] || {}).length > 0);
+      const cast = Object.keys(AppState.dailyRequirementsCast || {}).some(k => Object.keys(AppState.dailyRequirementsCast[k] || {}).length > 0);
+      if (!emp && !cast) { toast('上書き設定はありません', 'info'); return; }
+      if (!confirm('日別の上書き設定を全てクリアしますか？\nデフォルト必要人数には影響しません。')) return;
+      AppState.dailyRequirements     = {};
+      AppState.dailyRequirementsCast = {};
+      autoSave();
+      renderDailyReqPanel();
+      toast('日別上書き設定をクリアしました', 'success');
+    });
+  }
 
   container.querySelectorAll('.daily-req-input').forEach(el => {
     el.addEventListener('change', e => {
