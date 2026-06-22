@@ -248,36 +248,60 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
     });
   });
 
-  // 副店長の休みは「毎日1人は出勤」制約を守るため、全員同日に重ならないよう配置する
+  // 副店長の「出勤しない日」(公休・有給を含む) は「毎日1人は出勤」制約を守るため
+  // 全員同日に重ならないよう配置する
   const vmList = staff.filter(s => s.positionType === 'viceManager');
-  const vmRestByDay = {};
+  const vmOffByDay = {};
   vmList.forEach(s => {
     for (let d = 1; d <= days; d++) {
-      if (locked[s.id][d] && isPublicOff(shifts[s.id][d])) vmRestByDay[d] = (vmRestByDay[d] || 0) + 1;
+      if (locked[s.id][d] && isOff(shifts[s.id][d])) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
     }
   });
   // 副店長2人以上: 1日に休めるのは（人数-1）まで（毎日1人は出勤）
   // 副店長1人: ルール自体がオフなので制限なし（maxOff通り休める）
-  const maxVmRestPerDay = vmList.length >= 2 ? vmList.length - 1 : vmList.length;
+  const maxVmOffPerDay = vmList.length >= 2 ? vmList.length - 1 : vmList.length;
 
-  // Step1: 各スタッフに休日を配置（ロック済みの公休のみ目標から差し引く。有給は別枠）
+  // Step0: 有給を目標日数まで自動配置（日付未指定分をアプリが割り当てロックする）
+  // カレンダーで個別指定済みの有給はロック済みなので差し引く
+  staff.forEach(s => {
+    const target = s.paidLeave || 0;
+    if (target <= 0) return;
+    const isVm = s.positionType === 'viceManager';
+    let alreadyPaid = 0;
+    const cands = [];
+    for (let d = 1; d <= days; d++) {
+      if (locked[s.id][d]) { if (shifts[s.id][d] === '有') alreadyPaid++; continue; }
+      if (eventDays[s.id] && eventDays[s.id].has(d)) continue;
+      if (isVm && (vmOffByDay[d] || 0) >= maxVmOffPerDay) continue;
+      cands.push(d);
+    }
+    const need = Math.max(0, target - alreadyPaid);
+    shuffleArray(cands);
+    cands.slice(0, need).forEach(d => {
+      shifts[s.id][d] = '有';
+      locked[s.id][d] = true;
+      if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
+    });
+  });
+
+  // Step1: 各スタッフに公休を配置（ロック済みの公休のみ目標から差し引く。有給は別枠）
   staff.forEach(s => {
     const isVm = s.positionType === 'viceManager';
     let alreadyOff = 0;
     const unlockedDays = [];
     for (let d = 1; d <= days; d++) {
       if (locked[s.id][d] && isPublicOff(shifts[s.id][d])) alreadyOff++;
-      // 行事の対象日は初期解では休みを置かない
+      // 行事の対象日・ロック済み日は初期解では休みを置かない
       if (locked[s.id][d] || (eventDays[s.id] && eventDays[s.id].has(d))) continue;
       // 副店長は、既に上限人数が休む予定の日は候補から除外（全員休みを防ぐ）
-      if (isVm && (vmRestByDay[d] || 0) >= maxVmRestPerDay) continue;
+      if (isVm && (vmOffByDay[d] || 0) >= maxVmOffPerDay) continue;
       unlockedDays.push(d);
     }
     const needMoreOff = Math.max(0, (s.maxOff || 0) - alreadyOff);
     shuffleArray(unlockedDays);
     unlockedDays.slice(0, needMoreOff).forEach(d => {
       shifts[s.id][d] = '休';
-      if (isVm) vmRestByDay[d] = (vmRestByDay[d] || 0) + 1;
+      if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
     });
   });
 

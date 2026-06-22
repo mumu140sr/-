@@ -593,6 +593,7 @@ function setupStaffPanel() {
       positionType:    'staff',
       allowedShifts:   ['早', '遅'],
       maxOff:          9,
+      paidLeave:       0,
       prefs:           ['早可', '遅可'],
       balance:         'balanced',
       prevConsecutive: 0,
@@ -650,6 +651,10 @@ function renderStaffTable() {
                data-field="maxOff" data-id="${s.id}" style="width:50px"/>
       </td>
       <td>
+        <input type="number" min="0" max="31" value="${s.paidLeave || 0}"
+               data-field="paidLeave" data-id="${s.id}" style="width:50px"/>
+      </td>
+      <td>
         <div class="shift-pref">
           ${SHIFT_PREFS.map(p =>
             `<label><input type="checkbox" data-pref="${p}" data-id="${s.id}"
@@ -694,7 +699,7 @@ function renderStaffTable() {
       const staff = AppState.staff.find(s => s.id === id);
       if (!staff) return;
       let val = e.target.value;
-      if (['maxOff', 'prevConsecutive'].includes(field)) val = parseInt(val) || 0;
+      if (['maxOff', 'prevConsecutive', 'paidLeave'].includes(field)) val = parseInt(val) || 0;
       staff[field] = val;
       autoSave();
     });

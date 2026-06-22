@@ -22,7 +22,7 @@ function optimizeScheduleViaWorker(progressCallback) {
 
     let worker;
     try {
-      worker = new Worker('js/optimizer.worker.js?v=8');
+      worker = new Worker('js/optimizer.worker.js?v=9');
     } catch (e) {
       console.warn('[worker-client] Worker creation failed, falling back to main thread:', e);
       // フォールバック: メインスレッドで実行
