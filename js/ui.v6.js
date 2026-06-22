@@ -417,6 +417,14 @@ function renderRoleTable() {
         const oldKey = type.key;
         const newKey = e.target.value.trim();
         if (newKey && newKey !== oldKey) {
+          // 特別ルールが紐づくキー（責任者・総務）の改名はルールを無効化するため警告
+          const SPECIAL_RULE_KEYS = ['早責', '遅責', '早総務', '遅総務'];
+          if (SPECIAL_RULE_KEYS.includes(oldKey)) {
+            const ok = confirm(
+              `「${oldKey}」には責任者ヒエラルキー・重複禁止などの特別ルールが紐づいています。\n` +
+              `キー名を変更するとこれらのルールが無効になります。本当に変更しますか？`);
+            if (!ok) { e.target.value = oldKey; return; }
+          }
           if (AppState.roleRequirements[oldKey] !== undefined) {
             AppState.roleRequirements[newKey] = AppState.roleRequirements[oldKey];
             delete AppState.roleRequirements[oldKey];

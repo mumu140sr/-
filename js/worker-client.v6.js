@@ -22,7 +22,7 @@ function optimizeScheduleViaWorker(progressCallback) {
 
     let worker;
     try {
-      worker = new Worker('js/optimizer.worker.js');
+      worker = new Worker('js/optimizer.worker.js?v=8');
     } catch (e) {
       console.warn('[worker-client] Worker creation failed, falling back to main thread:', e);
       // フォールバック: メインスレッドで実行
@@ -67,6 +67,8 @@ function optimizeScheduleViaWorker(progressCallback) {
         shiftTypes:           AppState.shiftTypes,
         roleRequirements:     AppState.roleRequirements,
         roleRequirementsCast: AppState.roleRequirementsCast,
+        dailyRequirements:     AppState.dailyRequirements,
+        dailyRequirementsCast: AppState.dailyRequirementsCast,
         staff:                AppState.staff,
         requests:             AppState.requests,
         fixedShifts:          AppState.fixedShifts,
