@@ -5,7 +5,7 @@
 
 // data.js と optimizer.js を Worker スコープに取り込む
 // importScripts は Worker 専用 API
-self.importScripts('data.js?v=14', 'optimizer.js?v=14');
+self.importScripts('data.js?v=19', 'optimizer.js?v=19');
 
 /**
  * メインスレッドからのリクエスト受信
@@ -24,6 +24,7 @@ self.addEventListener('message', async (e) => {
     AppState.roleRequirementsCast = incoming.roleRequirementsCast || {};
     AppState.dailyRequirements     = incoming.dailyRequirements     || {};
     AppState.dailyRequirementsCast = incoming.dailyRequirementsCast || {};
+    AppState.skills                = incoming.skills                || [];
     AppState.staff       = incoming.staff       || [];
     AppState.requests    = incoming.requests    || {};
     AppState.fixedShifts = incoming.fixedShifts || {};

@@ -651,9 +651,89 @@ function setupStaffPanel() {
       prevConsecutive: 0,
       prevLastShift:   '',
       note:            '',
+      skills:          [],
     });
     renderStaffTable();
     autoSave();
+  });
+
+  setupSkillsPanel();
+}
+
+// ===== スキル設定（営業など、遅番に必要なスキル保有人数を管理） =====
+function setupSkillsPanel() {
+  const btn = document.getElementById('btnAddSkill');
+  if (btn && !btn._wired) {
+    btn._wired = true;
+    btn.addEventListener('click', () => {
+      if (!Array.isArray(AppState.skills)) AppState.skills = [];
+      AppState.skills.push({ name: '新スキル', lateReq: 1 });
+      renderSkillsPanel();
+      renderStaffTable();
+      autoSave();
+    });
+  }
+  renderSkillsPanel();
+}
+
+function renderSkillsPanel() {
+  const container = document.getElementById('skillsList');
+  if (!container) return;
+  const skills = AppState.skills || [];
+  if (skills.length === 0) {
+    container.innerHTML = '<p class="hint">スキル未登録です。「＋スキル追加」で登録すると、各スタッフにチェック欄が増えます。</p>';
+    return;
+  }
+  container.innerHTML = skills.map((sk, i) => `
+    <div class="skill-row" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <input type="text" value="${escapeHtml(sk.name)}" data-skill-idx="${i}" data-skill-field="name"
+             style="width:140px" placeholder="スキル名（例: 営業）"/>
+      <span class="hint">遅番に必要な人数:</span>
+      <input type="number" min="0" max="20" value="${sk.lateReq || 0}" data-skill-idx="${i}" data-skill-field="lateReq"
+             style="width:56px"/>
+      <button class="btn-icon" data-skill-del="${i}" title="削除">🗑</button>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('input[data-skill-field]').forEach(el => {
+    el.addEventListener('change', e => {
+      const idx   = parseInt(e.target.dataset.skillIdx);
+      const field = e.target.dataset.skillField;
+      if (!AppState.skills[idx]) return;
+      const oldName = AppState.skills[idx].name;
+      if (field === 'lateReq') {
+        AppState.skills[idx].lateReq = parseInt(e.target.value) || 0;
+      } else {
+        const newName = e.target.value.trim() || '無名';
+        AppState.skills[idx].name = newName;
+        // スタッフが持つスキル名も追従させる
+        AppState.staff.forEach(s => {
+          if (Array.isArray(s.skills)) {
+            const j = s.skills.indexOf(oldName);
+            if (j >= 0) s.skills[j] = newName;
+          }
+        });
+        renderStaffTable();
+      }
+      autoSave();
+    });
+  });
+
+  container.querySelectorAll('button[data-skill-del]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const idx = parseInt(e.target.closest('button[data-skill-del]').dataset.skillDel);
+      const sk = AppState.skills[idx];
+      if (!sk) return;
+      if (!confirm(`スキル「${sk.name}」を削除しますか？`)) return;
+      // スタッフからも除去
+      AppState.staff.forEach(s => {
+        if (Array.isArray(s.skills)) s.skills = s.skills.filter(n => n !== sk.name);
+      });
+      AppState.skills.splice(idx, 1);
+      renderSkillsPanel();
+      renderStaffTable();
+      autoSave();
+    });
   });
 }
 
@@ -697,6 +777,16 @@ function renderStaffTable() {
       </td>
       <td>
         <div class="allowed-shifts-wrap">${checkboxes}</div>
+      </td>
+      <td>
+        <div class="skill-checks" style="display:flex;flex-direction:column;gap:2px;min-width:70px">
+          ${(AppState.skills || []).length === 0
+            ? '<span class="hint" style="white-space:nowrap">—</span>'
+            : (AppState.skills || []).map(sk =>
+                `<label style="white-space:nowrap"><input type="checkbox" data-skill="${escapeHtml(sk.name)}" data-id="${s.id}"
+                   ${(s.skills || []).includes(sk.name) ? 'checked' : ''}/>${escapeHtml(sk.name)}</label>`
+              ).join('')}
+        </div>
       </td>
       <td>
         <input type="number" min="0" max="31" value="${s.maxOff}"
@@ -790,6 +880,23 @@ function renderStaffTable() {
       } else {
         staff.allowedShifts = staff.allowedShifts.filter(k => k !== shiftKey);
         if (label) label.style.background = '#edf2f7';
+      }
+      autoSave();
+    });
+  });
+
+  // スキルチェックボックス
+  tbody.querySelectorAll('input[data-skill]').forEach(el => {
+    el.addEventListener('change', e => {
+      const id    = e.target.dataset.id;
+      const skill = e.target.dataset.skill;
+      const staff = AppState.staff.find(s => s.id === id);
+      if (!staff) return;
+      if (!Array.isArray(staff.skills)) staff.skills = [];
+      if (e.target.checked) {
+        if (!staff.skills.includes(skill)) staff.skills.push(skill);
+      } else {
+        staff.skills = staff.skills.filter(n => n !== skill);
       }
       autoSave();
     });

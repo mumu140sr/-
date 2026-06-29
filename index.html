@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=18" />
+<link rel="stylesheet" href="css/style.css?v=19" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -155,6 +155,7 @@
               <th>部門</th>
               <th>役職</th>
               <th>担当シフト</th>
+              <th>スキル</th>
               <th>公休数<br><small>(月の休み数)</small></th>
               <th>有給<br><small>(月の有給数)</small></th>
               <th>希望<br><small>早可/遅可</small></th>
@@ -169,6 +170,15 @@
         </table>
       </div>
     </div>
+    <div class="card">
+      <h3>🎯 スキル設定</h3>
+      <p class="hint">「営業できる人」などのスキルを登録し、遅番に最低何人必要かを設定できます。登録すると上のスタッフ表に各スキルのチェック欄が表示されます。</p>
+      <div class="toolbar" style="margin-bottom:8px">
+        <button class="btn btn-primary" id="btnAddSkill">＋ スキル追加</button>
+      </div>
+      <div id="skillsList"></div>
+    </div>
+
     <div class="card">
       <h3>役職タイプ説明</h3>
       <ul class="hint-list">
@@ -277,11 +287,11 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=18"></script>
-<script src="js/optimizer.v6.js?v=18"></script>
-<script src="js/worker-client.v6.js?v=18"></script>
-<script src="js/ai-explain.v6.js?v=18"></script>
-<script src="js/ui.v6.js?v=18"></script>
-<script src="js/app.v6.js?v=18"></script>
+<script src="js/data.v6.js?v=19"></script>
+<script src="js/optimizer.v6.js?v=19"></script>
+<script src="js/worker-client.v6.js?v=19"></script>
+<script src="js/ai-explain.v6.js?v=19"></script>
+<script src="js/ui.v6.js?v=19"></script>
+<script src="js/app.v6.js?v=19"></script>
 </body>
 </html>

@@ -28,7 +28,7 @@ function _runViaWorker(mode, progressCallback) {
 
     let worker;
     try {
-      worker = new Worker('js/optimizer.worker.js?v=14');
+      worker = new Worker('js/optimizer.worker.js?v=19');
     } catch (e) {
       console.warn('[worker-client] Worker creation failed, falling back to main thread:', e);
       return fallback();
@@ -73,6 +73,7 @@ function _runViaWorker(mode, progressCallback) {
         roleRequirementsCast:  AppState.roleRequirementsCast,
         dailyRequirements:     AppState.dailyRequirements,
         dailyRequirementsCast: AppState.dailyRequirementsCast,
+        skills:                AppState.skills,
         staff:                 AppState.staff,
         requests:              AppState.requests,
         fixedShifts:           AppState.fixedShifts,

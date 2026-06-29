@@ -86,6 +86,7 @@ const DEFAULT_PENALTIES = {
   eventAbsent:       20000, // イベント日に対象スタッフが休んでいる
   restPairBonus:       100, // 2連休以上のまとまった休みへのボーナス（スコアから減算）
   nightAfterWork:     8000, // 夜勤翌日に休みでない（夜勤明けは必ず休み）
+  skillLateShortage:  9000, // 遅番に必要スキル保有者が不足（1人あたり）
 };
 
 // アプリケーションの状態
@@ -110,6 +111,8 @@ const AppState = {
   dailyRequirements: {},
   // キャスト部門の日別必要人数
   dailyRequirementsCast: {},
+  // スキル要件 [{ name: '営業', lateReq: 2 }] — 遅番にそのスキル保有者が lateReq 人以上必要
+  skills: [],
   // スタッフ一覧
   // 各スタッフ: { id, name, department, positionType, allowedShifts[], maxOff, prefs[], balance, prevConsecutive, prevLastShift, note }
   staff: [],
@@ -257,6 +260,7 @@ function saveToStorage() {
       roleRequirementsCast: AppState.roleRequirementsCast,
       dailyRequirements:    AppState.dailyRequirements,
       dailyRequirementsCast: AppState.dailyRequirementsCast,
+      skills:               AppState.skills,
       staff:                AppState.staff,
       requests:             AppState.requests,
       shifts:               AppState.shifts,
@@ -294,6 +298,7 @@ function loadFromStorage() {
     AppState.roleRequirementsCast  = data.roleRequirementsCast  || {};
     AppState.dailyRequirements     = data.dailyRequirements     || {};
     AppState.dailyRequirementsCast = data.dailyRequirementsCast || {};
+    AppState.skills                = Array.isArray(data.skills) ? data.skills : [];
 
     // events（v4以降）
     AppState.events = Array.isArray(data.events) ? data.events : [];
@@ -329,6 +334,7 @@ function loadFromStorage() {
         prevConsecutive: s.prevConsecutive || 0,
         prevLastShift:   s.prevLastShift || '',
         note:            s.note || '',
+        skills:          Array.isArray(s.skills) ? s.skills : [],
       };
     });
 
@@ -362,6 +368,7 @@ function resetAll() {
   AppState.roleRequirementsCast  = {};
   AppState.dailyRequirements     = {};
   AppState.dailyRequirementsCast = {};
+  AppState.skills                = [];
   AppState.settings.penalties = { ...DEFAULT_PENALTIES };
   _staffIdCounter = 1;
   localStorage.removeItem('shiftAppData');
@@ -399,6 +406,7 @@ function addSampleStaff() {
       prevConsecutive: 0,
       prevLastShift:   '',
       note:            '',
+      skills:          [],
     });
   });
 }
