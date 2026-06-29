@@ -667,7 +667,7 @@ function setupSkillsPanel() {
     btn._wired = true;
     btn.addEventListener('click', () => {
       if (!Array.isArray(AppState.skills)) AppState.skills = [];
-      AppState.skills.push({ name: '新スキル', lateReq: 1 });
+      AppState.skills.push({ name: '営業', lateReq: 0 });
       renderSkillsPanel();
       renderStaffTable();
       autoSave();
