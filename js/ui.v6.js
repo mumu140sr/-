@@ -667,7 +667,7 @@ function setupSkillsPanel() {
     btn._wired = true;
     btn.addEventListener('click', () => {
       if (!Array.isArray(AppState.skills)) AppState.skills = [];
-      AppState.skills.push({ name: '営業', lateReq: 0 });
+      AppState.skills.push({ name: '営業', target: 'late', req: 0 });
       renderSkillsPanel();
       renderStaffTable();
       autoSave();
@@ -684,16 +684,23 @@ function renderSkillsPanel() {
     container.innerHTML = '<p class="hint">スキル未登録です。「＋スキル追加」で登録すると、各スタッフにチェック欄が増えます。</p>';
     return;
   }
-  container.innerHTML = skills.map((sk, i) => `
+  container.innerHTML = skills.map((sk, i) => {
+    const target = sk.target || 'late';
+    const req    = (sk.req != null ? sk.req : (sk.lateReq || 0));
+    return `
     <div class="skill-row" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
       <input type="text" value="${escapeHtml(sk.name)}" data-skill-idx="${i}" data-skill-field="name"
              style="width:140px" placeholder="スキル名（例: 営業）"/>
-      <span class="hint">遅番に必要な人数:</span>
-      <input type="number" min="0" max="20" value="${sk.lateReq || 0}" data-skill-idx="${i}" data-skill-field="lateReq"
+      <select data-skill-idx="${i}" data-skill-field="target" style="width:72px">
+        <option value="late"  ${target === 'late'  ? 'selected' : ''}>遅番</option>
+        <option value="early" ${target === 'early' ? 'selected' : ''}>早番</option>
+      </select>
+      <span class="hint">に必要な人数:</span>
+      <input type="number" min="0" max="20" value="${req}" data-skill-idx="${i}" data-skill-field="req"
              style="width:56px"/>
       <button class="btn-icon" data-skill-del="${i}" title="削除">🗑</button>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
   container.querySelectorAll('input[data-skill-field]').forEach(el => {
     el.addEventListener('change', e => {
@@ -701,8 +708,11 @@ function renderSkillsPanel() {
       const field = e.target.dataset.skillField;
       if (!AppState.skills[idx]) return;
       const oldName = AppState.skills[idx].name;
-      if (field === 'lateReq') {
-        AppState.skills[idx].lateReq = parseInt(e.target.value) || 0;
+      if (field === 'req') {
+        AppState.skills[idx].req = parseInt(e.target.value) || 0;
+        delete AppState.skills[idx].lateReq; // 旧フィールドを掃除
+      } else if (field === 'target') {
+        AppState.skills[idx].target = e.target.value;
       } else {
         const newName = e.target.value.trim() || '無名';
         AppState.skills[idx].name = newName;

@@ -1308,16 +1308,18 @@ function calculateScore(shifts, allowedShifts, days, P) {
       else if (diff < 0) score += (-diff) * (SOLO_SHIFT_KEYS.includes(k) ? P.respDuplicate : P.overstaff);
     });
 
-    // スキル別: 遅番に必要なスキル保有者数を満たすか
+    // スキル別: 指定時間帯（早番/遅番）に必要なスキル保有者数を満たすか
     const skills = AppState.skills || [];
     if (skills.length) {
       skills.forEach(sk => {
-        const need = sk.lateReq || 0;
+        const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
         if (!need) return;
+        const early = (sk.target || 'late') === 'early';
         let have = 0;
         staff.forEach(s => {
           const sh = shifts[s.id][d];
-          if (isWork(sh) && isLate(sh) && (s.skills || []).includes(sk.name)) have++;
+          const inTarget = early ? isEarlyCategory(sh) : isLate(sh);
+          if (isWork(sh) && inTarget && (s.skills || []).includes(sk.name)) have++;
         });
         if (have < need) score += (need - have) * (P.skillLateShortage || 9000);
       });
@@ -1602,21 +1604,24 @@ function checkViolations(shifts) {
     }
   }
 
-  // スキル別: 遅番に必要なスキル保有者が足りているか
+  // スキル別: 指定の時間帯（早番/遅番）に必要なスキル保有者が足りているか
   (AppState.skills || []).forEach(sk => {
-    const need = sk.lateReq || 0;
+    const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
     if (!need) return;
+    const target = sk.target || 'late';
+    const label  = target === 'early' ? '早番' : '遅番';
+    const inTarget = (sh) => target === 'early' ? isEarlyCategory(sh) : isLate(sh);
     for (let d = 1; d <= days; d++) {
       let have = 0;
       staff.forEach(s => {
         const sh = (shifts[s.id] || {})[d] || '';
-        if (isWork(sh) && isLate(sh) && (s.skills || []).includes(sk.name)) have++;
+        if (isWork(sh) && inTarget(sh) && (s.skills || []).includes(sk.name)) have++;
       });
       if (have < need) {
         violations.push({
           staffId: null, day: d, type: 'skill-late',
-          message: `🚨 ${d}日 遅番に「${sk.name}」できる人が${have}人（${need}人必要）`,
-          action:  `「${sk.name}」スキルのある人を遅番に配置してください`,
+          message: `🚨 ${d}日 ${label}に「${sk.name}」できる人が${have}人（${need}人必要）`,
+          action:  `「${sk.name}」スキルのある人を${label}に配置してください`,
         });
       }
     }
