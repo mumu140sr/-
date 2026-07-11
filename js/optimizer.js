@@ -136,11 +136,15 @@ async function repairSchedule(progressCallback) {
 
   const days     = getDaysInMonth(AppState.settings.targetMonth);
   const groups   = getDepartmentGroups(AppState.staff);
-  const MAX_PASS = 5; // 改善が止まるまで最大5回繰り返す
+  const MAX_PASS = 8;          // 改善が止まるまで最大8回
+  const RADIUS   = [1, 2, 3];  // 段階レベルごとの前後日ウィンドウ
+  const FULL_LEVEL = 3;        // レベル3以上は部門全体を解放して全面再最適化
 
-  // 現在の最良（seed）から1パス修復する内部関数
-  const onePass = async (seedShifts, seedViolations, passLabel) => {
+  // 現在の最良（seed）から1パス修復する内部関数。level が上がるほど動かす範囲を広げる。
+  const onePass = async (seedShifts, seedViolations, level, passLabel) => {
     const merged = deepCopyShifts(seedShifts);
+    const radius = RADIUS[Math.min(level, RADIUS.length - 1)];
+    const full   = level >= FULL_LEVEL;
     try {
       for (let gi = 0; gi < groups.length; gi++) {
         const g        = groups[gi];
@@ -148,18 +152,23 @@ async function repairSchedule(progressCallback) {
         const cells    = new Set();
         const staffAll = new Set();
         const addCell  = (sid, d) => {
-          for (let dd = d - 1; dd <= d + 1; dd++) {
+          for (let dd = d - radius; dd <= d + radius; dd++) {
             if (dd >= 1 && dd <= days) cells.add(sid + ':' + dd);
           }
         };
-        seedViolations.forEach(v => {
-          if (v.staffId && groupIds.has(v.staffId)) {
-            if (v.day === 0) staffAll.add(v.staffId);
-            else addCell(v.staffId, v.day);
-          } else if (!v.staffId && v.day >= 1) {
-            g.staff.forEach(s => addCell(s.id, v.day));
-          }
-        });
+        if (full) {
+          // 全面再最適化: 部門の全スタッフを解放（希望休・固定は optimizeGroupSchedule 側で保持）
+          g.staff.forEach(s => staffAll.add(s.id));
+        } else {
+          seedViolations.forEach(v => {
+            if (v.staffId && groupIds.has(v.staffId)) {
+              if (v.day === 0) staffAll.add(v.staffId);
+              else addCell(v.staffId, v.day);
+            } else if (!v.staffId && v.day >= 1) {
+              g.staff.forEach(s => addCell(s.id, v.day));
+            }
+          });
+        }
         if (cells.size === 0 && staffAll.size === 0) continue;
 
         _optStaff = g.staff; _optReqs = g.reqs; _optDailyReqs = g.dailyReqs;
@@ -177,16 +186,19 @@ async function repairSchedule(progressCallback) {
     return { shifts: merged, violations: checkViolations(merged) };
   };
 
-  // 改善が続く限り繰り返す（悪化・停滞したら打ち切り）
+  // 改善が続く限り繰り返す。停滞したら範囲を段階的に広げ、全面再最適化まで試す。
   let bestShifts     = origShifts;
   let bestViolations = origViolations;
+  let level          = 0;
   for (let pass = 0; pass < MAX_PASS && bestViolations.length > 0; pass++) {
-    const label = `修復中(${pass + 1}/${MAX_PASS})...`;
-    const r = await onePass(bestShifts, bestViolations, label);
+    const label = `修復中(${pass + 1})...`;
+    const r = await onePass(bestShifts, bestViolations, level, label);
     if (r.violations.length < bestViolations.length) {
       bestShifts = r.shifts; bestViolations = r.violations;
+      level = 0; // 改善したら再び狭い範囲（安く速い）に戻す
     } else {
-      break; // これ以上減らないので終了
+      level++;                    // 停滞 → 範囲を広げて再挑戦
+      if (level > FULL_LEVEL) break; // 全面再最適化でも減らなければ終了
     }
   }
 
