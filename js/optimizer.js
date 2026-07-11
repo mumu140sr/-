@@ -190,8 +190,9 @@ async function repairSchedule(progressCallback) {
   let bestShifts     = origShifts;
   let bestViolations = origViolations;
   let level          = 0;
+  const scope = ['狭い範囲', 'やや広い範囲', '広い範囲', '全面見直し'];
   for (let pass = 0; pass < MAX_PASS && bestViolations.length > 0; pass++) {
-    const label = `修復中(${pass + 1})...`;
+    const label = `修復中 ${pass + 1}回目（${scope[Math.min(level, 3)]}）｜ 残りエラー ${bestViolations.length}件 →`;
     const r = await onePass(bestShifts, bestViolations, level, label);
     if (r.violations.length < bestViolations.length) {
       bestShifts = r.shifts; bestViolations = r.violations;
@@ -200,7 +201,12 @@ async function repairSchedule(progressCallback) {
       level++;                    // 停滞 → 範囲を広げて再挑戦
       if (level > FULL_LEVEL) break; // 全面再最適化でも減らなければ終了
     }
+    // 各パス終了時に「今の残りエラー数」を通知
+    progressCallback && progressCallback(
+      Math.min(99, Math.floor(((pass + 1) / MAX_PASS) * 100)),
+      `修復中… 残りエラー ${bestViolations.length}件（${pass + 1}回目まで完了）`);
   }
+  progressCallback && progressCallback(100, `修復完了 — 残りエラー ${bestViolations.length}件`);
 
   AppState.generated = true;
   if (bestViolations.length < origViolations.length) {
@@ -277,8 +283,10 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
     // 修復モード: 現在のシフトを種にして、エラー箇所だけロックを外す
     staff.forEach(s => {
       for (let d = 1; d <= days; d++) {
-        shifts[s.id][d] = (repairCtx.seedShifts[s.id] || {})[d] || '';
+        const seedVal = (repairCtx.seedShifts[s.id] || {})[d] || '';
+        shifts[s.id][d] = seedVal;
         if (locked[s.id][d]) continue; // 固定シフト・希望休はそのまま動かさない
+        if (seedVal === '有') { locked[s.id][d] = true; continue; } // 有給は消さない（動かさない）
         const inError = repairCtx.cells.has(s.id + ':' + d) || repairCtx.staffAll.has(s.id);
         locked[s.id][d] = !inError;
       }
