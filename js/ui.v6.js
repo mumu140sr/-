@@ -1074,6 +1074,10 @@ function renderShiftLegend() {
     <span class="legend-color" style="background:#fff9c4"></span>
     <span>有: 有給</span>
   </div>`;
+  html += `<div class="legend-item">
+    <span class="legend-color" style="background:#ffe0b2"></span>
+    <span>余: 余剰（人員余り）</span>
+  </div>`;
   el.innerHTML = html;
 }
 
@@ -1093,7 +1097,7 @@ function renderResultTable() {
   }
 
   // ヘッダー
-  const STAT_COLS = 6; // 名前列1 + 統計列5（公休/有給他/出勤/差/労働時間）
+  const STAT_COLS = 7; // 名前列1 + 統計列6（公休/有給他/余/出勤/差/労働時間）
   const thead = document.createElement('thead');
   let headRow = '<tr><th>名前</th>';
   for (let d = 1; d <= days; d++) {
@@ -1101,7 +1105,7 @@ function renderResultTable() {
     const cls = w === 0 ? 'weekend-sun' : w === 6 ? 'weekend-sat' : '';
     headRow += `<th class="${cls}">${d}<br><small>${getWeekdayLabel(w)}</small></th>`;
   }
-  headRow += '<th>公休</th><th>有給他</th><th>出勤</th><th>差</th><th>労働<br><small>時間</small></th></tr>';
+  headRow += '<th>公休</th><th>有給他</th><th>余<br><small>余剰</small></th><th>出勤</th><th>差</th><th>労働<br><small>時間</small></th></tr>';
   thead.innerHTML = headRow;
   table.appendChild(thead);
 
@@ -1126,7 +1130,7 @@ function renderResultTable() {
     // スタッフ行
     g.staff.forEach(s => {
       const tr = document.createElement('tr');
-      let workCount = 0, publicOffCount = 0, otherOffCount = 0, totalHours = 0;
+      let workCount = 0, publicOffCount = 0, otherOffCount = 0, surplusCount = 0, totalHours = 0;
       let cells = `<td>${escapeHtml(s.name)}</td>`;
       for (let d = 1; d <= days; d++) {
         const w     = getWeekday(AppState.settings.targetMonth, d);
@@ -1143,6 +1147,7 @@ function renderResultTable() {
           : (vio ? `title="${vMsg}"` : '');
         if (isWork(shift)) { workCount++; totalHours += getShiftHours(shift); }
         else if (isPublicOff(shift)) publicOffCount++;
+        else if (shift === '余') surplusCount++;
         else if (isOff(shift)) otherOffCount++;
         cells += `<td class="${wcls}${fixCls}" data-sid="${s.id}" data-day="${d}">
           <span class="shift-cell ${cls}${vio}" style="${sty}" draggable="true" ${titleAttr}>${shift}</span>
@@ -1153,7 +1158,8 @@ function renderResultTable() {
       const diffStr = offDiff === 0 ? '0' : (offDiff > 0 ? `+${offDiff}` : `${offDiff}`);
       const diffSty = offDiff < 0 ? 'color:#c53030;font-weight:700'
                     : offDiff > 0 ? 'color:#b7791f;font-weight:700' : '';
-      cells += `<td>${publicOffCount}</td><td>${otherOffCount || ''}</td>` +
+      const surplusStr = surplusCount > 0 ? `<span style="color:#bf5b00;font-weight:700">${surplusCount}</span>` : '';
+      cells += `<td>${publicOffCount}</td><td>${otherOffCount || ''}</td><td>${surplusStr}</td>` +
                `<td>${workCount}</td><td style="${diffSty}">${diffStr}</td>` +
                `<td>${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)}</td>`;
       tr.innerHTML = cells;
@@ -1177,7 +1183,7 @@ function renderResultTable() {
         const cls = count < dayReq ? 'under' : (count > dayReq ? 'over' : '');
         cells += `<td class="${cls}">${count}</td>`;
       }
-      cells += '<td></td><td></td><td></td><td></td><td></td>';
+      cells += '<td></td><td></td><td></td><td></td><td></td><td></td>';
       tr.innerHTML = cells;
       tbody.appendChild(tr);
     });
@@ -1311,6 +1317,7 @@ function renderModalOptions() {
     { shift: '公', label: '公休扱い',   bg: '#f5f5f5', color: '#424242' },
     { shift: '有', label: '有給',       bg: '#fff9c4', color: '#827717' },
     { shift: '半', label: '半休',       bg: '#e8f5e9', color: '#2e7d32' },
+    { shift: '余', label: '余剰（人員余り）', bg: '#ffe0b2', color: '#bf5b00' },
     { shift: '☆', label: '希望休',     bg: '#eeeeee', color: '#616161' },
     { shift: '季', label: '季節休暇',   bg: '#eeeeee', color: '#616161' },
     { shift: '引', label: '引継',       bg: '#eeeeee', color: '#616161' },

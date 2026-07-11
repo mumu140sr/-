@@ -70,11 +70,43 @@ async function optimizeSchedule(progressCallback) {
   }
 
   AppState.shifts     = mergedShifts;
+  markSurplusRest(AppState.shifts); // 公休を目標数ちょうどにし、余った休みを「余」に振り分ける
   AppState.violations = checkViolations(mergedShifts);
   AppState.generated  = true;
 
   // restPairBonus でスコアが負になり得るため、成功判定は違反件数で行う
   return { score: totalScore, violations: AppState.violations, success: AppState.violations.length === 0 };
+}
+
+/**
+ * 公休を目標数（maxOff）ちょうどに整え、超過分の休みを「余」（余剰）に振り替える。
+ * - 希望休・固定で入れた公休は必ず公休のまま残す（意図した休みのため）
+ * - 有給（有）はそのまま（別枠）
+ * これにより「公休は設定数を全部消化」「余った人員は余で可視化」を実現する。
+ */
+function markSurplusRest(shifts) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  staff.forEach(s => {
+    if (!shifts[s.id]) return;
+    const quota = s.maxOff || 0;
+    let lockedPublic = 0;
+    const freePublicDays = [];
+    for (let d = 1; d <= days; d++) {
+      const sh = shifts[s.id][d] || '';
+      if (!isPublicOff(sh)) continue; // 公休系のみ対象（有給・余は対象外）
+      const locked = isPublicOff((AppState.requests[s.id]    || {})[d]) ||
+                     isPublicOff((AppState.fixedShifts[s.id] || {})[d]);
+      if (locked) lockedPublic++;
+      else freePublicDays.push(d);
+    }
+    // 目標公休数のうち、固定分を除いた残りだけを公休として残し、超過分は「余」にする
+    let keep = Math.max(0, quota - lockedPublic);
+    freePublicDays.forEach(d => {
+      if (keep > 0) keep--;
+      else shifts[s.id][d] = '余';
+    });
+  });
 }
 
 /**
@@ -134,6 +166,7 @@ async function repairSchedule(progressCallback) {
     _optStaff = null; _optReqs = null; _optDailyReqs = null;
   }
 
+  markSurplusRest(mergedShifts); // 修復後も公休ちょうど＋余に整える
   const newViolations = checkViolations(mergedShifts);
   // 悪化させない安全装置: 違反が減った時だけ採用、それ以外は元のまま
   if (newViolations.length < baseViolations.length) {
@@ -2054,45 +2087,42 @@ function runAIDiagnosis() {
     }
   }
 
-  // ── 5. 公休余剰の可視化（生成済みシフトがある場合） ──────────
+  // ── 5. 余剰コマ（余）の可視化（生成済みシフトがある場合） ──────────
+  // 公休(maxOff)・有給は満額消化済み。それでも余った人員は「余」として表示。
   if (AppState.generated && AppState.shifts) {
     const surplusItems = [];
     let totalSurplus = 0;
     staff.forEach(s => {
-      const offCount = countOff(AppState.shifts, s, days);
-      const target   = s.maxOff || 0;
-      const excess   = offCount - target;
-      if (excess > 0) {
-        surplusItems.push({ name: s.name, offCount, target, excess });
-        totalSurplus += excess;
+      let yo = 0;
+      for (let d = 1; d <= days; d++) {
+        if ((AppState.shifts[s.id] || {})[d] === '余') yo++;
+      }
+      if (yo > 0) {
+        surplusItems.push({ name: s.name, yo });
+        totalSurplus += yo;
       }
     });
 
     if (surplusItems.length > 0) {
-      // 公休不足スタッフを suggestion 文に反映
-      const shortNames = (AppState.violations || [])
-        .filter(v => v.type === 'off-count')
-        .map(v => { const m = staff.find(s => s.id === v.staffId); return m ? m.name : null; })
-        .filter(Boolean);
-      const shortHint = shortNames.length
-        ? `（特に ${shortNames.join('・')} の公休不足と合わせて解消できます）`
-        : '';
       results.push({
         level: 'warning',
-        title: `公休余剰 合計 +${totalSurplus}コマ（${surplusItems.length}名、約${totalSurplus * 8}時間分の労働減）`,
-        detail: surplusItems
-          .sort((a, b) => b.excess - a.excess)
-          .map(r => `${r.name}: 公休 ${r.offCount}日（目標 ${r.target}日、余剰 +${r.excess}日 ≒ ${r.excess * 8}時間）`)
-          .join('\n'),
+        title: `余剰コマ 合計 ${totalSurplus}コマ（${surplusItems.length}名）— 誰がどれだけ余っているか`,
+        detail:
+          '公休・有給は満額消化済み。それでも人員が余っている分を「余」で表示しています。\n' +
+          '忙しい日の必要人数を増やすか、有給を追加すると、この「余」を出勤・有給に回せます。\n\n' +
+          surplusItems
+            .sort((a, b) => b.yo - a.yo)
+            .map(r => `${r.name}: 余 ${r.yo}コマ`)
+            .join('\n'),
         suggestion:
-          `余剰スタッフの休みを減らして公休不足スタッフの休みを増やすと全体バランスが改善します${shortHint}。` +
-          `「シフト作成」を再実行すると自動的に再配分されます。`,
+          '「日別必要人数（上書き設定）」で忙しい日の人数を増やす、または有給を増やしてから' +
+          '「シフト作成」を再実行すると、余（オレンジ）が減っていきます。',
       });
     } else {
       results.push({
         level: 'ok',
-        title: '公休余剰なし',
-        detail: 'すべてのスタッフが目標公休日数ちょうど（または不足）に収まっています。',
+        title: '余剰コマなし',
+        detail: 'すべてのスタッフが出勤・公休・有給でちょうど埋まっています（余りなし）。',
         suggestion: null,
       });
     }

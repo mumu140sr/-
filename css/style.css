@@ -416,6 +416,7 @@ td.cell-fixed {
 .shift-cell.s-paid        { background: #fff9c4; color: #827717; }
 .shift-cell.s-public      { background: #f5f5f5; color: #424242; }
 .shift-cell.s-half        { background: #e8f5e9; color: #2e7d32; }
+.shift-cell.s-surplus     { background: #ffe0b2; color: #bf5b00; }
 .shift-cell.s-empty       { background: white;   color: #cbd5e0; }
 
 /* 後方互換: 旧クラス名（ロードしたデータが表示される場合のフォールバック） */

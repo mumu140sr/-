@@ -393,7 +393,7 @@ function exportToExcel() {
     const w = getWeekday(AppState.settings.targetMonth, d);
     header.push(`${d}(${getWeekdayLabel(w)})`);
   }
-  header.push('公休', '有給他', '出勤日数', '差', '総労働時間');
+  header.push('公休', '有給他', '余剰', '出勤日数', '差', '総労働時間');
   data.push(header);
 
   groups.forEach(g => {
@@ -402,16 +402,17 @@ function exportToExcel() {
     // 各スタッフ
     g.staff.forEach(s => {
       const row = [s.name];
-      let work = 0, publicOff = 0, otherOff = 0, hours = 0;
+      let work = 0, publicOff = 0, otherOff = 0, surplus = 0, hours = 0;
       for (let d = 1; d <= days; d++) {
         const sh = (AppState.shifts[s.id] || {})[d] || '';
         row.push(sh);
         if (isWork(sh)) { work++; hours += getShiftHours(sh); }
         else if (isPublicOff(sh)) publicOff++;
+        else if (sh === '余') surplus++;
         else if (isOff(sh)) otherOff++;
       }
       const diff = publicOff - (s.maxOff || 0);
-      row.push(publicOff, otherOff, work, diff, Math.round(hours * 10) / 10);
+      row.push(publicOff, otherOff, surplus, work, diff, Math.round(hours * 10) / 10);
       data.push(row);
     });
 
@@ -436,7 +437,7 @@ function exportToExcel() {
   // 列幅設定
   const colWidths = [{ wch: 16 }];
   for (let d = 1; d <= days; d++) colWidths.push({ wch: 6 });
-  colWidths.push({ wch: 6 }, { wch: 7 }, { wch: 9 }, { wch: 5 }, { wch: 11 });
+  colWidths.push({ wch: 6 }, { wch: 7 }, { wch: 6 }, { wch: 9 }, { wch: 5 }, { wch: 11 });
   ws['!cols'] = colWidths;
 
   // セル色を設定（動的 shiftTypes + 固定 off 系）
@@ -447,7 +448,7 @@ function exportToExcel() {
   });
   // 固定の休み系
   Object.assign(colorMap, {
-    '休': 'EEEEEE', '公': 'F5F5F5', '有': 'FFF9C4',
+    '休': 'EEEEEE', '公': 'F5F5F5', '有': 'FFF9C4', '半': 'E8F5E9', '余': 'FFE0B2',
     '☆': 'EEEEEE', '季': 'EEEEEE', '引': 'EEEEEE', '慶': 'EEEEEE',
   });
 
@@ -465,21 +466,22 @@ function exportToExcel() {
   XLSX.utils.book_append_sheet(wb, ws, 'シフト表');
 
   // 集計シート（動的・部門順）
-  const summaryHeader = ['部門', 'スタッフ', ...AppState.shiftTypes.map(t => t.key), '公休', '有給他', '出勤日数', '差', '総労働時間'];
+  const summaryHeader = ['部門', 'スタッフ', ...AppState.shiftTypes.map(t => t.key), '公休', '有給他', '余剰', '出勤日数', '差', '総労働時間'];
   const summary = [summaryHeader];
   groups.forEach(g => {
     g.staff.forEach(s => {
       const counts = {};
       AppState.shiftTypes.forEach(t => { counts[t.key] = 0; });
-      let publicOff = 0, otherOff = 0, workCount = 0, hours = 0;
+      let publicOff = 0, otherOff = 0, surplus = 0, workCount = 0, hours = 0;
       for (let d = 1; d <= days; d++) {
         const sh = (AppState.shifts[s.id] || {})[d] || '';
         if (counts[sh] !== undefined) { counts[sh]++; workCount++; hours += getShiftHours(sh); }
         else if (isPublicOff(sh)) publicOff++;
+        else if (sh === '余') surplus++;
         else if (isOff(sh)) otherOff++;
       }
       summary.push([g.label, s.name, ...AppState.shiftTypes.map(t => counts[t.key]),
-        publicOff, otherOff, workCount, publicOff - (s.maxOff || 0), Math.round(hours * 10) / 10]);
+        publicOff, otherOff, surplus, workCount, publicOff - (s.maxOff || 0), Math.round(hours * 10) / 10]);
     });
   });
   const ws2 = XLSX.utils.aoa_to_sheet(summary);
@@ -504,21 +506,22 @@ function exportToCSV() {
     const w = getWeekday(AppState.settings.targetMonth, d);
     header.push(`${d}(${getWeekdayLabel(w)})`);
   }
-  header.push('公休', '有給他', '出勤日数', '差', '総労働時間');
+  header.push('公休', '有給他', '余剰', '出勤日数', '差', '総労働時間');
   csv += header.map(escapeCSV).join(',') + '\n';
 
   getDepartmentGroups().forEach(g => {
     g.staff.forEach(s => {
       const row = [g.label, s.name];
-      let work = 0, publicOff = 0, otherOff = 0, hours = 0;
+      let work = 0, publicOff = 0, otherOff = 0, surplus = 0, hours = 0;
       for (let d = 1; d <= days; d++) {
         const sh = (AppState.shifts[s.id] || {})[d] || '';
         row.push(sh);
         if (isWork(sh)) { work++; hours += getShiftHours(sh); }
         else if (isPublicOff(sh)) publicOff++;
+        else if (sh === '余') surplus++;
         else if (isOff(sh)) otherOff++;
       }
-      row.push(publicOff, otherOff, work, publicOff - (s.maxOff || 0), Math.round(hours * 10) / 10);
+      row.push(publicOff, otherOff, surplus, work, publicOff - (s.maxOff || 0), Math.round(hours * 10) / 10);
       csv += row.map(escapeCSV).join(',') + '\n';
     });
   });
