@@ -1166,8 +1166,9 @@ function renderResultTable() {
       tbody.appendChild(tr);
     });
 
-    // 集計行（部門の必要人数 > 0 のシフト種別）
+    // 集計行（部門の必要人数 > 0 のシフト種別）— 定数は各日セルで直接編集可能
     const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
+    const deptKey = g.key === 'cast' ? 'cast' : 'employee';
     workKeys.forEach(key => {
       const defaultReq = g.reqs[key] || 0;
       if (defaultReq === 0) return;
@@ -1181,7 +1182,15 @@ function renderResultTable() {
         });
         const dayReq = getDayReq(g.reqs, g.dailyReqs || {}, key, d);
         const cls = count < dayReq ? 'under' : (count > dayReq ? 'over' : '');
-        cells += `<td class="${cls}">${count}</td>`;
+        // 配置人数(count)を上に小さく、その下に編集できる定数(必要人数)入力
+        cells += `<td class="${cls}" style="padding:0">
+          <div style="font-size:9px;color:#718096;line-height:1">${count}</div>
+          <input type="number" min="0" max="99" value="${dayReq}"
+            class="summary-req-input" data-key="${escapeHtml(key)}" data-day="${d}"
+            data-dept="${deptKey}" data-default="${defaultReq}"
+            title="配置 ${count}人 / 必要 ${dayReq}人（この数字が定数。変更できます）"
+            style="width:100%;height:20px;border:none;background:transparent;text-align:center;font-size:11px;font-weight:700;color:#2d3748"/>
+        </td>`;
       }
       cells += '<td></td><td></td><td></td><td></td><td></td><td></td>';
       tr.innerHTML = cells;
@@ -1190,6 +1199,27 @@ function renderResultTable() {
   });
 
   table.appendChild(tbody);
+
+  // 集計行の定数（必要人数）をシフト表から直接編集
+  table.querySelectorAll('.summary-req-input').forEach(el => {
+    // 入力欄クリックでセル編集モーダルが開かないように伝播を止める
+    el.addEventListener('click', e => e.stopPropagation());
+    el.addEventListener('change', e => {
+      const key  = e.target.dataset.key;
+      const day  = parseInt(e.target.dataset.day);
+      const dept = e.target.dataset.dept;
+      const def  = parseInt(e.target.dataset.default) || 0;
+      const map  = dept === 'cast' ? AppState.dailyRequirementsCast : AppState.dailyRequirements;
+      if (!map[key]) map[key] = {};
+      const num = parseInt(e.target.value);
+      if (isNaN(num) || num === def) delete map[key][day]; // デフォルトと同じなら上書き解除
+      else map[key][day] = num;
+      if (typeof saveToStorage === 'function') saveToStorage();
+      AppState.violations = checkViolations(AppState.shifts);
+      renderResultTable(); // 色（過不足）を更新
+      toast(`${key} ${day}日 の必要人数を ${isNaN(num) ? def : num} に設定`, 'info', 1500);
+    });
+  });
 
   setupDragAndDrop();
   setupManualEdit();

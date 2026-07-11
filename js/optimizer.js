@@ -100,12 +100,23 @@ function markSurplusRest(shifts) {
       if (locked) lockedPublic++;
       else freePublicDays.push(d);
     }
-    // 目標公休数のうち、固定分を除いた残りだけを公休として残し、超過分は「余」にする
-    let keep = Math.max(0, quota - lockedPublic);
-    freePublicDays.forEach(d => {
-      if (keep > 0) keep--;
-      else shifts[s.id][d] = '余';
-    });
+    // 目標公休数のうち、固定分を除いた残りだけを公休として残し、超過分は「余」にする。
+    // 「余」は月末に固まらないよう、対象日を月内に均等に散らす。
+    const N       = freePublicDays.length;
+    const keep    = Math.max(0, quota - lockedPublic);
+    const convert = Math.max(0, N - keep); // 余にする日数
+    if (convert > 0) {
+      const surplusIdx = new Set();
+      for (let i = 0; i < convert; i++) {
+        surplusIdx.add(Math.min(N - 1, Math.floor((i + 0.5) * N / convert)));
+      }
+      // 端数で重複したら前から補充してちょうど convert 個にする
+      let j = 0;
+      while (surplusIdx.size < convert && j < N) { surplusIdx.add(j); j++; }
+      freePublicDays.forEach((d, idx) => {
+        if (surplusIdx.has(idx)) shifts[s.id][d] = '余';
+      });
+    }
   });
 }
 
