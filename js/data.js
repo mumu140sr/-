@@ -67,7 +67,7 @@ function getDefaultShiftTypes() {
 // デフォルトのペナルティ重み
 const DEFAULT_PENALTIES = {
   understaff:      10000,  // 人員不足（1人あたり）
-  overstaff:        2500,  // 人員超過（1人あたり）— 定数を超えたら強く回避し、余った人は「余」にする
+  overstaff:        6000,  // 人員超過（1人あたり）— 【優先1: 定数厳守】超えたら強く回避、余った人は「余」に
   respDuplicate:    8000,  // 責任者重複（早責/遅責が同じ時間帯に2人以上）
   disallowedShift: 50000,  // 担当外シフト
   consBase:          800,  // 連勤超過（1日超過あたり）
@@ -77,8 +77,8 @@ const DEFAULT_PENALTIES = {
   badRest:           600,  // 遅→休→早
   singleOff:          50,  // 単発休み
   singleWork:        200,  // 単発出勤（高すぎると surplus-rest スタッフの圧力で他違反が増えるため抑制）
-  offShortage:       4000,  // 公休不足（1日あたり）— 設定した公休は必ず消化させる
-  longRest:          4000,  // 4連休以上（自動配置分）— 連休は最大3日まで
+  offShortage:       4000,  // 公休不足（1日あたり）— 【優先2】設定した公休は必ず消化させる
+  longRest:          2000,  // 4連休以上（自動配置分）— 【優先3】連休は最大3日まで
   offSurplus:         400,  // 公休余剰（未使用 — tryConvertSurplusRest ムーブで自然削減）
   balanceDiff:         80,  // 早遅バランスずれ（1日あたり）
   viceManagerRest:   1200,  // 副店長が任意で休む
@@ -289,10 +289,10 @@ function loadFromStorage() {
 
     // settings（penalties がなければデフォルトで補完）
     const penalties = Object.assign({ ...DEFAULT_PENALTIES }, (data.settings || {}).penalties || {});
-    // 旧データの低いペナルティを新デフォルトへ引き上げ（定数オーバー放置・公休不足の原因）
-    if (!(penalties.overstaff  >= 1000)) penalties.overstaff  = DEFAULT_PENALTIES.overstaff;
-    if (!(penalties.offShortage >= 3000)) penalties.offShortage = DEFAULT_PENALTIES.offShortage;
-    if (penalties.longRest == null)      penalties.longRest    = DEFAULT_PENALTIES.longRest;
+    // 優先順位（定数厳守 > 公休 > 連休）を反映して旧データのペナルティを補正
+    if (!(penalties.overstaff  >= 5000)) penalties.overstaff  = DEFAULT_PENALTIES.overstaff;  // 優先1
+    if (!(penalties.offShortage >= 3000)) penalties.offShortage = DEFAULT_PENALTIES.offShortage; // 優先2
+    if (penalties.longRest == null || penalties.longRest >= 3000) penalties.longRest = DEFAULT_PENALTIES.longRest; // 優先3
     Object.assign(AppState.settings, data.settings || {}, { penalties });
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
