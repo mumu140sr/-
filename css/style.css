@@ -289,6 +289,22 @@ tbody tr:hover { background: #f7fafc; }
 .daily-req-input::-webkit-outer-spin-button,
 .daily-req-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
+/* シフト表の集計行で定数を直接編集する入力欄（グローバル padding を打ち消す） */
+.summary-req-input {
+  width: 100% !important;
+  min-width: 0;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+  appearance: textfield;
+  cursor: text;
+}
+.summary-req-input:focus { outline: 2px solid #667eea; background: #fff !important; }
+.summary-req-input::-webkit-outer-spin-button,
+.summary-req-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
 /* ===== スタッフテーブル ===== */
 .staff-table input[type="text"]   { width: 100%; min-width: 80px; }
 .staff-table input[type="number"] { width: 50px; }
