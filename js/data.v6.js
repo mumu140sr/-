@@ -67,7 +67,7 @@ function getDefaultShiftTypes() {
 // デフォルトのペナルティ重み
 const DEFAULT_PENALTIES = {
   understaff:      10000,  // 人員不足（1人あたり）
-  overstaff:         200,  // 人員超過（1人あたり）
+  overstaff:        2500,  // 人員超過（1人あたり）— 定数を超えたら強く回避し、余った人は「余」にする
   respDuplicate:    8000,  // 責任者重複（早責/遅責が同じ時間帯に2人以上）
   disallowedShift: 50000,  // 担当外シフト
   consBase:          800,  // 連勤超過（1日超過あたり）
@@ -288,6 +288,8 @@ function loadFromStorage() {
 
     // settings（penalties がなければデフォルトで補完）
     const penalties = Object.assign({ ...DEFAULT_PENALTIES }, (data.settings || {}).penalties || {});
+    // 旧データの低い超過ペナルティ（定数オーバー放置の原因）を新デフォルトへ引き上げ
+    if (!(penalties.overstaff >= 1000)) penalties.overstaff = DEFAULT_PENALTIES.overstaff;
     Object.assign(AppState.settings, data.settings || {}, { penalties });
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完

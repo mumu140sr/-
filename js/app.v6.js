@@ -142,9 +142,10 @@ function setupGeneratePanel() {
       $report.style.display = 'block';
       renderReport(result);
 
-      // 自動でシフト表タブへ
+      // 自動でシフト表タブへ → 余剰があればポップアップ案内
       setTimeout(() => {
         document.querySelector('.tab[data-tab="result"]').click();
+        if (typeof showSurplusPopup === 'function') showSurplusPopup();
       }, 800);
 
       if (result.success) {
@@ -195,6 +196,62 @@ function setupGeneratePanel() {
       }
     });
   }
+}
+
+/**
+ * 生成後、人員が余っている（「余」がある）場合にシフト表で目立つ案内を出す。
+ * 定数を守った結果あぶれた人を「余」で可視化し、次のアクションを促す。
+ */
+function showSurplusPopup() {
+  if (!AppState.generated) return;
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const items = [];
+  let total = 0;
+  AppState.staff.forEach(s => {
+    let yo = 0;
+    for (let d = 1; d <= days; d++) {
+      if ((AppState.shifts[s.id] || {})[d] === '余') yo++;
+    }
+    if (yo > 0) { items.push({ name: s.name, yo }); total += yo; }
+  });
+  if (total === 0) return; // 余りなし → 出さない
+
+  const old = document.getElementById('surplusPopup');
+  if (old) old.remove();
+
+  const list = items.sort((a, b) => b.yo - a.yo)
+    .map(r => `<li><b>${escapeHtml(r.name)}</b>：余 ${r.yo}コマ</li>`).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'surplusPopup';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:560px">
+      <div class="modal-header">
+        <h3 style="margin:0">📢 人員が ${total}コマ 余っています</h3>
+        <button class="modal-close" id="surplusClose">✕</button>
+      </div>
+      <div class="modal-body" style="padding:16px">
+        <p>必要人数（定数）を守った結果、下記の人が「<span style="color:#bf5b00;font-weight:700">余</span>（人員余り）」になっています。</p>
+        <ul style="margin:8px 0 12px;padding-left:20px;line-height:1.8">${list}</ul>
+        <div style="background:#fff8e1;border-left:4px solid #f6ad55;padding:10px 12px;border-radius:6px">
+          <b>この余りの使い方：</b>
+          <ol style="margin:6px 0 0;padding-left:20px;line-height:1.8">
+            <li><b>忙しい日の必要人数を増やす</b>（②シフト種別 →「日別必要人数」）</li>
+            <li>または <b>有給を増やす</b>（③スタッフ管理 → 有給数）</li>
+            <li>入力したら <b>「🛠 エラーを自動修正」</b>を押す → 余が減ります</li>
+          </ol>
+        </div>
+      </div>
+      <div style="padding:0 16px 16px;text-align:right">
+        <button class="btn btn-primary" id="surplusOk">わかった</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.querySelector('#surplusClose').addEventListener('click', close);
+  modal.querySelector('#surplusOk').addEventListener('click', close);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
 }
 
 function renderReport(result) {
