@@ -1297,8 +1297,10 @@ function calculateScore(shifts, allowedShifts, days, P) {
       if (s.positionType === 'viceManager' && isWork(sh)) viceWorking++;
     });
 
-    // 毎日、副店長が1人以上出勤していること（早番か遅番にいる）
-    if (hasVice && viceWorking === 0) score += (P.viceManagerDailyAbsent || 9000);
+    // 毎日、副店長が出勤 or 早責・遅責の両方がチーフ以上で埋まっていること
+    const chiefCovered = respEarlyPerson && respLatePerson &&
+      getStaffPriority(respEarlyPerson) <= 2 && getStaffPriority(respLatePerson) <= 2;
+    if (hasVice && viceWorking === 0 && !chiefCovered) score += (P.viceManagerDailyAbsent || 9000);
     shiftKeys.forEach(k => {
       const req = optDayReq(k, d);
       if (!req) return;
@@ -1588,17 +1590,23 @@ function checkViolations(shifts) {
     }
   });
 
-  // 毎日、副店長が1人以上出勤していること（副店長2人以上のときのみ有効）
+  // 毎日、次の①②のどちらかを満たすこと（副店長2人以上のときのみ有効）
+  //  ① 副店長が早番か遅番に出勤している
+  //  ② 早責と遅責の両方が「チーフ以上（チーフ or 副店長）」で埋まっている
   // 1人の場合は公休目標と数学的に矛盾するためチェックしない
   const viceManagers = staff.filter(s => s.positionType === 'viceManager');
   if (viceManagers.length >= 2) {
     for (let d = 1; d <= days; d++) {
       const working = viceManagers.some(vm => isWork((shifts[vm.id] || {})[d] || ''));
-      if (!working) {
+      const respEarly = staff.find(s => (shifts[s.id] || {})[d] === '早責');
+      const respLate  = staff.find(s => (shifts[s.id] || {})[d] === '遅責');
+      const chiefCovered = respEarly && respLate &&
+        getStaffPriority(respEarly) <= 2 && getStaffPriority(respLate) <= 2;
+      if (!working && !chiefCovered) {
         violations.push({
           staffId: null, day: d, type: 'vicemanager-absent',
-          message: `🚨 ${d}日 副店長が誰も出勤していない`,
-          action:  '副店長のいずれかをこの日に出勤させてください',
+          message: `🚨 ${d}日 副店長が不在で、早責・遅責もチーフ以上で揃っていない`,
+          action:  '副店長を出勤させるか、早責・遅責の両方をチーフ以上にしてください',
         });
       }
     }
@@ -1992,9 +2000,9 @@ function runAIDiagnosis() {
       const days   = vmVios.map(v => `${v.day}日`).join('、');
       results.push({
         level: 'error',
-        title: `副店長が誰も出勤していない日 ${cnt['vicemanager-absent']} 件`,
-        detail: `次の日は副店長が全員休みです: ${days}\n毎日少なくとも1人の副店長が出勤している必要があります。`,
-        suggestion: '副店長の公休日が重ならないよう調整するか、「シフト作成」を再実行してください。副店長が1人しかいない場合は増員が必要です。',
+        title: `副店長不在で早責・遅責もチーフ以上で揃っていない日 ${cnt['vicemanager-absent']} 件`,
+        detail: `次の日が該当します: ${days}\n毎日、副店長が出勤しているか、早責・遅責の両方がチーフ以上（チーフ or 副店長）で埋まっている必要があります。`,
+        suggestion: '副店長を出勤させるか、早責・遅責の両方をチーフ以上に配置してください。「シフト作成」の再実行でも改善します。',
       });
     }
 
