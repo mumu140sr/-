@@ -127,73 +127,82 @@ function markSurplusRest(shifts) {
  * - 違反件数が減った時だけ採用し、悪化した場合は元に戻す（絶対に悪くしない）
  */
 async function repairSchedule(progressCallback) {
-  const baseShifts     = deepCopyShifts(AppState.shifts || {});
-  const baseViolations = checkViolations(baseShifts);
-  if (baseViolations.length === 0) {
-    AppState.violations = baseViolations;
+  const origShifts     = deepCopyShifts(AppState.shifts || {});
+  const origViolations = checkViolations(origShifts);
+  if (origViolations.length === 0) {
+    AppState.violations = origViolations;
     return { score: 0, violations: [], success: true, improved: false, before: 0, after: 0 };
   }
 
-  const days   = getDaysInMonth(AppState.settings.targetMonth);
-  const groups = getDepartmentGroups(AppState.staff);
-  const mergedShifts = deepCopyShifts(baseShifts);
+  const days     = getDaysInMonth(AppState.settings.targetMonth);
+  const groups   = getDepartmentGroups(AppState.staff);
+  const MAX_PASS = 5; // 改善が止まるまで最大5回繰り返す
 
-  try {
-    for (let gi = 0; gi < groups.length; gi++) {
-      const g       = groups[gi];
-      const groupIds = new Set(g.staff.map(s => s.id));
+  // 現在の最良（seed）から1パス修復する内部関数
+  const onePass = async (seedShifts, seedViolations, passLabel) => {
+    const merged = deepCopyShifts(seedShifts);
+    try {
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g        = groups[gi];
+        const groupIds = new Set(g.staff.map(s => s.id));
+        const cells    = new Set();
+        const staffAll = new Set();
+        const addCell  = (sid, d) => {
+          for (let dd = d - 1; dd <= d + 1; dd++) {
+            if (dd >= 1 && dd <= days) cells.add(sid + ':' + dd);
+          }
+        };
+        seedViolations.forEach(v => {
+          if (v.staffId && groupIds.has(v.staffId)) {
+            if (v.day === 0) staffAll.add(v.staffId);
+            else addCell(v.staffId, v.day);
+          } else if (!v.staffId && v.day >= 1) {
+            g.staff.forEach(s => addCell(s.id, v.day));
+          }
+        });
+        if (cells.size === 0 && staffAll.size === 0) continue;
 
-      // この部門に関係するエラー箇所を集める（前後日も対象にして入れ替え余地を作る）
-      const cells    = new Set();
-      const staffAll = new Set();
-      const addCell  = (sid, d) => {
-        for (let dd = d - 1; dd <= d + 1; dd++) {
-          if (dd >= 1 && dd <= days) cells.add(sid + ':' + dd);
-        }
-      };
-      baseViolations.forEach(v => {
-        if (v.staffId && groupIds.has(v.staffId)) {
-          if (v.day === 0) staffAll.add(v.staffId); // 公休数不足 → その人の全日を対象
-          else addCell(v.staffId, v.day);
-        } else if (!v.staffId && v.day >= 1) {
-          // 日単位エラー（人員不足・副店長不在など）→ その日の部門全員を対象
-          g.staff.forEach(s => addCell(s.id, v.day));
-        }
-      });
-
-      if (cells.size === 0 && staffAll.size === 0) continue; // この部門は問題なし
-
-      _optStaff     = g.staff;
-      _optReqs      = g.reqs;
-      _optDailyReqs = g.dailyReqs;
-      const groupProgress = (pct, msg) => {
-        const mapped = Math.floor((gi * 100 + pct) / groups.length);
-        progressCallback && progressCallback(mapped, '修復中... ' + msg);
-      };
-      const res = await optimizeGroupSchedule(groupProgress, { seedShifts: baseShifts, cells, staffAll });
-      Object.assign(mergedShifts, res.shifts);
+        _optStaff = g.staff; _optReqs = g.reqs; _optDailyReqs = g.dailyReqs;
+        const groupProgress = (pct, msg) => {
+          const mapped = Math.floor((gi * 100 + pct) / groups.length);
+          progressCallback && progressCallback(mapped, `${passLabel} ` + msg);
+        };
+        const res = await optimizeGroupSchedule(groupProgress, { seedShifts, cells, staffAll });
+        Object.assign(merged, res.shifts);
+      }
+    } finally {
+      _optStaff = null; _optReqs = null; _optDailyReqs = null;
     }
-  } finally {
-    _optStaff = null; _optReqs = null; _optDailyReqs = null;
+    markSurplusRest(merged);
+    return { shifts: merged, violations: checkViolations(merged) };
+  };
+
+  // 改善が続く限り繰り返す（悪化・停滞したら打ち切り）
+  let bestShifts     = origShifts;
+  let bestViolations = origViolations;
+  for (let pass = 0; pass < MAX_PASS && bestViolations.length > 0; pass++) {
+    const label = `修復中(${pass + 1}/${MAX_PASS})...`;
+    const r = await onePass(bestShifts, bestViolations, label);
+    if (r.violations.length < bestViolations.length) {
+      bestShifts = r.shifts; bestViolations = r.violations;
+    } else {
+      break; // これ以上減らないので終了
+    }
   }
 
-  markSurplusRest(mergedShifts); // 修復後も公休ちょうど＋余に整える
-  const newViolations = checkViolations(mergedShifts);
-  // 悪化させない安全装置: 違反が減った時だけ採用、それ以外は元のまま
-  if (newViolations.length < baseViolations.length) {
-    AppState.shifts     = mergedShifts;
-    AppState.violations = newViolations;
-    AppState.generated  = true;
-    return { score: newViolations.length, violations: newViolations,
-             success: newViolations.length === 0, improved: true,
-             before: baseViolations.length, after: newViolations.length };
+  AppState.generated = true;
+  if (bestViolations.length < origViolations.length) {
+    AppState.shifts     = bestShifts;
+    AppState.violations = bestViolations;
+    return { score: bestViolations.length, violations: bestViolations,
+             success: bestViolations.length === 0, improved: true,
+             before: origViolations.length, after: bestViolations.length };
   }
-  AppState.shifts     = baseShifts;
-  AppState.violations = baseViolations;
-  AppState.generated  = true;
-  return { score: baseViolations.length, violations: baseViolations,
-           success: baseViolations.length === 0, improved: false,
-           before: baseViolations.length, after: baseViolations.length };
+  AppState.shifts     = origShifts;
+  AppState.violations = origViolations;
+  return { score: origViolations.length, violations: origViolations,
+           success: origViolations.length === 0, improved: false,
+           before: origViolations.length, after: origViolations.length };
 }
 
 /**
