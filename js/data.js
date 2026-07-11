@@ -77,7 +77,8 @@ const DEFAULT_PENALTIES = {
   badRest:           600,  // 遅→休→早
   singleOff:          50,  // 単発休み
   singleWork:        200,  // 単発出勤（高すぎると surplus-rest スタッフの圧力で他違反が増えるため抑制）
-  offShortage:       1500,  // 公休不足（1日あたり）
+  offShortage:       4000,  // 公休不足（1日あたり）— 設定した公休は必ず消化させる
+  longRest:          4000,  // 4連休以上（自動配置分）— 連休は最大3日まで
   offSurplus:         400,  // 公休余剰（未使用 — tryConvertSurplusRest ムーブで自然削減）
   balanceDiff:         80,  // 早遅バランスずれ（1日あたり）
   viceManagerRest:   1200,  // 副店長が任意で休む
@@ -288,8 +289,10 @@ function loadFromStorage() {
 
     // settings（penalties がなければデフォルトで補完）
     const penalties = Object.assign({ ...DEFAULT_PENALTIES }, (data.settings || {}).penalties || {});
-    // 旧データの低い超過ペナルティ（定数オーバー放置の原因）を新デフォルトへ引き上げ
-    if (!(penalties.overstaff >= 1000)) penalties.overstaff = DEFAULT_PENALTIES.overstaff;
+    // 旧データの低いペナルティを新デフォルトへ引き上げ（定数オーバー放置・公休不足の原因）
+    if (!(penalties.overstaff  >= 1000)) penalties.overstaff  = DEFAULT_PENALTIES.overstaff;
+    if (!(penalties.offShortage >= 3000)) penalties.offShortage = DEFAULT_PENALTIES.offShortage;
+    if (penalties.longRest == null)      penalties.longRest    = DEFAULT_PENALTIES.longRest;
     Object.assign(AppState.settings, data.settings || {}, { penalties });
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
