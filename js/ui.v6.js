@@ -286,6 +286,9 @@ function renderPenaltyInputs() {
     prefMismatch:       '🕐 早遅希望違反（早可/遅可）',
     eventAbsent:        '📌 行事日に対象者が休み',
     restPairBonus:      '🏝 連休ボーナス（2連休以上を優先）',
+    longRest:           '🛌 4連休以上（連休は最大3日）',
+    skillLateShortage:  '🎯 スキル保有者の不足',
+    nightAfterWork:     '🌃 夜勤翌日に出勤',
   };
 
   Object.entries(labels).forEach(([key, label]) => {
