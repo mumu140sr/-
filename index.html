@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=33" />
+<link rel="stylesheet" href="css/style.css?v=34" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -257,6 +257,13 @@
         <button class="btn" id="btnClearFixed">🔓 固定をすべて解除</button>
         <span class="hint">セルをドラッグ&ドロップでシフト交換、クリックで直接編集（編集すると🔒固定されます）。Ctrl+Z で元に戻す／Ctrl+Y でやり直し。</span>
       </div>
+      <!-- 自動修正の進捗（シフト表用） -->
+      <div id="repairProgress" style="display:none;margin:10px 0">
+        <div style="background:#e2e8f0;border-radius:6px;height:14px;overflow:hidden">
+          <div id="repairBar" style="width:0%;height:100%;background:#667eea;transition:width .2s"></div>
+        </div>
+        <div id="repairText" style="font-size:13px;color:#4a5568;margin-top:6px"></div>
+      </div>
       <!-- 凡例：シフト種別から動的生成 -->
       <div class="legend" id="shiftLegend"></div>
       <div class="table-wrap">
@@ -287,11 +294,11 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=33"></script>
-<script src="js/optimizer.v6.js?v=33"></script>
-<script src="js/worker-client.v6.js?v=33"></script>
-<script src="js/ai-explain.v6.js?v=33"></script>
-<script src="js/ui.v6.js?v=33"></script>
-<script src="js/app.v6.js?v=33"></script>
+<script src="js/data.v6.js?v=34"></script>
+<script src="js/optimizer.v6.js?v=34"></script>
+<script src="js/worker-client.v6.js?v=34"></script>
+<script src="js/ai-explain.v6.js?v=34"></script>
+<script src="js/ui.v6.js?v=34"></script>
+<script src="js/app.v6.js?v=34"></script>
 </body>
 </html>

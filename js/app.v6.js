@@ -366,9 +366,10 @@ function setupResultPanel() {
       // 修復前の状態を履歴に積む → 気に入らなければ Ctrl+Z で戻せる
       if (typeof recordShiftHistory === 'function') recordShiftHistory();
 
-      const $area = document.getElementById('progressArea');
-      const $bar  = document.getElementById('progressBar');
-      const $text = document.getElementById('progressText');
+      // シフト表タブ内の進捗バーを使う（⑤自動生成のバーは別タブで見えないため）
+      const $area = document.getElementById('repairProgress');
+      const $bar  = document.getElementById('repairBar');
+      const $text = document.getElementById('repairText');
       const orig  = btnRepair.textContent;
       btnRepair.disabled = true;
       btnRepair.textContent = '⏳ 修復中...';
@@ -406,6 +407,8 @@ function setupResultPanel() {
       } finally {
         btnRepair.disabled = false;
         btnRepair.textContent = orig;
+        // 数秒後に進捗表示を隠す（結果は表とレポートに残る）
+        setTimeout(() => { if ($area) $area.style.display = 'none'; }, 4000);
       }
     });
   }
