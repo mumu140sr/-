@@ -241,6 +241,27 @@ function showSurplusPopup() {
   const hasSurplus  = surplusTotal > 0;
   if (!hasShortage && !hasSurplus) return; // どちらもなければ出さない
 
+  // 担当できる人の偏り（公休不足↔余の根本原因）を検出してポップアップに添える
+  let bottleneckHtml = '';
+  if (typeof findCapabilityBottlenecks === 'function') {
+    const bn = findCapabilityBottlenecks();
+    if (bn.length > 0) {
+      const items = bn.map(b => {
+        const cand = b.surplusCandidates.length
+          ? `<br><span style="color:#2b6cb0">→ 余っている <b>${escapeHtml(b.surplusCandidates.slice(0, 4).join('・'))}</b> に任せられると分散できます</span>`
+          : '';
+        return `<li>「<b>${escapeHtml(b.key)}</b>」ができるのは <b>${b.capable.length}人</b>だけ（${escapeHtml(b.capable.slice(0, 5).join('・'))}）${cand}</li>`;
+      }).join('');
+      bottleneckHtml = `
+        <div style="background:#ebf8ff;border-left:4px solid #4299e1;padding:10px 12px;border-radius:6px;margin-top:12px">
+          <b>⚖️ 根本原因：担当できる人の偏り</b>
+          <p style="margin:4px 0">下記は「できる人」が少なく、その人に負担が集中します（＝公休不足）。逆にこの担当ができない人は「余」になります。</p>
+          <ul style="margin:4px 0;padding-left:20px;line-height:1.7">${items}</ul>
+          <p style="margin:4px 0 0">③スタッフ管理で、余っている人に担当を追加すると両方改善します。</p>
+        </div>`;
+    }
+  }
+
   const old = document.getElementById('surplusPopup');
   if (old) old.remove();
 
@@ -271,7 +292,7 @@ function showSurplusPopup() {
           <li><b>スタッフを増やす</b>（③スタッフ管理）</li>
           <li>調整後 <b>「🛠 エラーを自動修正」</b>または再生成</li>
         </ol>
-      </div>`;
+      </div>${bottleneckHtml}`;
   } else {
     const list = surplusItems.sort((a, b) => b.yo - a.yo)
       .map(r => `<li><b>${escapeHtml(r.name)}</b>：余 ${r.yo}コマ</li>`).join('');
@@ -286,7 +307,7 @@ function showSurplusPopup() {
           <li>または <b>有給を増やす</b>（③スタッフ管理 → 有給数）</li>
           <li>入力したら <b>「🛠 エラーを自動修正」</b>を押す → 余が減ります</li>
         </ol>
-      </div>`;
+      </div>${bottleneckHtml}`;
   }
 
   const modal = document.createElement('div');

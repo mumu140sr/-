@@ -1854,6 +1854,51 @@ function applySpecialDaysLogic(shifts, locked, staff, days) {
  * スタッフ構成・制約・違反を分析して診断レポートを返す
  * @returns {Array<{level:'error'|'warning'|'info'|'ok', title:string, detail:string, suggestion:string|null}>}
  */
+/**
+ * 「その担当ができる人が少なく、負担が偏っている」ボトルネックを検出する。
+ * 例: 早責・遅責をできる人が2人しかいない → その人が休めず公休不足、他の人が余になる。
+ * @returns {Array<{dept,key,capable:string[],needPerDay,surplusCandidates:string[]}>}
+ */
+function findCapabilityBottlenecks() {
+  const staff  = AppState.staff || [];
+  const days   = getDaysInMonth(AppState.settings.targetMonth);
+  const groups = getDepartmentGroups(staff);
+  const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
+
+  // 現在「余」がついている人（＝担当を広げれば戦力になる候補）
+  const surplusNames = [];
+  staff.forEach(s => {
+    let yo = 0;
+    for (let d = 1; d <= days; d++) if ((AppState.shifts[s.id] || {})[d] === '余') yo++;
+    if (yo > 0) surplusNames.push({ name: s.name, id: s.id, yo });
+  });
+
+  const out = [];
+  groups.forEach(g => {
+    workKeys.forEach(key => {
+      const baseReq = g.reqs[key] || 0;
+      if (!baseReq) return;
+      const capable = g.staff.filter(s => (s.allowedShifts || []).includes(key));
+      // できる人が「必要人数+1」以下しかいない → 休みを回しにくいボトルネック
+      if (capable.length > 0 && capable.length <= baseReq + 1) {
+        // その担当を今できない余剰スタッフ＝広げる候補
+        const cands = surplusNames
+          .filter(sn => {
+            const s = g.staff.find(m => m.id === sn.id);
+            return s && !(s.allowedShifts || []).includes(key);
+          })
+          .map(sn => sn.name);
+        out.push({
+          dept: g.label, key, needPerDay: baseReq,
+          capable: capable.map(s => s.name),
+          surplusCandidates: cands,
+        });
+      }
+    });
+  });
+  return out;
+}
+
 function runAIDiagnosis() {
   const days      = getDaysInMonth(AppState.settings.targetMonth);
   const staff     = AppState.staff;
@@ -2200,6 +2245,27 @@ function runAIDiagnosis() {
         suggestion: null,
       });
     }
+  }
+
+  // ── 6. 担当できる人が少ない偏り（公休不足↔余の根本原因）──────────
+  const bottlenecks = findCapabilityBottlenecks();
+  if (bottlenecks.length > 0) {
+    const lines = bottlenecks.map(b => {
+      const cand = b.surplusCandidates.length
+        ? `　→ 余っている ${b.surplusCandidates.slice(0, 4).join('・')} に「${b.key}」を任せられると分散できます`
+        : '';
+      return `・「${b.key}」ができるのは ${b.capable.length}人だけ（${b.capable.slice(0, 5).join('・')}）${cand}`;
+    }).join('\n');
+    results.push({
+      level: 'warning',
+      title: `⚖️ 担当できる人の偏り（公休不足・余の原因）`,
+      detail:
+        '次の担当は「できる人」が少なく、その人に負担が集中して公休不足になりやすく、\n' +
+        '一方でその担当ができない人は「余」になりがちです。\n\n' + lines,
+      suggestion:
+        '③スタッフ管理で、余っている人に上記シフト（早責・遅責など）の担当チェックを追加して再生成すると、' +
+        '公休不足と余の両方が減ります。',
+    });
   }
 
   return results;
