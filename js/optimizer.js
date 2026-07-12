@@ -1899,6 +1899,74 @@ function findCapabilityBottlenecks() {
   return out;
 }
 
+/**
+ * 症状（個々の違反）の裏にある「根本原因」を推定してランキングで返す。
+ * @returns {Array<{title,detail,fix}>}
+ */
+function analyzeRootCauses() {
+  const vios  = AppState.violations || [];
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  const causes = [];
+
+  // (1) 担当できる人が少ない（公休不足・時間帯切替・順位違反・余 の根本原因）
+  const bn = findCapabilityBottlenecks();
+  const relatedTypes = ['off-count', 'understaff', 'hierarchy', 'category-switch', 'skill-late', 'resp-duplicate'];
+  const relatedCount = vios.filter(v => relatedTypes.includes(v.type)).length;
+  if (bn.length > 0 && (relatedCount > 0 || bn.some(b => b.surplusCandidates.length))) {
+    const keys  = [...new Set(bn.map(b => b.key))].join('・');
+    const cands = [...new Set(bn.flatMap(b => b.surplusCandidates))].slice(0, 5);
+    causes.push({
+      weight: relatedCount + 10,
+      title: `「${keys}」を担当できる人が少なすぎる`,
+      detail: `${keys} をこなせる人が限られているため、その人に仕事が集中して「公休不足」「連勤中の時間帯切替」「責任者の順位」などが発生し、担当できない人は「余」になります。これが多くのエラーの共通原因です。`,
+      fix: cands.length
+        ? `③スタッフ管理で ${cands.join('・')} に「${keys}」の担当チェックを追加して再生成`
+        : `「${keys}」を担当できる人を増やす（育成・役職追加）`,
+    });
+  }
+
+  // (2) 早番と遅番を両方こなす人に、切替・リズム崩れが集中
+  const switchVios = vios.filter(v => ['category-switch', 'bad-rest'].includes(v.type));
+  if (switchVios.length > 0) {
+    const both = [...new Set(switchVios.map(v => v.staffId))]
+      .map(id => staff.find(s => s.id === id)).filter(Boolean)
+      .filter(s => {
+        const a = s.allowedShifts || [];
+        return a.some(k => isEarlyCategory(k)) && a.some(k => isLate(k));
+      }).map(s => s.name);
+    if (both.length) {
+      causes.push({
+        weight: switchVios.length + 3,
+        title: `早番と遅番を両方こなす人に切替が集中`,
+        detail: `${both.slice(0, 5).join('・')} は早番・遅番の両方を担当できるため、日によって時間帯が変わり「連勤中の切替」「遅→休→早」が起きやすくなります。`,
+        fix: `③スタッフ管理で対象者の「早遅バランス」を早寄り/遅寄りにする、または担当を片方の時間帯に絞ると切替が減ります。`,
+      });
+    }
+  }
+
+  // (3) 人手の過不足（必要コマ vs 出せるコマ）
+  const groups   = getDepartmentGroups(staff);
+  const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
+  let requiredWork = 0, availableWork = 0;
+  staff.forEach(s => { availableWork += Math.max(0, days - (s.maxOff || 0) - (s.paidLeave || 0)); });
+  groups.forEach(g => workKeys.forEach(key => {
+    if (!(g.reqs[key] > 0)) return;
+    for (let d = 1; d <= days; d++) requiredWork += getDayReq(g.reqs, g.dailyReqs || {}, key, d);
+  }));
+  if (requiredWork > availableWork) {
+    causes.push({
+      weight: (requiredWork - availableWork) + 8,
+      title: `そもそも人手が足りない（${requiredWork - availableWork}コマ不足）`,
+      detail: `必要コマ合計 ${requiredWork} に対して、出せるコマ合計は ${availableWork} です。物理的に足りないため、公休不足や人員不足が必ず発生します。`,
+      fix: `必要人数（定数）を下げる／公休・有給を減らす／スタッフを増やす のいずれかが必要です。`,
+    });
+  }
+
+  causes.sort((a, b) => b.weight - a.weight);
+  return causes;
+}
+
 function runAIDiagnosis() {
   const days      = getDaysInMonth(AppState.settings.targetMonth);
   const staff     = AppState.staff;
@@ -1907,6 +1975,19 @@ function runAIDiagnosis() {
 
   if (!staff.length || !days) {
     return [{ level: 'info', title: 'データ未入力', detail: 'スタッフまたは対象月が設定されていません。', suggestion: null }];
+  }
+
+  // ── 0. 根本原因（症状の裏にある本当の原因）を最優先で表示 ─────────
+  if (AppState.generated && (AppState.violations || []).length > 0) {
+    const roots = analyzeRootCauses();
+    roots.slice(0, 3).forEach((r, i) => {
+      results.push({
+        level: i === 0 ? 'error' : 'warning',
+        title: `🔍 根本原因${roots.length > 1 ? ` ${i + 1}` : ''}：${r.title}`,
+        detail: r.detail,
+        suggestion: r.fix,
+      });
+    });
   }
 
   // ── 1〜3. 部門ごとの実現可能性・カバレッジ・個別制約 ─────────

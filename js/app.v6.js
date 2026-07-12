@@ -273,9 +273,27 @@ function showSurplusPopup() {
         <td style="padding:3px 8px;color:#4a5568">${escapeHtml(c[1])}${c[2] ? `<br><span style="color:#2b6cb0">→ ${escapeHtml(c[2])}</span>` : ''}</td>
       </tr>`;
     }).join('');
-  const causeHtml = hasErrors ? `
+  // 根本原因（症状の裏にある本当の原因）を最優先で表示
+  let rootHtml = '';
+  if (hasErrors && typeof analyzeRootCauses === 'function') {
+    const roots = analyzeRootCauses().slice(0, 3);
+    if (roots.length) {
+      rootHtml = `
+        <div style="background:#fff5f5;border-left:4px solid #e53e3e;padding:10px 12px;border-radius:6px;margin-bottom:12px">
+          <b>🔍 根本原因</b>
+          ${roots.map((r, i) => `
+            <div style="margin-top:${i ? 8 : 6}px">
+              <div style="font-weight:700;color:#c53030">${i + 1}. ${escapeHtml(r.title)}</div>
+              <div style="color:#4a5568;font-size:13px;margin:2px 0">${escapeHtml(r.detail)}</div>
+              <div style="color:#2b6cb0;font-size:13px">→ ${escapeHtml(r.fix)}</div>
+            </div>`).join('')}
+        </div>`;
+    }
+  }
+
+  const causeHtml = hasErrors ? `${rootHtml}
     <div style="background:#fffaf0;border-left:4px solid #ed8936;padding:10px 12px;border-radius:6px;margin-bottom:12px">
-      <b>📋 今回のエラーの原因（${allVios.length}件）</b>
+      <b>📋 今回のエラーの原因（症状の内訳・${allVios.length}件）</b>
       <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:13px;margin-top:6px;width:100%">
         <tr style="color:#718096"><td style="padding:3px 8px">種類</td><td style="padding:3px 8px;text-align:center">件数</td><td style="padding:3px 8px">原因 → 対処</td></tr>
         ${causeRows}
