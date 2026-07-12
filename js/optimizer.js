@@ -1433,6 +1433,7 @@ function calculateScore(shifts, allowedShifts, days, P) {
     let offCount  = 0, earlyCount = 0, lateCount = 0;
     let lockedOff = 0, unlockedOff = 0; // viceManager 用（既存ループ内で同時集計）
     let offRun    = 0, pairRestRuns = 0; // 連休（2連休以上）の検出用
+    let pubRun    = 0; // 公休のみの連続数（連休最大3日ルール用。余・有給は数えない）
 
     for (let d = 1; d <= days; d++) {
       const cur = shifts[s.id][d];
@@ -1440,6 +1441,7 @@ function calculateScore(shifts, allowedShifts, days, P) {
       if (isWork(cur)) {
         if (offRun >= 2) pairRestRuns++;
         offRun = 0;
+        pubRun = 0;
 
         if (!isTraining(cur)) {
           // 担当外シフト
@@ -1490,13 +1492,17 @@ function calculateScore(shifts, allowedShifts, days, P) {
             }
           }
           offRun++;
-          // 連休は最大3日まで。4日目以降の「自動配置の休み」を抑制
-          //（希望休・固定で入れた休みは意図的なので対象外）
-          if (offRun > 3) {
-            const restLocked =
-              isOff((AppState.requests[s.id]    || {})[d]) ||
-              isOff((AppState.fixedShifts[s.id] || {})[d]);
-            if (!restLocked) score += (P.longRest || 4000);
+          // 連休は最大3日まで（公休の連続のみ対象。余・有給は連休に数えない）
+          if (isPublicOff(cur)) {
+            pubRun++;
+            if (pubRun > 3) {
+              const restLocked =
+                isPublicOff((AppState.requests[s.id]    || {})[d]) ||
+                isPublicOff((AppState.fixedShifts[s.id] || {})[d]);
+              if (!restLocked) score += (P.longRest || 4000);
+            }
+          } else {
+            pubRun = 0; // 余・有給などは公休連続を分断
           }
         }
         consWork = 0;
@@ -1647,16 +1653,16 @@ function checkViolations(shifts) {
         if (isPublicOff(cur)) offCount++; // 公休のみカウント（有給・季節休暇は別枠）
         consWork = 0;
 
-        // 連休は最大3日まで。4日連続以上（自動配置分）を違反として報告
-        if (isOff(cur)) {
+        // 連休は最大3日まで（公休の連続のみ対象。余・有給は連休に数えない）
+        if (isPublicOff(cur)) {
           offRun++;
           const restLocked =
-            isOff((AppState.requests[s.id]    || {})[d]) ||
-            isOff((AppState.fixedShifts[s.id] || {})[d]);
+            isPublicOff((AppState.requests[s.id]    || {})[d]) ||
+            isPublicOff((AppState.fixedShifts[s.id] || {})[d]);
           if (offRun === 4 && !restLocked && !reportedDays.has('rest' + d)) {
             violations.push({
               staffId: s.id, day: d, type: 'long-rest',
-              message: `⚠️ ${offRun}連休以上（連休は最大3日まで）`,
+              message: `⚠️ 公休が${offRun}連休以上（連休は最大3日まで）`,
               action:  '4日以上の連休は、必要なら希望休として手動で入れてください',
             });
             reportedDays.add('rest' + d);
