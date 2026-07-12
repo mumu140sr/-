@@ -237,9 +237,50 @@ function showSurplusPopup() {
   const understaffVios = (AppState.violations || []).filter(v =>
     ['understaff', 'skill-late', 'vicemanager-absent', 'off-count'].includes(v.type));
 
+  const allVios     = AppState.violations || [];
   const hasShortage = shortageComa > 0 || understaffVios.length > 0;
   const hasSurplus  = surplusTotal > 0;
-  if (!hasShortage && !hasSurplus) return; // どちらもなければ出さない
+  const hasErrors   = allVios.length > 0;
+  if (!hasShortage && !hasSurplus && !hasErrors) return; // 何もなければ出さない
+
+  // ── 今回のエラーの原因まとめ（種類ごとに件数と原因・対処を表示）──
+  const CAUSE = {
+    'understaff':         ['人員不足',              'その日その担当に人が足りない',           '定数を下げる／人を増やす'],
+    'off-count':          ['公休不足',              'その人が働きすぎで公休が取りきれない',   '担当できる人を増やして負担を分散'],
+    'consecutive':        ['連勤超過',              '休みの配置が偏って連勤が長い',           '連勤の間に休みを挟む'],
+    'category-switch':    ['連勤中の時間帯切替',    '連勤の中で早番⇔遅番が混ざっている',     '連勤は同じ時間帯で揃える'],
+    'bad-rest':           ['遅→休→早（リズム）',   '休みの前後で時間帯がちぐはぐ',           '休みの前後の時間帯を揃える'],
+    'single-work':        ['単発出勤',              '前後が休みで1日だけ出勤',               '出勤日を連続させる'],
+    'late-early':         ['遅→早',                '退勤から翌出勤までが短い',               '順序を入れ替える'],
+    'long-rest':          ['4連休以上',            '連休が長すぎる（余は除く）',             '休みを分散する'],
+    'hierarchy':          ['責任者の順位',          '上位者がいるのに下位者が責任者',         '責任者を入れ替える'],
+    'skill-late':         ['スキル不足',            '必要スキルの人がその時間帯に足りない',   'スキル保有者を配置／スキル設定を見直す'],
+    'vicemanager-absent': ['副店長・責任者の不在',  'その日カバーできていない',               '副店長かチーフ責任者を配置'],
+    'resp-duplicate':     ['責任者の重複',          '同じ時間帯に責任者が過剰',               'どちらかを通常シフトに'],
+    'role-mismatch':      ['担当外シフト',          '入れないシフトに配置されている',         '担当を見直す／担当を広げる'],
+    'pref-mismatch':      ['早遅希望と不一致',      '早可/遅可の希望に反している',             '希望に合うよう入れ替える'],
+    'event-absent':       ['行事日の欠勤',          '行事の対象者が休みになっている',         'その日を出勤に'],
+  };
+  const typeCount = {};
+  allVios.forEach(v => { typeCount[v.type] = (typeCount[v.type] || 0) + 1; });
+  const causeRows = Object.entries(typeCount)
+    .sort((a, b) => b[1] - a[1])
+    .map(([type, cnt]) => {
+      const c = CAUSE[type] || [type, '', ''];
+      return `<tr>
+        <td style="padding:3px 8px;font-weight:700;white-space:nowrap">${escapeHtml(c[0])}</td>
+        <td style="padding:3px 8px;text-align:center;color:#c53030;font-weight:700">${cnt}件</td>
+        <td style="padding:3px 8px;color:#4a5568">${escapeHtml(c[1])}${c[2] ? `<br><span style="color:#2b6cb0">→ ${escapeHtml(c[2])}</span>` : ''}</td>
+      </tr>`;
+    }).join('');
+  const causeHtml = hasErrors ? `
+    <div style="background:#fffaf0;border-left:4px solid #ed8936;padding:10px 12px;border-radius:6px;margin-bottom:12px">
+      <b>📋 今回のエラーの原因（${allVios.length}件）</b>
+      <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:13px;margin-top:6px;width:100%">
+        <tr style="color:#718096"><td style="padding:3px 8px">種類</td><td style="padding:3px 8px;text-align:center">件数</td><td style="padding:3px 8px">原因 → 対処</td></tr>
+        ${causeRows}
+      </table></div>
+    </div>` : '';
 
   // 担当できる人の偏り（公休不足↔余の根本原因）を検出してポップアップに添える
   let bottleneckHtml = '';
@@ -279,7 +320,7 @@ function showSurplusPopup() {
     title = shortageComa > 0
       ? `⚠️ コマ数が ${shortageComa}コマ 足りません`
       : `⚠️ 人手が足りない日があります`;
-    body = `
+    body = `${causeHtml}
       <p>必要コマ合計 <b>${requiredWork}</b> に対して、出せるコマ合計は <b>${availableWork}</b> です。
       ${shortageComa > 0 ? `<b style="color:#c53030">${shortageComa}コマ不足</b>しています。` : '合計は足りていますが、特定の日・シフトで埋められていません。'}</p>
       ${shortDays ? `<div style="margin:8px 0"><b>埋まっていない主な箇所：</b><ul style="margin:4px 0;padding-left:20px;line-height:1.7">${shortDays}</ul></div>` : ''}
@@ -293,11 +334,11 @@ function showSurplusPopup() {
           <li>調整後 <b>「🛠 エラーを自動修正」</b>または再生成</li>
         </ol>
       </div>${bottleneckHtml}`;
-  } else {
+  } else if (hasSurplus) {
     const list = surplusItems.sort((a, b) => b.yo - a.yo)
       .map(r => `<li><b>${escapeHtml(r.name)}</b>：余 ${r.yo}コマ</li>`).join('');
     title = `📢 人員が ${surplusTotal}コマ 余っています`;
-    body = `
+    body = `${causeHtml}
       <p>必要人数（定数）を守った結果、下記の人が「<span style="color:#bf5b00;font-weight:700">余</span>（人員余り）」になっています。</p>
       <ul style="margin:8px 0 12px;padding-left:20px;line-height:1.8">${list}</ul>
       <div style="background:#fff8e1;border-left:4px solid #f6ad55;padding:10px 12px;border-radius:6px">
@@ -306,6 +347,17 @@ function showSurplusPopup() {
           <li><b>忙しい日の必要人数を増やす</b>（②シフト種別 →「日別必要人数」）</li>
           <li>または <b>有給を増やす</b>（③スタッフ管理 → 有給数）</li>
           <li>入力したら <b>「🛠 エラーを自動修正」</b>を押す → 余が減ります</li>
+        </ol>
+      </div>${bottleneckHtml}`;
+  } else {
+    // 不足も余りもないが、エラー（時間帯切替・リズムなど）がある場合
+    title = `⚠️ ${allVios.length}件のエラーがあります`;
+    body = `${causeHtml}
+      <div style="background:#fffaf0;border-left:4px solid #ed8936;padding:10px 12px;border-radius:6px">
+        <b>減らし方：</b>
+        <ol style="margin:6px 0 0;padding-left:20px;line-height:1.8">
+          <li><b>「🛠 エラーを自動修正」</b>を押す（数回押すとさらに減ります）</li>
+          <li>⑤自動生成で「生成する案の数」を増やして再生成</li>
         </ol>
       </div>${bottleneckHtml}`;
   }
