@@ -73,10 +73,10 @@ const DEFAULT_PENALTIES = {
   consBase:          800,  // 連勤超過（1日超過あたり）
   consSq:            200,  // 連勤超過（二乗項）
   lateEarly:        1500,  // 遅→早インターバル不足
-  categorySwitch:    600,  // 連勤中の時間帯切替
-  badRest:           600,  // 遅→休→早
+  categorySwitch:   2000,  // 連勤中の時間帯切替（早→遅など。残り違反で最多のため強化）
+  badRest:          1500,  // 遅→休→早（リズム悪）
   singleOff:          50,  // 単発休み
-  singleWork:        200,  // 単発出勤（高すぎると surplus-rest スタッフの圧力で他違反が増えるため抑制）
+  singleWork:        600,  // 単発出勤
   offShortage:       4000,  // 公休不足（1日あたり）— 【優先2】設定した公休は必ず消化させる
   longRest:          2000,  // 4連休以上（自動配置分）— 【優先3】連休は最大3日まで
   offSurplus:         400,  // 公休余剰（未使用 — tryConvertSurplusRest ムーブで自然削減）
@@ -293,6 +293,10 @@ function loadFromStorage() {
     if (!(penalties.overstaff  >= 5000)) penalties.overstaff  = DEFAULT_PENALTIES.overstaff;  // 優先1
     if (!(penalties.offShortage >= 3000)) penalties.offShortage = DEFAULT_PENALTIES.offShortage; // 優先2
     if (penalties.longRest == null || penalties.longRest >= 3000) penalties.longRest = DEFAULT_PENALTIES.longRest; // 優先3
+    // 残り違反で多い「時間帯切替・リズム・単発出勤」を減らすため旧データも引き上げ
+    if (!(penalties.categorySwitch >= 1500)) penalties.categorySwitch = DEFAULT_PENALTIES.categorySwitch;
+    if (!(penalties.badRest        >= 1200)) penalties.badRest        = DEFAULT_PENALTIES.badRest;
+    if (!(penalties.singleWork     >= 400))  penalties.singleWork     = DEFAULT_PENALTIES.singleWork;
     Object.assign(AppState.settings, data.settings || {}, { penalties });
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完

@@ -1492,17 +1492,17 @@ function calculateScore(shifts, allowedShifts, days, P) {
             }
           }
           offRun++;
-          // 連休は最大3日まで（公休の連続のみ対象。余・有給は連休に数えない）
-          if (isPublicOff(cur)) {
+          // 連休は最大3日まで（有給も連休に数える。「余」は人員余りの都合なので除外）
+          if (cur !== '余') {
             pubRun++;
             if (pubRun > 3) {
               const restLocked =
-                isPublicOff((AppState.requests[s.id]    || {})[d]) ||
-                isPublicOff((AppState.fixedShifts[s.id] || {})[d]);
-              if (!restLocked) score += (P.longRest || 4000);
+                isOff((AppState.requests[s.id]    || {})[d]) ||
+                isOff((AppState.fixedShifts[s.id] || {})[d]);
+              if (!restLocked) score += (P.longRest || 2000);
             }
           } else {
-            pubRun = 0; // 余・有給などは公休連続を分断
+            pubRun = 0; // 「余」は連休を分断
           }
         }
         consWork = 0;
@@ -1653,16 +1653,16 @@ function checkViolations(shifts) {
         if (isPublicOff(cur)) offCount++; // 公休のみカウント（有給・季節休暇は別枠）
         consWork = 0;
 
-        // 連休は最大3日まで（公休の連続のみ対象。余・有給は連休に数えない）
-        if (isPublicOff(cur)) {
+        // 連休は最大3日まで（有給も連休に数える。「余」は除外）
+        if (isOff(cur) && cur !== '余') {
           offRun++;
           const restLocked =
-            isPublicOff((AppState.requests[s.id]    || {})[d]) ||
-            isPublicOff((AppState.fixedShifts[s.id] || {})[d]);
+            isOff((AppState.requests[s.id]    || {})[d]) ||
+            isOff((AppState.fixedShifts[s.id] || {})[d]);
           if (offRun === 4 && !restLocked && !reportedDays.has('rest' + d)) {
             violations.push({
               staffId: s.id, day: d, type: 'long-rest',
-              message: `⚠️ 公休が${offRun}連休以上（連休は最大3日まで）`,
+              message: `⚠️ ${offRun}連休以上（連休は最大3日まで）`,
               action:  '4日以上の連休は、必要なら希望休として手動で入れてください',
             });
             reportedDays.add('rest' + d);
