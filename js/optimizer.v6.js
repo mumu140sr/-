@@ -381,10 +381,13 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
 
   }
 
-  // 仕上げ: 総当たり微調整（山登り）＋難所の同日入れ替えでスコアを底上げ（A・D）
-  progressCallback && progressCallback(99, '仕上げ中（総当たり微調整）...');
-  await sleep(0);
-  bestScore = hillClimbPolish(bestShifts, locked, staff, allowedShifts, days, P, 3);
+  // 仕上げ: 総当たり微調整（山登り）＋難所の同日入れ替え（A・D）。
+  // 修復モードでは毎パス重くなるためスキップ（修復自体が局所探索のため）。
+  if (!repairCtx) {
+    progressCallback && progressCallback(99, '仕上げ中（総当たり微調整）...');
+    await sleep(0);
+    bestScore = hillClimbPolish(bestShifts, locked, staff, allowedShifts, days, P, 2);
+  }
 
   return { shifts: bestShifts, score: bestScore };
 }
@@ -418,7 +421,8 @@ function hillClimbPolish(shifts, locked, staff, allowedShifts, days, P, maxSweep
       }
     }
 
-    // (D) 難所対策: 同じ日の2人のシフトを入れ替えて良くなるなら採用
+    // (D) 難所対策: 同じ日の2人のシフトを入れ替えて良くなるなら採用（重いので初回のみ）
+    if (sweep === 0)
     for (let d = 1; d <= days; d++) {
       for (let i = 0; i < staff.length; i++) {
         const a = staff[i];

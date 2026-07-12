@@ -160,7 +160,7 @@ function setupGeneratePanel() {
         const origMax  = AppState.settings.maxAttempts;
         const repairRunner = (typeof repairScheduleViaWorker === 'function')
           ? repairScheduleViaWorker : repairSchedule;
-        for (let retry = 1; retry <= 2 && bestVios.length > 0; retry++) {
+        for (let retry = 1; retry <= 1 && bestVios.length > 0; retry++) {
           const boosted = Math.min(1000000, Math.floor(origMax * (1 + 0.7 * retry)));
           if (boosted <= origMax) break;
           AppState.settings.maxAttempts = boosted;
