@@ -131,6 +131,28 @@ function setupGeneratePanel() {
             `案${i + 1}: 違反${c.violations.length}件 / スコア${c.result.score}${i === bestIdx ? ' ←採用' : ''}`).join('　')
         : null;
 
+      // 仕上げ: 違反が残っていれば自動でエラー修正まで走らせて最良の状態にする
+      if (best.violations.length > 0) {
+        $text.textContent = '仕上げ中（エラーを自動修正）...';
+        try {
+          const repairRunner = (typeof repairScheduleViaWorker === 'function')
+            ? repairScheduleViaWorker : repairSchedule;
+          const rep = await repairRunner((pct, msg) => {
+            $bar.style.width = pct + '%';
+            $text.textContent = msg;
+          });
+          // repair は AppState.shifts/violations を更新済み。結果に反映
+          const beforeN = result.violations.length;
+          result.violations = AppState.violations;
+          result.score      = AppState.violations.length;
+          result.success    = AppState.violations.length === 0;
+          if (rep && rep.improved) {
+            result.candidateSummary = (result.candidateSummary ? result.candidateSummary + '　' : '') +
+              `自動修正: 違反${beforeN}→${AppState.violations.length}件`;
+          }
+        } catch (_) { /* 修正失敗時は生成結果のまま */ }
+      }
+
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
       $text.textContent = `完了！ 最終スコア: ${result.score} (${elapsed}秒)`;
