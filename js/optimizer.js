@@ -381,7 +381,68 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
 
   }
 
+  // 仕上げ: 総当たり微調整（山登り）＋難所の同日入れ替えでスコアを底上げ（A・D）
+  progressCallback && progressCallback(99, '仕上げ中（総当たり微調整）...');
+  await sleep(0);
+  bestScore = hillClimbPolish(bestShifts, locked, staff, allowedShifts, days, P, 3);
+
   return { shifts: bestShifts, score: bestScore };
+}
+
+/**
+ * 山登り法による仕上げ（A: 総当たり微調整 / D: 難所の同日入れ替え集中）。
+ * ロックされていない各マスについて、より良いシフトへ置き換える／同じ日の2人を
+ * 入れ替える、を改善がなくなるまで繰り返す。焼きなましの取りこぼしを削る。
+ * @returns {number} 仕上げ後のスコア
+ */
+function hillClimbPolish(shifts, locked, staff, allowedShifts, days, P, maxSweeps) {
+  let cur = calculateScore(shifts, allowedShifts, days, P);
+  for (let sweep = 0; sweep < maxSweeps; sweep++) {
+    let improved = false;
+
+    // (A) 1マスずつ、より良いシフト（担当シフト＋休）に置き換える
+    for (const s of staff) {
+      for (let d = 1; d <= days; d++) {
+        if (locked[s.id][d]) continue;
+        const orig  = shifts[s.id][d];
+        const cands = allowedShifts[s.id].concat(['休']);
+        let bestVal = orig, bestScore = cur;
+        for (const c of cands) {
+          if (c === orig) continue;
+          shifts[s.id][d] = c;
+          const sc = calculateScore(shifts, allowedShifts, days, P);
+          if (sc < bestScore - 1e-9) { bestScore = sc; bestVal = c; }
+        }
+        shifts[s.id][d] = bestVal;
+        if (bestVal !== orig) { cur = bestScore; improved = true; }
+      }
+    }
+
+    // (D) 難所対策: 同じ日の2人のシフトを入れ替えて良くなるなら採用
+    for (let d = 1; d <= days; d++) {
+      for (let i = 0; i < staff.length; i++) {
+        const a = staff[i];
+        if (locked[a.id][d]) continue;
+        for (let j = i + 1; j < staff.length; j++) {
+          const b = staff[j];
+          if (locked[b.id][d]) continue;
+          const va = shifts[a.id][d], vb = shifts[b.id][d];
+          if (va === vb) continue;
+          // 入れ替え後も担当可能なもの同士のみ（休は誰でも可）
+          const aOk = vb === '休' || (allowedShifts[a.id] || []).includes(vb);
+          const bOk = va === '休' || (allowedShifts[b.id] || []).includes(va);
+          if (!aOk || !bOk) continue;
+          shifts[a.id][d] = vb; shifts[b.id][d] = va;
+          const sc = calculateScore(shifts, allowedShifts, days, P);
+          if (sc < cur - 1e-9) { cur = sc; improved = true; }
+          else { shifts[a.id][d] = va; shifts[b.id][d] = vb; } // 戻す
+        }
+      }
+    }
+
+    if (!improved) break;
+  }
+  return cur;
 }
 
 function deepCopyShifts(shifts) {

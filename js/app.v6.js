@@ -153,6 +153,37 @@ function setupGeneratePanel() {
         } catch (_) { /* 修正失敗時は生成結果のまま */ }
       }
 
+      // B. まだ違反が残るなら、反復回数を自動で増やして再挑戦（最良を保持）
+      if (result.violations.length > 0) {
+        let bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
+        let bestVios   = AppState.violations.slice();
+        const origMax  = AppState.settings.maxAttempts;
+        const repairRunner = (typeof repairScheduleViaWorker === 'function')
+          ? repairScheduleViaWorker : repairSchedule;
+        for (let retry = 1; retry <= 2 && bestVios.length > 0; retry++) {
+          const boosted = Math.min(1000000, Math.floor(origMax * (1 + 0.7 * retry)));
+          if (boosted <= origMax) break;
+          AppState.settings.maxAttempts = boosted;
+          $text.textContent = `違反${bestVios.length}件 → 反復回数を${boosted.toLocaleString()}に増やして再挑戦(${retry})…`;
+          try {
+            await runner((pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = `再挑戦${retry}: ${msg}`; });
+            if (AppState.violations.length > 0) {
+              await repairRunner((pct, msg) => { $text.textContent = `再挑戦${retry} 仕上げ: ${msg}`; });
+            }
+            if (AppState.violations.length < bestVios.length) {
+              bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
+              bestVios   = AppState.violations.slice();
+            }
+          } catch (_) { /* この再挑戦は失敗、最良を維持 */ }
+        }
+        AppState.settings.maxAttempts = origMax; // 元に戻す
+        AppState.shifts     = bestShifts;         // 最良を確定
+        AppState.violations = bestVios;
+        result.violations   = bestVios;
+        result.score        = bestVios.length;
+        result.success      = bestVios.length === 0;
+      }
+
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
       $text.textContent = `完了！ 最終スコア: ${result.score} (${elapsed}秒)`;
