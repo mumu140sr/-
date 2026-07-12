@@ -199,28 +199,95 @@ function setupGeneratePanel() {
 }
 
 /**
- * 生成後、人員が余っている（「余」がある）場合にシフト表で目立つ案内を出す。
- * 定数を守った結果あぶれた人を「余」で可視化し、次のアクションを促す。
+ * 生成後の案内ポップアップ。
+ *  - コマ不足（必要コマ合計 > 出せるコマ合計、または人員不足の違反あり）→ 不足の案内
+ *  - 人員余り（「余」がある）→ 余りの案内
+ * を1つのポップアップで表示する。
  */
 function showSurplusPopup() {
   if (!AppState.generated) return;
-  const days = getDaysInMonth(AppState.settings.targetMonth);
-  const items = [];
-  let total = 0;
+  const days   = getDaysInMonth(AppState.settings.targetMonth);
+  const groups = getDepartmentGroups();
+
+  // 出せるコマ合計（各人の 月日数 − 公休 − 有給）と 必要コマ合計（定数×日）
+  let availableWork = 0;
+  AppState.staff.forEach(s => {
+    availableWork += Math.max(0, days - (s.maxOff || 0) - (s.paidLeave || 0));
+  });
+  const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
+  let requiredWork = 0;
+  groups.forEach(g => {
+    workKeys.forEach(key => {
+      if (!(g.reqs[key] > 0)) return;
+      for (let d = 1; d <= days; d++) requiredWork += getDayReq(g.reqs, g.dailyReqs || {}, key, d);
+    });
+  });
+  const shortageComa = requiredWork - availableWork; // 正なら不足
+
+  // 余りコマ（「余」）
+  const surplusItems = [];
+  let surplusTotal = 0;
   AppState.staff.forEach(s => {
     let yo = 0;
-    for (let d = 1; d <= days; d++) {
-      if ((AppState.shifts[s.id] || {})[d] === '余') yo++;
-    }
-    if (yo > 0) { items.push({ name: s.name, yo }); total += yo; }
+    for (let d = 1; d <= days; d++) if ((AppState.shifts[s.id] || {})[d] === '余') yo++;
+    if (yo > 0) { surplusItems.push({ name: s.name, yo }); surplusTotal += yo; }
   });
-  if (total === 0) return; // 余りなし → 出さない
+
+  // 人員不足の違反（定数を満たせない・公休が足りない）
+  const understaffVios = (AppState.violations || []).filter(v =>
+    ['understaff', 'skill-late', 'vicemanager-absent', 'off-count'].includes(v.type));
+
+  const hasShortage = shortageComa > 0 || understaffVios.length > 0;
+  const hasSurplus  = surplusTotal > 0;
+  if (!hasShortage && !hasSurplus) return; // どちらもなければ出さない
 
   const old = document.getElementById('surplusPopup');
   if (old) old.remove();
 
-  const list = items.sort((a, b) => b.yo - a.yo)
-    .map(r => `<li><b>${escapeHtml(r.name)}</b>：余 ${r.yo}コマ</li>`).join('');
+  let title, body;
+  if (hasShortage) {
+    // 不足している日・シフトの上位を列挙
+    const shortDays = understaffVios
+      .filter(v => v.type === 'understaff' || v.type === 'skill-late')
+      .slice(0, 12)
+      .map(v => `<li>${escapeHtml(v.message.replace(/^🚨\s*/, ''))}</li>`).join('');
+    const offShort = understaffVios.filter(v => v.type === 'off-count')
+      .map(v => { const s = AppState.staff.find(m => m.id === v.staffId); return s ? s.name : ''; })
+      .filter(Boolean);
+
+    title = shortageComa > 0
+      ? `⚠️ コマ数が ${shortageComa}コマ 足りません`
+      : `⚠️ 人手が足りない日があります`;
+    body = `
+      <p>必要コマ合計 <b>${requiredWork}</b> に対して、出せるコマ合計は <b>${availableWork}</b> です。
+      ${shortageComa > 0 ? `<b style="color:#c53030">${shortageComa}コマ不足</b>しています。` : '合計は足りていますが、特定の日・シフトで埋められていません。'}</p>
+      ${shortDays ? `<div style="margin:8px 0"><b>埋まっていない主な箇所：</b><ul style="margin:4px 0;padding-left:20px;line-height:1.7">${shortDays}</ul></div>` : ''}
+      ${offShort.length ? `<p>公休が足りていない人：<b>${escapeHtml(offShort.join('・'))}</b></p>` : ''}
+      <div style="background:#fff5f5;border-left:4px solid #fc8181;padding:10px 12px;border-radius:6px">
+        <b>不足の解消方法：</b>
+        <ol style="margin:6px 0 0;padding-left:20px;line-height:1.8">
+          <li><b>必要人数（定数）を減らす</b>（②シフト種別 or シフト表の集計行で日別に）</li>
+          <li><b>公休数・有給数を減らす</b>（③スタッフ管理）</li>
+          <li><b>スタッフを増やす</b>（③スタッフ管理）</li>
+          <li>調整後 <b>「🛠 エラーを自動修正」</b>または再生成</li>
+        </ol>
+      </div>`;
+  } else {
+    const list = surplusItems.sort((a, b) => b.yo - a.yo)
+      .map(r => `<li><b>${escapeHtml(r.name)}</b>：余 ${r.yo}コマ</li>`).join('');
+    title = `📢 人員が ${surplusTotal}コマ 余っています`;
+    body = `
+      <p>必要人数（定数）を守った結果、下記の人が「<span style="color:#bf5b00;font-weight:700">余</span>（人員余り）」になっています。</p>
+      <ul style="margin:8px 0 12px;padding-left:20px;line-height:1.8">${list}</ul>
+      <div style="background:#fff8e1;border-left:4px solid #f6ad55;padding:10px 12px;border-radius:6px">
+        <b>この余りの使い方：</b>
+        <ol style="margin:6px 0 0;padding-left:20px;line-height:1.8">
+          <li><b>忙しい日の必要人数を増やす</b>（②シフト種別 →「日別必要人数」）</li>
+          <li>または <b>有給を増やす</b>（③スタッフ管理 → 有給数）</li>
+          <li>入力したら <b>「🛠 エラーを自動修正」</b>を押す → 余が減ります</li>
+        </ol>
+      </div>`;
+  }
 
   const modal = document.createElement('div');
   modal.id = 'surplusPopup';
@@ -228,21 +295,10 @@ function showSurplusPopup() {
   modal.innerHTML = `
     <div class="modal-content" style="max-width:560px">
       <div class="modal-header">
-        <h3 style="margin:0">📢 人員が ${total}コマ 余っています</h3>
+        <h3 style="margin:0">${title}</h3>
         <button class="modal-close" id="surplusClose">✕</button>
       </div>
-      <div class="modal-body" style="padding:16px">
-        <p>必要人数（定数）を守った結果、下記の人が「<span style="color:#bf5b00;font-weight:700">余</span>（人員余り）」になっています。</p>
-        <ul style="margin:8px 0 12px;padding-left:20px;line-height:1.8">${list}</ul>
-        <div style="background:#fff8e1;border-left:4px solid #f6ad55;padding:10px 12px;border-radius:6px">
-          <b>この余りの使い方：</b>
-          <ol style="margin:6px 0 0;padding-left:20px;line-height:1.8">
-            <li><b>忙しい日の必要人数を増やす</b>（②シフト種別 →「日別必要人数」）</li>
-            <li>または <b>有給を増やす</b>（③スタッフ管理 → 有給数）</li>
-            <li>入力したら <b>「🛠 エラーを自動修正」</b>を押す → 余が減ります</li>
-          </ol>
-        </div>
-      </div>
+      <div class="modal-body" style="padding:16px">${body}</div>
       <div style="padding:0 16px 16px;text-align:right">
         <button class="btn btn-primary" id="surplusOk">わかった</button>
       </div>
