@@ -1526,6 +1526,12 @@ function calculateScore(shifts, allowedShifts, days, P) {
                 Math.abs(lateCount  - totalWork * balance.lateRatio)) * P.balanceDiff;
     }
 
+    // 早番・遅番の片寄せ: 1人がどちらかの時間帯に集中するほど「連勤中の切替」「遅→休→早」が
+    // 起きにくくなる。少ない方の時間帯の日数にペナルティを与え、自動的にチーム分けへ寄せる。
+    if (earlyCount > 0 && lateCount > 0) {
+      score += Math.min(earlyCount, lateCount) * (P.bandConcentration || 700);
+    }
+
     // 単発出勤
     if (AppState.settings.penaltySingleOff) {
       for (let d = 2; d < days; d++) {

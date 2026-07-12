@@ -289,6 +289,7 @@ function renderPenaltyInputs() {
     longRest:           '🛌 4連休以上（連休は最大3日）',
     skillLateShortage:  '🎯 スキル保有者の不足',
     nightAfterWork:     '🌃 夜勤翌日に出勤',
+    bandConcentration:  '🔀 早番/遅番の片寄せ（切替を減らす）',
   };
 
   Object.entries(labels).forEach(([key, label]) => {

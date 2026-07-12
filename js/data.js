@@ -89,6 +89,7 @@ const DEFAULT_PENALTIES = {
   restPairBonus:       100, // 2連休以上のまとまった休みへのボーナス（スコアから減算）
   nightAfterWork:     8000, // 夜勤翌日に休みでない（夜勤明けは必ず休み）
   skillLateShortage:  9000, // 遅番に必要スキル保有者が不足（1人あたり）
+  bandConcentration:   700, // 早番・遅番の片寄せ（少ない方の時間帯の日数×。切替を根本から減らす）
 };
 
 // アプリケーションの状態
@@ -297,6 +298,7 @@ function loadFromStorage() {
     if (!(penalties.categorySwitch >= 1500)) penalties.categorySwitch = DEFAULT_PENALTIES.categorySwitch;
     if (!(penalties.badRest        >= 1200)) penalties.badRest        = DEFAULT_PENALTIES.badRest;
     if (!(penalties.singleWork     >= 400))  penalties.singleWork     = DEFAULT_PENALTIES.singleWork;
+    if (penalties.bandConcentration == null) penalties.bandConcentration = DEFAULT_PENALTIES.bandConcentration;
     Object.assign(AppState.settings, data.settings || {}, { penalties });
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
