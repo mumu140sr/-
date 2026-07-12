@@ -70,7 +70,7 @@ async function optimizeSchedule(progressCallback) {
   }
 
   AppState.shifts     = mergedShifts;
-  markSurplusRest(AppState.shifts); // 公休を目標数ちょうどにし、余った休みを「余」に振り分ける
+  // markSurplusRest は無効化（公休は目標数ちょうどに固定せず、余っても公休のまま＝以前の動作）
   AppState.violations = checkViolations(mergedShifts);
   AppState.generated  = true;
 
@@ -182,7 +182,7 @@ async function repairSchedule(progressCallback) {
     } finally {
       _optStaff = null; _optReqs = null; _optDailyReqs = null;
     }
-    markSurplusRest(merged);
+    // markSurplusRest は無効化（公休を固定せず以前の動作。余は手動ラベルとして残す）
     return { shifts: merged, violations: checkViolations(merged) };
   };
 
@@ -2360,13 +2360,16 @@ function runAIDiagnosis() {
     const surplusItems = [];
     let totalSurplus = 0;
     staff.forEach(s => {
-      let yo = 0;
+      let publicOff = 0, yo = 0;
       for (let d = 1; d <= days; d++) {
-        if ((AppState.shifts[s.id] || {})[d] === '余') yo++;
+        const sh = (AppState.shifts[s.id] || {})[d] || '';
+        if (isPublicOff(sh)) publicOff++;
+        else if (sh === '余') yo++;
       }
-      if (yo > 0) {
-        surplusItems.push({ name: s.name, yo });
-        totalSurplus += yo;
+      const excess = Math.max(0, publicOff - (s.maxOff || 0)) + yo;
+      if (excess > 0) {
+        surplusItems.push({ name: s.name, yo: excess });
+        totalSurplus += excess;
       }
     });
 

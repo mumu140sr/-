@@ -277,13 +277,18 @@ function showSurplusPopup() {
   });
   const shortageComa = requiredWork - availableWork; // 正なら不足
 
-  // 余りコマ（「余」）
+  // 余りコマ（公休が目標より多い分 ＋ 手動「余」）
   const surplusItems = [];
   let surplusTotal = 0;
   AppState.staff.forEach(s => {
-    let yo = 0;
-    for (let d = 1; d <= days; d++) if ((AppState.shifts[s.id] || {})[d] === '余') yo++;
-    if (yo > 0) { surplusItems.push({ name: s.name, yo }); surplusTotal += yo; }
+    let publicOff = 0, yo = 0;
+    for (let d = 1; d <= days; d++) {
+      const sh = (AppState.shifts[s.id] || {})[d] || '';
+      if (isPublicOff(sh)) publicOff++;
+      else if (sh === '余') yo++;
+    }
+    const excess = Math.max(0, publicOff - (s.maxOff || 0)) + yo;
+    if (excess > 0) { surplusItems.push({ name: s.name, yo: excess }); surplusTotal += excess; }
   });
 
   // 人員不足の違反（定数を満たせない・公休が足りない）
