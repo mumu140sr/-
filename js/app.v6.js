@@ -619,6 +619,59 @@ function setupResultPanel() {
     });
   }
 
+  // 🧩 かんたん調整: 手動修正(🔒)は保ったまま、玉突きの崩れだけを高速で吸収
+  const btnQuick = document.getElementById('btnQuickAdjust');
+  if (btnQuick) {
+    btnQuick.addEventListener('click', () => {
+      if (!AppState.generated) {
+        toast('シフトを生成してから実行してください', 'error');
+        return;
+      }
+      const before = checkViolations(AppState.shifts).length;
+      if (before === 0) {
+        toast('エラーはありません 🎉', 'success');
+        return;
+      }
+      if (typeof recordShiftHistory === 'function') recordShiftHistory();
+      const backup = JSON.parse(JSON.stringify(AppState.shifts));
+
+      btnQuick.disabled = true;
+      btnQuick.textContent = '⏳ 調整中...';
+      // 描画を1フレーム挟んでからサッと実行（violationPolish は焼きなましなしの高速探索）
+      setTimeout(() => {
+        try {
+          violationPolish(AppState.shifts, 4);
+          markSurplusRest(AppState.shifts); // 公休超過を余に整える
+          AppState.violations = checkViolations(AppState.shifts);
+          if (AppState.violations.length >= before) {
+            // 改善なし → 完全に元へ戻す
+            AppState.shifts = backup;
+            AppState.violations = checkViolations(backup);
+            if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
+            toast('自動では調整できませんでした（変更なし）。🛠 エラーを自動修正 をお試しください', 'info', 4000);
+          } else {
+            toast(`🧩 エラー ${before}件 → ${AppState.violations.length}件 に調整（Ctrl+Zで戻せます）`, 'success', 4000);
+          }
+          renderResultTable();
+          const reportCard = document.getElementById('reportCard');
+          if (reportCard && reportCard.style.display !== 'none') {
+            renderReport({ success: AppState.violations.length === 0,
+              score: AppState.violations.length, violations: AppState.violations });
+          }
+          saveToStorage();
+        } catch (e) {
+          console.error(e);
+          AppState.shifts = backup;
+          if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
+          toast('調整中にエラーが発生しました: ' + e.message, 'error');
+        } finally {
+          btnQuick.disabled = false;
+          btnQuick.textContent = '🧩 かんたん調整';
+        }
+      }, 50);
+    });
+  }
+
   // ↩ 元に戻す / ↪ やり直す
   const btnUndo = document.getElementById('btnUndo');
   const btnRedo = document.getElementById('btnRedo');

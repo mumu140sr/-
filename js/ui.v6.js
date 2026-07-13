@@ -1511,7 +1511,12 @@ function updateHistoryButtons() {
  * - localStorage に保存
  */
 function refreshAfterManualEdit() {
+  const prevCount = (AppState.violations || []).length;
   AppState.violations = checkViolations(AppState.shifts);
+  // 手動修正で玉突きの違反が増えた場合は「かんたん調整」を案内
+  if (AppState.violations.length > prevCount) {
+    toast(`⚠ この変更で違反が ${prevCount}→${AppState.violations.length}件に。「🧩 かんたん調整」で周りを自動で直せます`, 'info', 4500);
+  }
   renderResultTable();
 
   const reportCard = document.getElementById('reportCard');
