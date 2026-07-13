@@ -666,7 +666,8 @@ function setupResultPanel() {
             AppState.shifts = backup;
             AppState.violations = checkViolations(backup);
             if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-            toast('自動では調整できませんでした（変更なし）。🛠 エラーを自動修正 をお試しください', 'info', 4000);
+            toast('🧩では直せませんでした（変更なし）。編集済み🔒のマスは動かせないため、' +
+                  'より強力な「🛠 エラーを自動修正」を試すか、関係する🔒を解除してください', 'info', 6000);
           } else {
             toast(`🧩 エラー ${before}件 → ${AppState.violations.length}件 に調整（Ctrl+Zで戻せます）`, 'success', 4000);
           }

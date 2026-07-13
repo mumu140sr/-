@@ -278,12 +278,27 @@ function violationPolish(shifts, maxRounds) {
     }
     candsOf[s.id] = base.concat(['休']);
   });
+  // スコア計算用の allowedShifts（休を除く）
+  const allowedMap = {};
+  staff.forEach(s => { allowedMap[s.id] = candsOf[s.id].filter(c => c !== '休'); });
+  const P = AppState.settings.penalties || {};
 
-  let vios = checkViolations(shifts);
+  let vios     = checkViolations(shifts);
+  let curScore = calculateScore(shifts, allowedMap, days, P);
+  // 受理条件: 違反件数が減る手を最優先。同数でもスコアが良くなる手は受理して
+  // 「同点の壁」を越える（(件数, スコア) の辞書式で単調減少するためループしない）
   const tryMove = (apply, undo) => {
     apply();
     const nv = checkViolations(shifts);
-    if (nv.length < vios.length) { vios = nv; return true; }
+    if (nv.length < vios.length) {
+      vios = nv;
+      curScore = calculateScore(shifts, allowedMap, days, P);
+      return true;
+    }
+    if (nv.length === vios.length) {
+      const sc = calculateScore(shifts, allowedMap, days, P);
+      if (sc < curScore - 1e-9) { vios = nv; curScore = sc; return true; }
+    }
     undo();
     return false;
   };
