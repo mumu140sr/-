@@ -108,8 +108,8 @@ function setupGeneratePanel() {
           shifts:     AppState.shifts,
           violations: AppState.violations,
         });
-        // 全案違反ゼロなら早期終了
-        if (res.violations.length === 0) break;
+        // 十分良い案（違反2件以下）が出たら早期終了 → 残りは仕上げ(修正)に任せて時間短縮
+        if (res.violations.length <= 2) break;
       }
 
       // 最良案: 違反件数 → スコア の順で比較
@@ -153,8 +153,9 @@ function setupGeneratePanel() {
         } catch (_) { /* 修正失敗時は生成結果のまま */ }
       }
 
-      // B. まだ違反が残るなら、反復回数を自動で増やして再挑戦（最良を保持）
-      if (result.violations.length > 0) {
+      // B. まだ違反が多く残る場合のみ、反復回数を自動で増やして再挑戦（最良を保持）
+      // 3件以下ならフル再生成より手動修正の方が早いためスキップ（時間短縮）
+      if (result.violations.length > 3) {
         let bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
         let bestVios   = AppState.violations.slice();
         const origMax  = AppState.settings.maxAttempts;
