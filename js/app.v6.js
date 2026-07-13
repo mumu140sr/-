@@ -182,11 +182,12 @@ function setupGeneratePanel() {
           const boosted = Math.min(1000000, Math.floor(origMax * (1 + 0.7 * retry)));
           if (boosted <= origMax) break;
           AppState.settings.maxAttempts = boosted;
-          $text.textContent = `違反${bestVios.length}件 → 反復回数を${boosted.toLocaleString()}に増やして再挑戦(${retry})…`;
+          $text.textContent = `違反${bestVios.length}件 → 別の案をもう1回生成して比較します（現在の最良${bestVios.length}件は保持中）…`;
           try {
-            await runner((pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = `再挑戦${retry}: ${msg}`; });
+            const keepNote = `｜現在の最良 ${bestVios.length}件は保持中（悪化しません）`;
+            await runner((pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = `再挑戦${retry}: ${msg}${keepNote}`; });
             if (AppState.violations.length > 0) {
-              await repairRunner((pct, msg) => { $text.textContent = `再挑戦${retry} 仕上げ: ${msg}`; });
+              await repairRunner((pct, msg) => { $text.textContent = `再挑戦${retry} 仕上げ: ${msg}${keepNote}`; });
             }
             if (AppState.violations.length < bestVios.length) {
               bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
