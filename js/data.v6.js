@@ -8,7 +8,7 @@ const OFF_TYPES = {
   '休': { label: '公休',     class: 's-off',    isOff: true, countsAsPublic: true  },
   '公': { label: '公休',     class: 's-public', isOff: true, countsAsPublic: true  },
   '有': { label: '有給',     class: 's-paid',   isOff: true, countsAsPublic: false },
-  '半': { label: '半休',     class: 's-half',   isOff: false, countsAsPublic: false }, // 半休は出勤扱い（勤務時間が半分）
+  '半': { label: '半休',     class: 's-half',   isOff: true,  countsAsPublic: false }, // 半休（休み扱い・公休にはカウントしない。集計は有給他に含む）
   '余': { label: '余剰',     class: 's-surplus',isOff: true,  countsAsPublic: false }, // 人員余剰による休み（公休・有給とは別枠）
   '☆': { label: '希望休',   class: 's-off',    isOff: true, countsAsPublic: true  },
   '季': { label: '季節休暇', class: 's-off',    isOff: true, countsAsPublic: false },
