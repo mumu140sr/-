@@ -186,38 +186,43 @@ async function repairSchedule(progressCallback) {
     return { shifts: merged, violations: checkViolations(merged) };
   };
 
-  // 改善が続く限り繰り返す。停滞したら範囲を段階的に広げ、全面再最適化まで試す。
+  // 「焼きなまし修復 ⇄ 違反狙い撃ち仕上げ」を最大2周まで往復して粘る
   let bestShifts     = origShifts;
   let bestViolations = origViolations;
-  let level          = 0;
   const scope = ['狭い範囲', 'やや広い範囲', '広い範囲', '全面見直し'];
-  for (let pass = 0; pass < MAX_PASS && bestViolations.length > 0; pass++) {
-    const label = `修復中 ${pass + 1}回目（${scope[Math.min(level, 3)]}）｜ 残りエラー ${bestViolations.length}件 →`;
-    const r = await onePass(bestShifts, bestViolations, level, label);
-    if (r.violations.length < bestViolations.length) {
-      bestShifts = r.shifts; bestViolations = r.violations;
-      level = 0; // 改善したら再び狭い範囲（安く速い）に戻す
-    } else {
-      level++;                    // 停滞 → 範囲を広げて再挑戦
-      if (level > FULL_LEVEL) break; // 全面再最適化でも減らなければ終了
+  for (let cycle = 0; cycle < 2 && bestViolations.length > 0; cycle++) {
+    // フェーズ1: 焼きなまし修復（停滞したら範囲を段階的に拡大）
+    let level = 0;
+    for (let pass = 0; pass < MAX_PASS && bestViolations.length > 0; pass++) {
+      const label = `修復中 ${pass + 1}回目（${scope[Math.min(level, 3)]}）｜ 残りエラー ${bestViolations.length}件 →`;
+      const r = await onePass(bestShifts, bestViolations, level, label);
+      if (r.violations.length < bestViolations.length) {
+        bestShifts = r.shifts; bestViolations = r.violations;
+        level = 0; // 改善したら再び狭い範囲（安く速い）に戻す
+      } else {
+        level++;                    // 停滞 → 範囲を広げて再挑戦
+        if (level > FULL_LEVEL) break; // 全面再最適化でも減らなければ終了
+      }
+      progressCallback && progressCallback(
+        Math.min(99, Math.floor(((pass + 1) / MAX_PASS) * 100)),
+        `修復中… 残りエラー ${bestViolations.length}件（${pass + 1}回目まで完了）`);
     }
-    // 各パス終了時に「今の残りエラー数」を通知
-    progressCallback && progressCallback(
-      Math.min(99, Math.floor(((pass + 1) / MAX_PASS) * 100)),
-      `修復中… 残りエラー ${bestViolations.length}件（${pass + 1}回目まで完了）`);
-  }
-  // 最終仕上げ: 違反件数そのものを狙い撃ちする入れ替え探索
-  // （1マス置換・同一人物の2日交換・同日2人交換 — 件数が減る手だけ採用）
-  if (bestViolations.length > 0) {
-    progressCallback && progressCallback(99, `最終仕上げ（違反狙い撃ち）… 残り ${bestViolations.length}件`);
-    await sleep(0);
-    bestViolations = violationPolish(bestShifts, 4);
-    // 仕上げで公休が目標超過になった分を「余」に整える（悪化したら戻す）
-    const preSurplus = deepCopyShifts(bestShifts);
-    markSurplusRest(bestShifts);
-    const nv = checkViolations(bestShifts);
-    if (nv.length <= bestViolations.length) bestViolations = nv;
-    else { for (const sid in preSurplus) bestShifts[sid] = preSurplus[sid]; }
+
+    // フェーズ2: 違反狙い撃ち仕上げ（1マス置換・2日交換・同日2人交換）
+    if (bestViolations.length > 0) {
+      progressCallback && progressCallback(99, `最終仕上げ（違反狙い撃ち）… 残り ${bestViolations.length}件`);
+      await sleep(0);
+      const beforePolish = bestViolations.length;
+      bestViolations = violationPolish(bestShifts, 4);
+      // 仕上げで公休が目標超過になった分を「余」に整える（悪化したら戻す）
+      const preSurplus = deepCopyShifts(bestShifts);
+      markSurplusRest(bestShifts);
+      const nv = checkViolations(bestShifts);
+      if (nv.length <= bestViolations.length) bestViolations = nv;
+      else { for (const sid in preSurplus) bestShifts[sid] = preSurplus[sid]; }
+      // 仕上げで改善がなければ、もう1周しても同じなので終了
+      if (bestViolations.length >= beforePolish) break;
+    }
   }
   progressCallback && progressCallback(100, `修復完了 — 残りエラー ${bestViolations.length}件`);
 
@@ -293,8 +298,8 @@ function violationPolish(shifts, maxRounds) {
         : staff;
 
       for (const s of targets) {
-        // ① 1マス置換（違反日とその前後日）
-        for (let d = Math.max(1, v.day - 1); d <= Math.min(days, v.day + 1); d++) {
+        // ① 1マス置換（違反日と前後2日 — 切替・リズムは前後の日が原因のことが多い）
+        for (let d = Math.max(1, v.day - 2); d <= Math.min(days, v.day + 2); d++) {
           if (!_polishMovable(shifts, s.id, d)) continue;
           const cur = shifts[s.id][d];
           for (const c of candsOf[s.id]) {
@@ -304,9 +309,9 @@ function violationPolish(shifts, maxRounds) {
           }
         }
 
-        // ② 同一人物の2日交換（違反日 ↔ 月内の別日）
-        const d1 = v.day;
-        if (_polishMovable(shifts, s.id, d1)) {
+        // ② 同一人物の2日交換（違反日±1 ↔ 月内の別日）
+        for (let d1 = Math.max(1, v.day - 1); d1 <= Math.min(days, v.day + 1); d1++) {
+          if (!_polishMovable(shifts, s.id, d1)) continue;
           for (let d2 = 1; d2 <= days; d2++) {
             if (d2 === d1 || !_polishMovable(shifts, s.id, d2)) continue;
             const a = shifts[s.id][d1], b = shifts[s.id][d2];
@@ -317,20 +322,22 @@ function violationPolish(shifts, maxRounds) {
         }
       }
 
-      // ③ 同日2人交換（その日の全ペア。担当可能な組のみ）
-      for (let i = 0; i < staff.length; i++) {
-        const A = staff[i];
-        if (!_polishMovable(shifts, A.id, v.day)) continue;
-        for (let j = i + 1; j < staff.length; j++) {
-          const B = staff[j];
-          if (!_polishMovable(shifts, B.id, v.day)) continue;
-          const va = shifts[A.id][v.day], vb = shifts[B.id][v.day];
-          if (va === vb) continue;
-          const aOk = !isWork(vb) || candsOf[A.id].includes(vb);
-          const bOk = !isWork(va) || candsOf[B.id].includes(va);
-          if (!aOk || !bOk) continue;
-          if (tryMove(() => { shifts[A.id][v.day] = vb; shifts[B.id][v.day] = va; },
-                      () => { shifts[A.id][v.day] = va; shifts[B.id][v.day] = vb; })) { improved = true; break; }
+      // ③ 同日2人交換（違反日±1の全ペア。担当可能な組のみ）
+      for (let d = Math.max(1, v.day - 1); d <= Math.min(days, v.day + 1); d++) {
+        for (let i = 0; i < staff.length; i++) {
+          const A = staff[i];
+          if (!_polishMovable(shifts, A.id, d)) continue;
+          for (let j = i + 1; j < staff.length; j++) {
+            const B = staff[j];
+            if (!_polishMovable(shifts, B.id, d)) continue;
+            const va = shifts[A.id][d], vb = shifts[B.id][d];
+            if (va === vb) continue;
+            const aOk = !isWork(vb) || candsOf[A.id].includes(vb);
+            const bOk = !isWork(va) || candsOf[B.id].includes(va);
+            if (!aOk || !bOk) continue;
+            if (tryMove(() => { shifts[A.id][d] = vb; shifts[B.id][d] = va; },
+                        () => { shifts[A.id][d] = va; shifts[B.id][d] = vb; })) { improved = true; break; }
+          }
         }
       }
     }
