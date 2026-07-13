@@ -70,7 +70,7 @@ async function optimizeSchedule(progressCallback) {
   }
 
   AppState.shifts     = mergedShifts;
-  // markSurplusRest は無効化（公休は目標数ちょうどに固定せず、余っても公休のまま＝以前の動作）
+  markSurplusRest(AppState.shifts); // 公休を目標数ちょうどにし、余った休みを「余」に振り分ける
   AppState.violations = checkViolations(mergedShifts);
   AppState.generated  = true;
 
@@ -182,7 +182,7 @@ async function repairSchedule(progressCallback) {
     } finally {
       _optStaff = null; _optReqs = null; _optDailyReqs = null;
     }
-    // markSurplusRest は無効化（公休を固定せず以前の動作。余は手動ラベルとして残す）
+    markSurplusRest(merged); // 修復後も公休ちょうど＋余に整える
     return { shifts: merged, violations: checkViolations(merged) };
   };
 
