@@ -96,20 +96,37 @@ function setupGeneratePanel() {
         parseInt(document.getElementById('numCandidates')?.value) || 3));
       AppState.settings.numCandidates = numCand;
 
-      const candidates = [];
-      for (let ci = 0; ci < numCand; ci++) {
-        const res = await runner((pct, msg) => {
-          const mapped = Math.floor((ci * 100 + pct) / numCand);
-          $bar.style.width = mapped + '%';
-          $text.textContent = numCand > 1 ? `案${ci + 1}/${numCand}: ${msg}` : msg;
-        });
-        candidates.push({
-          result:     res,
-          shifts:     AppState.shifts,
-          violations: AppState.violations,
-        });
-        // 十分良い案（違反2件以下）が出たら早期終了 → 残りは仕上げ(修正)に任せて時間短縮
-        if (res.violations.length <= 2) break;
+      let candidates = [];
+      const canParallel = numCand > 1 &&
+        typeof optimizeCandidatesParallel === 'function' && typeof Worker !== 'undefined';
+      if (canParallel) {
+        // 複数案を並列 Worker で同時生成（マルチコア活用 → 1案分の時間で全案完成）
+        try {
+          candidates = await optimizeCandidatesParallel(numCand, (pct, msg) => {
+            $bar.style.width = pct + '%';
+            $text.textContent = msg;
+          });
+        } catch (e) {
+          console.warn('並列生成に失敗、逐次生成にフォールバック:', e);
+          candidates = [];
+        }
+      }
+      if (candidates.length === 0) {
+        // フォールバック: 逐次生成
+        for (let ci = 0; ci < numCand; ci++) {
+          const res = await runner((pct, msg) => {
+            const mapped = Math.floor((ci * 100 + pct) / numCand);
+            $bar.style.width = mapped + '%';
+            $text.textContent = numCand > 1 ? `案${ci + 1}/${numCand}: ${msg}` : msg;
+          });
+          candidates.push({
+            result:     res,
+            shifts:     AppState.shifts,
+            violations: AppState.violations,
+          });
+          // 十分良い案（違反2件以下）が出たら早期終了
+          if (res.violations.length <= 2) break;
+        }
       }
 
       // 最良案: 違反件数 → スコア の順で比較

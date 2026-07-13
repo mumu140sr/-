@@ -428,7 +428,16 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
   let bestShifts   = deepCopyShifts(shifts);
   let bestScore    = currentScore;
 
-  const maxAttempts  = settings.maxAttempts;
+  // 修復モードでは動かせるマス数に応じて反復回数を自動縮小（探索空間が小さいため
+  // フル回数は不要 — 品質を保ったまま大幅に高速化）
+  let maxAttempts = settings.maxAttempts;
+  if (repairCtx) {
+    let unlockedCells = 0;
+    staff.forEach(s => {
+      for (let d = 1; d <= days; d++) if (!locked[s.id][d]) unlockedCells++;
+    });
+    maxAttempts = Math.min(settings.maxAttempts, Math.max(20000, unlockedCells * 2500));
+  }
   let T              = 500.0;
   const coolingRate  = Math.pow(0.01 / T, 1.0 / maxAttempts);
   const reportInterval = Math.max(500, Math.floor(maxAttempts / 200));
