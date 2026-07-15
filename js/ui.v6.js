@@ -656,6 +656,8 @@ function setupStaffPanel() {
       prevLastShift:   '',
       note:            '',
       skills:          [],
+      personalMaxCons: 0,
+      needPairRest:    false,
     });
     renderStaffTable();
     autoSave();
@@ -826,6 +828,16 @@ function renderStaffTable() {
         </select>
       </td>
       <td>
+        <input type="number" min="0" max="10" value="${s.personalMaxCons > 0 ? s.personalMaxCons : ''}"
+               placeholder="全体" title="この人だけの連勤上限。空欄なら全体設定を使用"
+               data-field="personalMaxCons" data-id="${s.id}" style="width:54px"/>
+      </td>
+      <td style="text-align:center">
+        <input type="checkbox" data-prule="needPairRest" data-id="${s.id}"
+               title="遅番→早番へ移るときは休み1日ではなく2連休以上を挟む"
+               ${s.needPairRest ? 'checked' : ''}/>
+      </td>
+      <td>
         <input type="number" min="0" max="6" value="${s.prevConsecutive || 0}"
                data-field="prevConsecutive" data-id="${s.id}" style="width:50px"/>
       </td>
@@ -855,7 +867,7 @@ function renderStaffTable() {
       const staff = AppState.staff.find(s => s.id === id);
       if (!staff) return;
       let val = e.target.value;
-      if (['maxOff', 'prevConsecutive', 'paidLeave'].includes(field)) val = parseInt(val) || 0;
+      if (['maxOff', 'prevConsecutive', 'paidLeave', 'personalMaxCons'].includes(field)) val = parseInt(val) || 0;
       staff[field] = val;
       autoSave();
     });
@@ -895,6 +907,18 @@ function renderStaffTable() {
         staff.allowedShifts = staff.allowedShifts.filter(k => k !== shiftKey);
         if (label) label.style.background = '#edf2f7';
       }
+      autoSave();
+    });
+  });
+
+  // 個人ルールのチェックボックス（遅→早は連休必須 など）
+  tbody.querySelectorAll('input[data-prule]').forEach(el => {
+    el.addEventListener('change', e => {
+      const id    = e.target.dataset.id;
+      const rule  = e.target.dataset.prule;
+      const staff = AppState.staff.find(s => s.id === id);
+      if (!staff) return;
+      staff[rule] = e.target.checked;
       autoSave();
     });
   });

@@ -170,6 +170,12 @@ function isPublicOff(shift) {
   return t ? !!t.countsAsPublic : false;
 }
 
+// 個人の連勤上限（未設定・0なら全体設定 maxConsecutive を使う）
+function getMaxConsFor(s) {
+  const v = s ? parseInt(s.personalMaxCons) : NaN;
+  return (v > 0) ? v : (AppState.settings.maxConsecutive || 4);
+}
+
 // 1コマあたりの労働時間（未設定シフトは8h扱い）
 function getShiftHours(shift) {
   const t = getShiftType(shift);
@@ -350,6 +356,8 @@ function loadFromStorage() {
         prevLastShift:   s.prevLastShift || '',
         note:            s.note || '',
         skills:          Array.isArray(s.skills) ? s.skills : [],
+        personalMaxCons: parseInt(s.personalMaxCons) || 0, // 個人の連勤上限（0=全体設定）
+        needPairRest:    !!s.needPairRest,                 // 遅→早の切替時は2連休以上必須
       };
     });
 
@@ -422,6 +430,8 @@ function addSampleStaff() {
       prevLastShift:   '',
       note:            '',
       skills:          [],
+      personalMaxCons: 0,
+      needPairRest:    false,
     });
   });
 }

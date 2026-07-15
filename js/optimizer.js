@@ -767,7 +767,7 @@ function wouldCauseHierarchyViolation(shifts, staff, allowedShifts, A, d, shiftK
 }
 
 function wouldExceedConsWork(shifts, s, d, days) {
-  const maxCons = AppState.settings.maxConsecutive || 5;
+  const maxCons = getMaxConsFor(s); // 個人の連勤上限（未設定なら全体設定）
   let count = 1; // 当該日自体
   let dd = d - 1;
   while (dd >= 1  && isWork(shifts[s.id][dd])) { count++; dd--; }
@@ -1662,8 +1662,9 @@ function calculateScore(shifts, allowedShifts, days, P) {
         }
 
         consWork++;
-        if (consWork > maxCons) {
-          const over = consWork - maxCons;
+        const myMaxCons = getMaxConsFor(s); // 個人の連勤上限
+        if (consWork > myMaxCons) {
+          const over = consWork - myMaxCons;
           score += P.consBase * over + P.consSq * over * over;
         }
 
@@ -1719,6 +1720,14 @@ function calculateScore(shifts, allowedShifts, days, P) {
           }
         }
         consWork = 0;
+
+        // 個人ルール: 遅→早の切替時は2連休以上必須（遅→休1日→早 を強く禁止）
+        if (s.needPairRest && d > 1 && d < days) {
+          const pv2 = shifts[s.id][d - 1], nx2 = shifts[s.id][d + 1];
+          if (isWork(pv2) && isWork(nx2) && isLate(pv2) && isEarlyCategory(nx2)) {
+            score += (P.lateEarly || 2500) * 2;
+          }
+        }
 
         // 単発休みペナルティ
         if (AppState.settings.penaltySingleOff && d > 1 && d < days) {
@@ -1797,10 +1806,11 @@ function checkViolations(shifts) {
 
       if (isWork(cur)) {
         consWork++;
-        if (consWork > maxCons && !reportedDays.has(d)) {
+        const myMaxCons = getMaxConsFor(s); // 個人の連勤上限（未設定なら全体設定）
+        if (consWork > myMaxCons && !reportedDays.has(d)) {
           violations.push({
             staffId: s.id, day: d, type: 'consecutive',
-            message: `🚨 ${consWork}連勤（上限${maxCons}）`,
+            message: `🚨 ${consWork}連勤（上限${myMaxCons}${s.personalMaxCons > 0 ? '・個人設定' : ''}）`,
             action:  '他の日と入れ替えて休みを挟んでください',
           });
           reportedDays.add(d);
@@ -1890,7 +1900,18 @@ function checkViolations(shifts) {
           offRun = 0;
         }
 
-        if (settings.penaltySingleOff && d > 1 && d < days) {
+        // 個人ルール: 遅→早の切替時は2連休以上必須
+        if (s.needPairRest && d > 1 && d < days) {
+          const pv = (shifts[s.id] || {})[d - 1] || '';
+          const nx = (shifts[s.id] || {})[d + 1] || '';
+          if (isWork(pv) && isWork(nx) && isLate(pv) && isEarlyCategory(nx)) {
+            violations.push({
+              staffId: s.id, day: d, type: 'pair-rest',
+              message: `🚨 遅→休1日→早（個人ルール: 切替時は2連休以上）`,
+              action:  '休みを2連休以上にするか、時間帯を揃えてください',
+            });
+          }
+        } else if (settings.penaltySingleOff && d > 1 && d < days) {
           const pv = (shifts[s.id] || {})[d - 1] || '';
           const nx = (shifts[s.id] || {})[d + 1] || '';
           if (isLate(pv) && isEarlyCategory(nx)) {
