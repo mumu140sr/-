@@ -841,10 +841,9 @@ function renderStaffTable() {
       </td>
       <td>
         <select data-field="weekendPref" data-id="${s.id}" style="min-width:78px"
-                title="土日をなるべく（または絶対）休みにする">
+                title="土日をなるべく休みにする">
           <option value=""     ${!s.weekendPref            ? 'selected' : ''}>なし</option>
           <option value="soft" ${s.weekendPref === 'soft'  ? 'selected' : ''}>なるべく</option>
-          <option value="hard" ${s.weekendPref === 'hard'  ? 'selected' : ''}>絶対</option>
         </select>
       </td>
       <td>
@@ -852,9 +851,7 @@ function renderStaffTable() {
                 title="連休派=休みをまとめる／分散派=3連勤前後でこまめに休む">
           <option value=""            ${!s.restStyle                    ? 'selected' : ''}>おまかせ</option>
           <option value="pair-soft"   ${s.restStyle === 'pair-soft'    ? 'selected' : ''}>なるべく連休</option>
-          <option value="pair-hard"   ${s.restStyle === 'pair-hard'    ? 'selected' : ''}>絶対連休</option>
           <option value="spread-soft" ${s.restStyle === 'spread-soft'  ? 'selected' : ''}>なるべく分散</option>
-          <option value="spread-hard" ${s.restStyle === 'spread-hard'  ? 'selected' : ''}>絶対分散</option>
         </select>
       </td>
       <td>
