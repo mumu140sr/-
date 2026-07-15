@@ -658,6 +658,8 @@ function setupStaffPanel() {
       skills:          [],
       personalMaxCons: 0,
       needPairRest:    false,
+      weekendPref:     '',
+      restStyle:       '',
     });
     renderStaffTable();
     autoSave();
@@ -836,6 +838,24 @@ function renderStaffTable() {
         <input type="checkbox" data-prule="needPairRest" data-id="${s.id}"
                title="遅番→早番へ移るときは休み1日ではなく2連休以上を挟む"
                ${s.needPairRest ? 'checked' : ''}/>
+      </td>
+      <td>
+        <select data-field="weekendPref" data-id="${s.id}" style="min-width:78px"
+                title="土日をなるべく（または絶対）休みにする">
+          <option value=""     ${!s.weekendPref            ? 'selected' : ''}>なし</option>
+          <option value="soft" ${s.weekendPref === 'soft'  ? 'selected' : ''}>なるべく</option>
+          <option value="hard" ${s.weekendPref === 'hard'  ? 'selected' : ''}>絶対</option>
+        </select>
+      </td>
+      <td>
+        <select data-field="restStyle" data-id="${s.id}" style="min-width:110px"
+                title="連休派=休みをまとめる／分散派=3連勤前後でこまめに休む">
+          <option value=""            ${!s.restStyle                    ? 'selected' : ''}>おまかせ</option>
+          <option value="pair-soft"   ${s.restStyle === 'pair-soft'    ? 'selected' : ''}>なるべく連休</option>
+          <option value="pair-hard"   ${s.restStyle === 'pair-hard'    ? 'selected' : ''}>絶対連休</option>
+          <option value="spread-soft" ${s.restStyle === 'spread-soft'  ? 'selected' : ''}>なるべく分散</option>
+          <option value="spread-hard" ${s.restStyle === 'spread-hard'  ? 'selected' : ''}>絶対分散</option>
+        </select>
       </td>
       <td>
         <input type="number" min="0" max="6" value="${s.prevConsecutive || 0}"

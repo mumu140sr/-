@@ -1639,6 +1639,10 @@ function calculateScore(shifts, allowedShifts, days, P) {
     });
   });
 
+  // 曜日を事前計算（個人希望: 土日休み判定用）
+  const _wd = [0];
+  for (let d = 1; d <= days; d++) _wd[d] = getWeekday(AppState.settings.targetMonth, d);
+
   // 横: 各スタッフのルール
   staff.forEach(s => {
     let consWork  = s.prevConsecutive || 0;
@@ -1647,6 +1651,11 @@ function calculateScore(shifts, allowedShifts, days, P) {
     let lockedOff = 0, unlockedOff = 0; // viceManager 用（既存ループ内で同時集計）
     let offRun    = 0, pairRestRuns = 0; // 連休（2連休以上）の検出用
     let pubRun    = 0; // 公休のみの連続数（連休最大3日ルール用。余・有給は数えない）
+    // 個人希望（土日休み・休み方）の重み: 定数(6000)・公休(4000)より下に置き優先順位を守る
+    const wkW = s.weekendPref === 'hard' ? 3500 : (s.weekendPref === 'soft' ? 600 : 0);
+    const styleSpread = (s.restStyle || '').startsWith('spread');
+    const stylePair   = (s.restStyle || '').startsWith('pair');
+    const styleW = (s.restStyle || '').endsWith('hard') ? 3000 : 500;
 
     for (let d = 1; d <= days; d++) {
       const cur = shifts[s.id][d];
@@ -1667,6 +1676,11 @@ function calculateScore(shifts, allowedShifts, days, P) {
           const over = consWork - myMaxCons;
           score += P.consBase * over + P.consSq * over * over;
         }
+
+        // 個人希望: 土日休み（土日に出勤したら減点）
+        if (wkW && (_wd[d] === 0 || _wd[d] === 6)) score += wkW;
+        // 個人希望: 分散派（勤務は3連勤前後まで。4日目以降に減点）
+        if (styleSpread && consWork > 3) score += styleW;
 
         // 遅→早禁止
         if (AppState.settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
@@ -1720,6 +1734,12 @@ function calculateScore(shifts, allowedShifts, days, P) {
           }
         }
         consWork = 0;
+
+        // 個人希望: 連休派（ポツンと1日だけの休みに減点 → 連休にまとまる方向へ）
+        if (stylePair && cur !== '余' && d > 1 && d < days) {
+          const pvP = shifts[s.id][d - 1], nxP = shifts[s.id][d + 1];
+          if (isWork(pvP) && isWork(nxP)) score += styleW;
+        }
 
         // 個人ルール: 遅→早の切替時は2連休以上必須（遅→休1日→早 を強く禁止）
         if (s.needPairRest && d > 1 && d < days) {
@@ -1793,6 +1813,10 @@ function checkViolations(shifts) {
   const maxCons    = settings.maxConsecutive;
   const shiftKeys  = getWorkShiftKeys();
 
+  // 曜日を事前計算（個人希望: 土日休み判定用）
+  const _wdv = [0];
+  for (let d = 1; d <= days; d++) _wdv[d] = getWeekday(settings.targetMonth, d);
+
   staff.forEach(s => {
     let consWork  = s.prevConsecutive || 0;
     let prevShift = (consWork > 0 && s.prevLastShift) ? s.prevLastShift : '';
@@ -1800,6 +1824,9 @@ function checkViolations(shifts) {
     let offRun    = 0;
     const effectiveAllowed = (s.allowedShifts || []).concat(['研']); // 研は全員許容
     const reportedDays = new Set();
+    const wkHard     = s.weekendPref === 'hard';
+    const pairHard   = s.restStyle === 'pair-hard';
+    const spreadHard = s.restStyle === 'spread-hard';
 
     for (let d = 1; d <= days; d++) {
       const cur = (shifts[s.id] || {})[d] || '';
@@ -1814,6 +1841,24 @@ function checkViolations(shifts) {
             action:  '他の日と入れ替えて休みを挟んでください',
           });
           reportedDays.add(d);
+        }
+
+        // 個人希望（絶対）: 土日休み
+        if (wkHard && (_wdv[d] === 0 || _wdv[d] === 6)) {
+          violations.push({
+            staffId: s.id, day: d, type: 'weekend-pref',
+            message: `🚨 ${_wdv[d] === 0 ? '日曜' : '土曜'}に出勤（個人希望: 土日休み・絶対）`,
+            action:  'この日を休みにして平日の休みと入れ替えてください',
+          });
+        }
+        // 個人希望（絶対）: 分散派（勤務は3連勤まで）
+        if (spreadHard && consWork === 4 && !reportedDays.has('sp' + d)) {
+          violations.push({
+            staffId: s.id, day: d, type: 'rest-style',
+            message: `🚨 4連勤以上（個人希望: こまめに分散・絶対）`,
+            action:  '3連勤以内になるよう休みを挟んでください',
+          });
+          reportedDays.add('sp' + d);
         }
 
         if (settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
@@ -1898,6 +1943,19 @@ function checkViolations(shifts) {
           }
         } else {
           offRun = 0;
+        }
+
+        // 個人希望（絶対）: 連休派（ポツンと1日だけの休みはNG）
+        if (pairHard && cur !== '余' && d > 1 && d < days) {
+          const pvP = (shifts[s.id] || {})[d - 1] || '';
+          const nxP = (shifts[s.id] || {})[d + 1] || '';
+          if (isWork(pvP) && isWork(nxP)) {
+            violations.push({
+              staffId: s.id, day: d, type: 'rest-style',
+              message: `🚨 単独の1日休み（個人希望: 連休・絶対）`,
+              action:  '前後どちらかの日も休みにして連休にしてください',
+            });
+          }
         }
 
         // 個人ルール: 遅→早の切替時は2連休以上必須

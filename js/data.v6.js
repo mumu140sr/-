@@ -358,6 +358,8 @@ function loadFromStorage() {
         skills:          Array.isArray(s.skills) ? s.skills : [],
         personalMaxCons: parseInt(s.personalMaxCons) || 0, // 個人の連勤上限（0=全体設定）
         needPairRest:    !!s.needPairRest,                 // 遅→早の切替時は2連休以上必須
+        weekendPref:     s.weekendPref || '',              // 土日休み希望: ''なし/'soft'なるべく/'hard'絶対
+        restStyle:       s.restStyle   || '',              // 休み方: ''/'pair-soft'/'pair-hard'/'spread-soft'/'spread-hard'
       };
     });
 
@@ -432,6 +434,8 @@ function addSampleStaff() {
       skills:          [],
       personalMaxCons: 0,
       needPairRest:    false,
+      weekendPref:     '',
+      restStyle:       '',
     });
   });
 }
