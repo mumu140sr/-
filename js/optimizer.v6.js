@@ -270,7 +270,7 @@ function suggestViolationFixes(maxItems) {
   });
 
   const baseVios = checkViolations(shifts);
-  const VPRI = { 'understaff': 0, 'skill-late': 1, 'consecutive': 2, 'single-work': 3 };
+  const VPRI = { 'understaff': 0, 'skill-late': 1, 'consecutive': 2, 'single-work': 3, 'hierarchy': 4, 'resp-duplicate': 4 };
   const ordered = baseVios.slice()
     .sort((a, b) => ((VPRI[a.type] ?? 9) - (VPRI[b.type] ?? 9)))
     .slice(0, maxItems || 10);
@@ -345,6 +345,34 @@ function suggestViolationFixes(maxItems) {
       }
     }
 
+    // ④ 2日同時の2人交換（同じ違反が2日連続で絡み合っている場合用）
+    for (const d0 of [v.day - 1, v.day]) {
+      if (found || d0 < 1 || d0 + 1 > days) continue;
+      for (let i = 0; i < staff.length && !found; i++) {
+        const A = staff[i];
+        if (!_polishMovable(shifts, A.id, d0) || !_polishMovable(shifts, A.id, d0 + 1)) continue;
+        for (let j = i + 1; j < staff.length && !found; j++) {
+          const B = staff[j];
+          if (!_polishMovable(shifts, B.id, d0) || !_polishMovable(shifts, B.id, d0 + 1)) continue;
+          const a1 = shifts[A.id][d0] || '',     b1 = shifts[B.id][d0] || '';
+          const a2 = shifts[A.id][d0 + 1] || '', b2 = shifts[B.id][d0 + 1] || '';
+          if (a1 === b1 && a2 === b2) continue;
+          const ok = (!isWork(b1) || candsOf[A.id].includes(b1)) &&
+                     (!isWork(a1) || candsOf[B.id].includes(a1)) &&
+                     (!isWork(b2) || candsOf[A.id].includes(b2)) &&
+                     (!isWork(a2) || candsOf[B.id].includes(a2));
+          if (!ok) continue;
+          tryEval(
+            () => { shifts[A.id][d0] = b1; shifts[B.id][d0] = a1;
+                    shifts[A.id][d0 + 1] = b2; shifts[B.id][d0 + 1] = a2; },
+            () => { shifts[A.id][d0] = a1; shifts[B.id][d0] = b1;
+                    shifts[A.id][d0 + 1] = a2; shifts[B.id][d0 + 1] = b2; },
+            `${d0}日と${d0 + 1}日: ${nameOf(A.id)}さんと${nameOf(B.id)}さんのシフトを両日とも交代`,
+            { kind: 'swapStaff2', aId: A.id, bId: B.id, d1: d0, d2: d0 + 1 });
+        }
+      }
+    }
+
     if (found) out.push({ v, desc: found.desc, move: found.move, after: found.after });
     else out.push({ v, reason: '1手では直せません（周囲が🔒固定・希望休で動かせない可能性）。「🛠 エラーを自動修正」を試すか、この日周辺の固定・希望休を見直してください。' });
   }
@@ -414,7 +442,7 @@ function violationPolish(shifts, maxRounds) {
   };
 
   // 絶対に残したくない違反（人員不足・単発出勤・連勤超過）を最優先で処理する
-  const VPRI = { 'understaff': 0, 'skill-late': 1, 'consecutive': 2, 'single-work': 3 };
+  const VPRI = { 'understaff': 0, 'skill-late': 1, 'consecutive': 2, 'single-work': 3, 'hierarchy': 4, 'resp-duplicate': 4 };
   for (let round = 0; round < maxRounds && vios.length > 0; round++) {
     let improved = false;
 
@@ -470,11 +498,104 @@ function violationPolish(shifts, maxRounds) {
           }
         }
       }
+
+      // ④ 2日同時の2人交換: 同じ違反が2日連続で絡み合っていると（例: ヒエラルキー違反が
+      //    25日と26日）、1日だけ直しても件数が減らず①〜③では採用されない。
+      //    2日まとめて入れ替えれば両方同時に消えるケースを拾う。
+      for (const d0 of [v.day - 1, v.day]) {
+        if (d0 < 1 || d0 + 1 > days) continue;
+        for (let i = 0; i < staff.length; i++) {
+          const A = staff[i];
+          if (!_polishMovable(shifts, A.id, d0) || !_polishMovable(shifts, A.id, d0 + 1)) continue;
+          for (let j = i + 1; j < staff.length; j++) {
+            const B = staff[j];
+            if (!_polishMovable(shifts, B.id, d0) || !_polishMovable(shifts, B.id, d0 + 1)) continue;
+            const a1 = shifts[A.id][d0],     b1 = shifts[B.id][d0];
+            const a2 = shifts[A.id][d0 + 1], b2 = shifts[B.id][d0 + 1];
+            if (a1 === b1 && a2 === b2) continue;
+            const ok = (!isWork(b1) || candsOf[A.id].includes(b1)) &&
+                       (!isWork(a1) || candsOf[B.id].includes(a1)) &&
+                       (!isWork(b2) || candsOf[A.id].includes(b2)) &&
+                       (!isWork(a2) || candsOf[B.id].includes(a2));
+            if (!ok) continue;
+            if (tryMove(
+              () => { shifts[A.id][d0] = b1; shifts[B.id][d0] = a1;
+                      shifts[A.id][d0 + 1] = b2; shifts[B.id][d0 + 1] = a2; },
+              () => { shifts[A.id][d0] = a1; shifts[B.id][d0] = b1;
+                      shifts[A.id][d0 + 1] = a2; shifts[B.id][d0 + 1] = b2; })) { improved = true; break; }
+          }
+        }
+      }
     }
 
     if (!improved) break;
   }
   return vios;
+}
+
+// ===== 自動チーム分け（早の軸 / 遅の軸） =====
+// 早遅バランスが「均等」の人が多いと、「片寄せしたい」と「半々にしたい」が綱引きになり
+// 切替エラーが残りやすい。そこで生成前に必要コマ数と各自の出勤余力から
+// 「誰を早番の軸に、誰を遅番の軸にするか」をアプリ側で自動決定する。
+// ユーザーが明示的に早寄り/遅寄りを設定している人はその設定を尊重して対象外。
+let _autoBandMap = {};
+
+function _bandOfShift(sh) {
+  if (isLate(sh)) return 'late';
+  if (isEarlyCategory(sh) && !isTraining(sh)) return 'early';
+  return null;
+}
+
+function computeAutoBands(staff, allowedShifts, days) {
+  const map  = {};
+  const keys = getWorkShiftKeys();
+
+  // 月間の必要コマ数（時間帯別）
+  const demand = { early: 0, late: 0 };
+  for (let d = 1; d <= days; d++) {
+    keys.forEach(sh => {
+      const b = _bandOfShift(sh);
+      if (b) demand[b] += optDayReq(sh, d) || 0;
+    });
+  }
+
+  const cap = s => Math.max(0, days - (s.maxOff || 0) - (s.paidLeave || 0));
+  const assigned = { early: 0, late: 0 };
+  const flexible = [];
+
+  staff.forEach(s => {
+    const shs  = allowedShifts[s.id] || s.allowedShifts || [];
+    const canE = shs.some(sh => _bandOfShift(sh) === 'early');
+    const canL = shs.some(sh => _bandOfShift(sh) === 'late');
+    const bal  = s.balance || 'balanced';
+    if (!canE || !canL) {
+      // 片方の時間帯しか入れない人は、その時間帯の供給として先にカウント
+      const b = canE ? 'early' : (canL ? 'late' : null);
+      if (b) assigned[b] += cap(s);
+      return;
+    }
+    if (bal !== 'balanced' && SHIFT_BALANCE[bal]) {
+      // 明示設定済みの人は設定比率で供給をカウント（軸の自動決定はしない）
+      assigned.early += cap(s) * SHIFT_BALANCE[bal].earlyRatio;
+      assigned.late  += cap(s) * SHIFT_BALANCE[bal].lateRatio;
+      return;
+    }
+    flexible.push(s);
+  });
+
+  // 上位役職から順に、不足が大きい時間帯へ軸を割り当てる
+  // （責任者になれる人が早番・遅番の両方に行き渡るようにする狙い）
+  flexible.sort((a, b) => getStaffPriority(a) - getStaffPriority(b));
+  flexible.forEach(s => {
+    const needE = demand.early - assigned.early;
+    const needL = demand.late  - assigned.late;
+    const band  = needE >= needL ? 'early' : 'late';
+    map[s.id] = band;
+    // 軸にしても3割程度は反対帯に入る前提で供給をカウント
+    assigned[band] += cap(s) * 0.7;
+    assigned[band === 'early' ? 'late' : 'early'] += cap(s) * 0.3;
+  });
+  return map;
 }
 
 /**
@@ -508,6 +629,9 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
     }
     allowedShifts[s.id] = base;
   });
+
+  // 自動チーム分け: 「均等」設定で両時間帯に入れる人に、早の軸/遅の軸を自動割り当て
+  _autoBandMap = computeAutoBands(staff, allowedShifts, days);
 
   // 2. 希望休と固定シフトをロックして初期化
   let shifts = {};
@@ -805,7 +929,15 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
       // 早責・遅責は役職優先度順（上位者を優先的に責任者に据える）
       const isRespShift = sh === '早責' || sh === '遅責';
       const candidates = avail.filter(s => shifts[s.id][d] === '' && allowedShifts[s.id].includes(sh));
-      if (isRespShift) candidates.sort((a, b) => getStaffPriority(a) - getStaffPriority(b));
+      // 自動チーム分けの軸に合う人を優先（早番コマには早の軸の人から入れる）
+      const shBand = _bandOfShift(sh);
+      const bandRank = s => {
+        if (!shBand || !_autoBandMap[s.id]) return 1;
+        return _autoBandMap[s.id] === shBand ? 0 : 2;
+      };
+      if (shBand) candidates.sort((a, b) => bandRank(a) - bandRank(b));
+      if (isRespShift) candidates.sort((a, b) =>
+        (getStaffPriority(a) - getStaffPriority(b)) || (bandRank(a) - bandRank(b)));
       for (const s of candidates) {
         if (placed >= req) break;
         if (shifts[s.id][d] !== '') continue;
@@ -1875,8 +2007,13 @@ function calculateScore(shifts, allowedShifts, days, P) {
       }
     }
 
-    // 早遅バランス
-    const balance   = SHIFT_BALANCE[s.balance || 'balanced'];
+    // 早遅バランス（「均等」の人は自動チーム分けで決めた軸の比率に置き換える。
+    // 均等目標のままだと「片寄せ」ペナルティと綱引きになり切替が残るため）
+    const balKey  = s.balance || 'balanced';
+    let balance   = SHIFT_BALANCE[balKey];
+    if (balKey === 'balanced' && _autoBandMap[s.id]) {
+      balance = _autoBandMap[s.id] === 'early' ? SHIFT_BALANCE.earlyHeavy : SHIFT_BALANCE.lateHeavy;
+    }
     const totalWork = earlyCount + lateCount;
     if (balance && totalWork > 0) {
       score += (Math.abs(earlyCount - totalWork * balance.earlyRatio) +

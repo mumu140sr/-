@@ -566,6 +566,12 @@ function showFixGuide() {
       } else if (m.kind === 'swapStaff') {
         const a = sh[m.aId][m.d], b = sh[m.bId][m.d];
         sh[m.aId][m.d] = b; sh[m.bId][m.d] = a;
+      } else if (m.kind === 'swapStaff2') {
+        // 2日連続で絡み合った違反用: 2人のシフトを両日とも入れ替える
+        [m.d1, m.d2].forEach(d => {
+          const a = sh[m.aId][d], b = sh[m.bId][d];
+          sh[m.aId][d] = b; sh[m.bId][d] = a;
+        });
       }
       AppState.violations = checkViolations(sh);
       saveToStorage();
