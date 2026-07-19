@@ -340,8 +340,10 @@ function violationPolish(shifts, maxRounds) {
         }
       }
 
-      // ③ 同日2人交換（違反日±1の全ペア。担当可能な組のみ）
-      for (let d = Math.max(1, v.day - 1); d <= Math.min(days, v.day + 1); d++) {
+      // ③ 同日2人交換（担当可能な組のみ）。連勤違反は「連勤の途中の日」を
+      //    誰かに肩代わりさせないと直らないため、走査範囲を連勤ブロック全体に広げる
+      const swapFrom = v.type === 'consecutive' ? Math.max(1, v.day - 5) : Math.max(1, v.day - 1);
+      for (let d = swapFrom; d <= Math.min(days, v.day + 1); d++) {
         for (let i = 0; i < staff.length; i++) {
           const A = staff[i];
           if (!_polishMovable(shifts, A.id, d)) continue;
