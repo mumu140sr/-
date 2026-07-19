@@ -303,8 +303,8 @@ function violationPolish(shifts, maxRounds) {
     return false;
   };
 
-  // 絶対に残したくない違反（人員不足・単発出勤）を最優先で処理する
-  const VPRI = { 'understaff': 0, 'skill-late': 1, 'single-work': 2 };
+  // 絶対に残したくない違反（人員不足・単発出勤・連勤超過）を最優先で処理する
+  const VPRI = { 'understaff': 0, 'skill-late': 1, 'consecutive': 2, 'single-work': 3 };
   for (let round = 0; round < maxRounds && vios.length > 0; round++) {
     let improved = false;
 

@@ -70,8 +70,8 @@ const DEFAULT_PENALTIES = {
   overstaff:        6000,  // 人員超過（1人あたり）— 【優先1: 定数厳守】超えたら強く回避、余った人は「余」に
   respDuplicate:    8000,  // 責任者重複（早責/遅責が同じ時間帯に2人以上）
   disallowedShift: 50000,  // 担当外シフト
-  consBase:         2500,  // 連勤超過（1日超過あたり）— 残存違反ゼロを目指し強化
-  consSq:            500,  // 連勤超過（二乗項）
+  consBase:         6000,  // 連勤超過（1日超過あたり）— 絶対回避（公休4000より優先）
+  consSq:           1000,  // 連勤超過（二乗項）
   lateEarly:        2500,  // 遅→早インターバル不足
   categorySwitch:   3000,  // 連勤中の時間帯切替（早→遅など）
   badRest:          2500,  // 遅→休→早（リズム悪）
@@ -306,8 +306,8 @@ function loadFromStorage() {
     if (!(penalties.badRest        >= 2500)) penalties.badRest        = DEFAULT_PENALTIES.badRest;
     if (!(penalties.singleWork     >= 5000)) penalties.singleWork     = DEFAULT_PENALTIES.singleWork;
     if (!(penalties.understaff     >= 20000)) penalties.understaff    = DEFAULT_PENALTIES.understaff;
-    if (!(penalties.consBase       >= 2500)) penalties.consBase       = DEFAULT_PENALTIES.consBase;
-    if (!(penalties.consSq         >= 500))  penalties.consSq         = DEFAULT_PENALTIES.consSq;
+    if (!(penalties.consBase       >= 6000)) penalties.consBase       = DEFAULT_PENALTIES.consBase;
+    if (!(penalties.consSq         >= 1000)) penalties.consSq         = DEFAULT_PENALTIES.consSq;
     if (!(penalties.lateEarly      >= 2500)) penalties.lateEarly      = DEFAULT_PENALTIES.lateEarly;
     // 旧デフォルト(700)のままなら新デフォルト(1500)へ引き上げ（手動調整済みなら尊重）
     if (penalties.bandConcentration == null || penalties.bandConcentration === 700)
