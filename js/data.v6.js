@@ -66,7 +66,7 @@ function getDefaultShiftTypes() {
 
 // デフォルトのペナルティ重み
 const DEFAULT_PENALTIES = {
-  understaff:      10000,  // 人員不足（1人あたり）
+  understaff:      20000,  // 人員不足（1人あたり）— 絶対禁止級
   overstaff:        6000,  // 人員超過（1人あたり）— 【優先1: 定数厳守】超えたら強く回避、余った人は「余」に
   respDuplicate:    8000,  // 責任者重複（早責/遅責が同じ時間帯に2人以上）
   disallowedShift: 50000,  // 担当外シフト
@@ -76,7 +76,7 @@ const DEFAULT_PENALTIES = {
   categorySwitch:   3000,  // 連勤中の時間帯切替（早→遅など）
   badRest:          2500,  // 遅→休→早（リズム悪）
   singleOff:          50,  // 単発休み
-  singleWork:       2500,  // 単発出勤 — 残存違反の最多要因のため強化
+  singleWork:       5000,  // 単発出勤 — 絶対回避（公休4000より優先、定数系より下）
   offShortage:       4000,  // 公休不足（1日あたり）— 【優先2】設定した公休は必ず消化させる
   longRest:          2000,  // 4連休以上（自動配置分）— 【優先3】連休は最大3日まで
   offSurplus:         400,  // 公休余剰（未使用 — tryConvertSurplusRest ムーブで自然削減）
@@ -304,7 +304,8 @@ function loadFromStorage() {
     // 残り違反（切替・リズム・単発出勤・連勤超過・遅→早）を減らすため旧データも引き上げ
     if (!(penalties.categorySwitch >= 3000)) penalties.categorySwitch = DEFAULT_PENALTIES.categorySwitch;
     if (!(penalties.badRest        >= 2500)) penalties.badRest        = DEFAULT_PENALTIES.badRest;
-    if (!(penalties.singleWork     >= 2500)) penalties.singleWork     = DEFAULT_PENALTIES.singleWork;
+    if (!(penalties.singleWork     >= 5000)) penalties.singleWork     = DEFAULT_PENALTIES.singleWork;
+    if (!(penalties.understaff     >= 20000)) penalties.understaff    = DEFAULT_PENALTIES.understaff;
     if (!(penalties.consBase       >= 2500)) penalties.consBase       = DEFAULT_PENALTIES.consBase;
     if (!(penalties.consSq         >= 500))  penalties.consSq         = DEFAULT_PENALTIES.consSq;
     if (!(penalties.lateEarly      >= 2500)) penalties.lateEarly      = DEFAULT_PENALTIES.lateEarly;

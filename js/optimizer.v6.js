@@ -303,10 +303,13 @@ function violationPolish(shifts, maxRounds) {
     return false;
   };
 
+  // 絶対に残したくない違反（人員不足・単発出勤）を最優先で処理する
+  const VPRI = { 'understaff': 0, 'skill-late': 1, 'single-work': 2 };
   for (let round = 0; round < maxRounds && vios.length > 0; round++) {
     let improved = false;
 
-    for (const v of vios.slice()) {
+    const ordered = vios.slice().sort((a, b) => ((VPRI[a.type] ?? 9) - (VPRI[b.type] ?? 9)));
+    for (const v of ordered) {
       if (v.day < 1) continue; // 公休不足(day0)は全日対象で高コストのため対象外
       const targets = v.staffId
         ? staff.filter(s => s.id === v.staffId)

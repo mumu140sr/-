@@ -167,7 +167,10 @@ function setupGeneratePanel() {
             result.candidateSummary = (result.candidateSummary ? result.candidateSummary + '　' : '') +
               `自動修正: 違反${beforeN}→${AppState.violations.length}件`;
           }
-        } catch (_) { /* 修正失敗時は生成結果のまま */ }
+        } catch (repErr) {
+          console.error('[generate] 仕上げの自動修正に失敗（生成結果のまま続行）:', repErr);
+          toast('仕上げの自動修正に失敗しました。🛠 エラーを自動修正 を手動でお試しください', 'info', 5000);
+        }
       }
 
       // B. まだ違反が多く残る場合のみ、反復回数を自動で増やして再挑戦（最良を保持）
