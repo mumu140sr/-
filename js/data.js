@@ -100,6 +100,7 @@ const AppState = {
     forbidLateEarly: true,
     penaltySingleOff: true,
     maxAttempts: 250000,
+    pairRestTarget: 0, // 月の連休（2連休以上）の目安回数（全体・0=指定なし。個人設定があれば個人優先）
     penalties: { ...DEFAULT_PENALTIES },
   },
   // ユーザーが自由に定義・編集できるシフト種別
@@ -361,6 +362,7 @@ function loadFromStorage() {
         // 個人希望は「なるべく」のみ（旧データの'絶対'は自動でなるべくに変換）
         weekendPref:     s.weekendPref === 'hard' ? 'soft' : (s.weekendPref || ''),
         restStyle:       (s.restStyle || '').replace('-hard', '-soft'),
+        pairRestTarget:  parseInt(s.pairRestTarget) || 0, // 月の連休回数（個人・0=全体設定）
       };
     });
 
@@ -437,6 +439,7 @@ function addSampleStaff() {
       needPairRest:    false,
       weekendPref:     '',
       restStyle:       '',
+      pairRestTarget:  0,
     });
   });
 }

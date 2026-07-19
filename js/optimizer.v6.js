@@ -1786,6 +1786,14 @@ function calculateScore(shifts, allowedShifts, days, P) {
     if (offRun >= 2) pairRestRuns++;
     score -= pairRestRuns * (P.restPairBonus || 0);
 
+    // 連休回数の目標: 個人設定 > 全体設定 の優先で、足りない回数分を回避（なるべく）
+    const pairTarget = (s.pairRestTarget > 0)
+      ? s.pairRestTarget
+      : (AppState.settings.pairRestTarget || 0);
+    if (pairTarget > 0 && pairRestRuns < pairTarget) {
+      score += (pairTarget - pairRestRuns) * 800;
+    }
+
     // 公休不足のみペナルティ（余剰は余力として許容、targetedムーブで自然に削減）
     const offDiff = offCount - (s.maxOff || 0);
     if (offDiff < 0) score += (-offDiff) * P.offShortage;
@@ -1878,16 +1886,8 @@ function checkViolations(shifts) {
           });
         }
 
-        if (consWork >= 2 && isWork(prevShift)) {
-          const pc = getShiftCategory(prevShift), cc = getShiftCategory(cur);
-          if (pc && cc && pc !== cc) {
-            violations.push({
-              staffId: s.id, day: d, type: 'category-switch',
-              message: `⚠️ 連勤中の時間帯切替（${prevShift}→${cur}）`,
-              action:  '連続勤務は同じ時間帯で揃えてください',
-            });
-          }
-        }
+        // 連勤中の時間帯切替はエラー表示しない（スコアではなるべく回避を継続）
+        // ※ユーザー要望: 両刀スタッフの切替はエラーとして扱わない
 
         if (!effectiveAllowed.includes(cur)) {
           violations.push({
@@ -1969,17 +1969,9 @@ function checkViolations(shifts) {
               action:  '休みを2連休以上にするか、時間帯を揃えてください',
             });
           }
-        } else if (settings.penaltySingleOff && d > 1 && d < days) {
-          const pv = (shifts[s.id] || {})[d - 1] || '';
-          const nx = (shifts[s.id] || {})[d + 1] || '';
-          if (isLate(pv) && isEarlyCategory(nx)) {
-            violations.push({
-              staffId: s.id, day: d, type: 'bad-rest',
-              message: `⚠️ ${isTraining(nx) ? '遅→休→研' : '遅→休→早'}（リズムが悪い）`,
-              action:  '時間帯を揃えてください',
-            });
-          }
         }
+        // 遅→休→早（リズム）はエラー表示しない（スコアではなるべく回避を継続）
+        // ※「遅→早は連休必須」にチェックした人のみ上の pair-rest として報告
         prevShift = cur;
       }
     }

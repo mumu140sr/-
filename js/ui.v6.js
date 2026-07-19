@@ -43,6 +43,8 @@ function refreshAllUI() {
   if ($forbidLE)  $forbidLE.checked  = AppState.settings.forbidLateEarly;
   if ($penaltySO) $penaltySO.checked = AppState.settings.penaltySingleOff;
   if ($maxAtt)    $maxAtt.value      = AppState.settings.maxAttempts;
+  const $pairRestR = document.getElementById('pairRestTarget');
+  if ($pairRestR) $pairRestR.value   = AppState.settings.pairRestTarget || 0;
 
   if ($replDays) {
     $replDays.value = Object.keys(AppState.specialDays)
@@ -108,6 +110,14 @@ function setupSettingsPanel() {
   $forbidLE.checked  = AppState.settings.forbidLateEarly;
   $penaltySO.checked = AppState.settings.penaltySingleOff;
   $maxAtt.value      = AppState.settings.maxAttempts;
+  const $pairRest = document.getElementById('pairRestTarget');
+  if ($pairRest) {
+    $pairRest.value = AppState.settings.pairRestTarget || 0;
+    $pairRest.addEventListener('change', () => {
+      AppState.settings.pairRestTarget = parseInt($pairRest.value) || 0;
+      autoSave();
+    });
+  }
 
   $replDays.value = Object.keys(AppState.specialDays)
     .filter(d => AppState.specialDays[d] === 'replacement').join(',');
@@ -660,6 +670,7 @@ function setupStaffPanel() {
       needPairRest:    false,
       weekendPref:     '',
       restStyle:       '',
+      pairRestTarget:  0,
     });
     renderStaffTable();
     autoSave();
@@ -855,6 +866,11 @@ function renderStaffTable() {
         </select>
       </td>
       <td>
+        <input type="number" min="0" max="10" value="${s.pairRestTarget > 0 ? s.pairRestTarget : ''}"
+               placeholder="全体" title="この人だけの月の連休（2連休以上）目安回数。空欄なら全体設定"
+               data-field="pairRestTarget" data-id="${s.id}" style="width:54px"/>
+      </td>
+      <td>
         <input type="number" min="0" max="6" value="${s.prevConsecutive || 0}"
                data-field="prevConsecutive" data-id="${s.id}" style="width:50px"/>
       </td>
@@ -884,7 +900,7 @@ function renderStaffTable() {
       const staff = AppState.staff.find(s => s.id === id);
       if (!staff) return;
       let val = e.target.value;
-      if (['maxOff', 'prevConsecutive', 'paidLeave', 'personalMaxCons'].includes(field)) val = parseInt(val) || 0;
+      if (['maxOff', 'prevConsecutive', 'paidLeave', 'personalMaxCons', 'pairRestTarget'].includes(field)) val = parseInt(val) || 0;
       staff[field] = val;
       autoSave();
     });
