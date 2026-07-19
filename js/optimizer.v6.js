@@ -241,6 +241,116 @@ async function repairSchedule(progressCallback) {
            before: origViolations.length, after: origViolations.length };
 }
 
+/**
+ * 各違反について「1手で直る具体的な修正案」を探して返す（適用はしない）。
+ * 修正ガイド（誰でも直せるモード）用。
+ * @returns {Array<{v, desc, move, after} | {v, reason}>}
+ */
+function suggestViolationFixes(maxItems) {
+  const staff  = AppState.staff || [];
+  const days   = getDaysInMonth(AppState.settings.targetMonth);
+  const shifts = AppState.shifts || {};
+  const nameOf = id => (staff.find(s => s.id === id) || {}).name || '全体';
+
+  const candsOf = {};
+  staff.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    candsOf[s.id] = base.concat(['休']);
+  });
+
+  const baseVios = checkViolations(shifts);
+  const VPRI = { 'understaff': 0, 'skill-late': 1, 'consecutive': 2, 'single-work': 3 };
+  const ordered = baseVios.slice()
+    .sort((a, b) => ((VPRI[a.type] ?? 9) - (VPRI[b.type] ?? 9)))
+    .slice(0, maxItems || 10);
+
+  const out = [];
+  for (const v of ordered) {
+    if (v.day < 1) {
+      out.push({ v, reason: '公休数の過不足は1手では直せません。「🛠 エラーを自動修正」をお試しください。' });
+      continue;
+    }
+    let found = null;
+    const tryEval = (apply, undo, desc, move) => {
+      if (found) return;
+      apply();
+      const nv = checkViolations(shifts);
+      if (nv.length < baseVios.length) found = { desc, move, after: nv.length };
+      undo();
+    };
+    const targets = v.staffId ? staff.filter(s => s.id === v.staffId) : staff;
+
+    // ① 1マス置換（違反日±2）
+    for (const s of targets) {
+      if (found) break;
+      for (let d = Math.max(1, v.day - 2); d <= Math.min(days, v.day + 2) && !found; d++) {
+        if (!_polishMovable(shifts, s.id, d)) continue;
+        const cur = shifts[s.id][d] || '';
+        for (const c of candsOf[s.id]) {
+          if (found || c === cur) continue;
+          tryEval(() => { shifts[s.id][d] = c; }, () => { shifts[s.id][d] = cur; },
+            `${nameOf(s.id)}さんの ${d}日 を「${cur || '空'}」→「${c}」に変更`,
+            { kind: 'set', sid: s.id, d, to: c });
+        }
+      }
+    }
+    // ② 同一人物の2日交換
+    for (const s of targets) {
+      if (found) break;
+      for (let d1 = Math.max(1, v.day - 1); d1 <= Math.min(days, v.day + 1) && !found; d1++) {
+        if (!_polishMovable(shifts, s.id, d1)) continue;
+        for (let d2 = 1; d2 <= days && !found; d2++) {
+          if (d2 === d1 || !_polishMovable(shifts, s.id, d2)) continue;
+          const a = shifts[s.id][d1] || '', b = shifts[s.id][d2] || '';
+          if (a === b) continue;
+          tryEval(
+            () => { shifts[s.id][d1] = b; shifts[s.id][d2] = a; },
+            () => { shifts[s.id][d1] = a; shifts[s.id][d2] = b; },
+            `${nameOf(s.id)}さんの ${d1}日「${a || '空'}」と ${d2}日「${b || '空'}」を入れ替え`,
+            { kind: 'swapDays', sid: s.id, d1, d2 });
+        }
+      }
+    }
+    // ③ 同日2人交換（連勤は連勤ブロック全体）
+    const swapFrom = v.type === 'consecutive' ? Math.max(1, v.day - 5) : Math.max(1, v.day - 1);
+    for (let d = swapFrom; d <= Math.min(days, v.day + 1) && !found; d++) {
+      for (let i = 0; i < staff.length && !found; i++) {
+        const A = staff[i];
+        if (!_polishMovable(shifts, A.id, d)) continue;
+        for (let j = i + 1; j < staff.length && !found; j++) {
+          const B = staff[j];
+          if (!_polishMovable(shifts, B.id, d)) continue;
+          const va = shifts[A.id][d] || '', vb = shifts[B.id][d] || '';
+          if (va === vb) continue;
+          const aOk = !isWork(vb) || candsOf[A.id].includes(vb);
+          const bOk = !isWork(va) || candsOf[B.id].includes(va);
+          if (!aOk || !bOk) continue;
+          tryEval(
+            () => { shifts[A.id][d] = vb; shifts[B.id][d] = va; },
+            () => { shifts[A.id][d] = va; shifts[B.id][d] = vb; },
+            `${d}日: ${nameOf(A.id)}さん「${va || '空'}」と ${nameOf(B.id)}さん「${vb || '空'}」を交代`,
+            { kind: 'swapStaff', aId: A.id, bId: B.id, d });
+        }
+      }
+    }
+
+    if (found) out.push({ v, desc: found.desc, move: found.move, after: found.after });
+    else out.push({ v, reason: '1手では直せません（周囲が🔒固定・希望休で動かせない可能性）。「🛠 エラーを自動修正」を試すか、この日周辺の固定・希望休を見直してください。' });
+  }
+  return out;
+}
+
 /** 修復仕上げ用: そのセルが動かせるか（希望休・固定・有給は不可） */
 function _polishMovable(shifts, sid, d) {
   const req = (AppState.requests[sid] || {})[d];
