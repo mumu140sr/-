@@ -586,14 +586,45 @@ function computeAutoBands(staff, allowedShifts, days) {
   // 上位役職から順に、不足が大きい時間帯へ軸を割り当てる
   // （責任者になれる人が早番・遅番の両方に行き渡るようにする狙い）
   flexible.sort((a, b) => getStaffPriority(a) - getStaffPriority(b));
+
+  // スキル要件を先に満たす: 「営業は遅番に2人」のようなスキルは、その時間帯に
+  // 保有者が毎日いないと必ずエラーになる。軸割り当てを役職順の前に行い、
+  // 必要なスキル保有者を該当時間帯の軸へ優先的に寄せる（スキルブラインドを解消）。
+  const skillReqs = [];
+  (AppState.skills || []).forEach(sk => {
+    const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
+    if (!need) return;
+    const band = (sk.target || 'late') === 'early' ? 'early' : 'late';
+    skillReqs.push({ name: sk.name, need, band });
+  });
+  const taken = new Set();
+  const assignBand = (s, band) => {
+    map[s.id] = band;
+    taken.add(s.id);
+    const c = cap(s);
+    assigned[band] += c * 0.7;
+    assigned[band === 'early' ? 'late' : 'early'] += c * 0.3;
+  };
+  skillReqs.forEach(req => {
+    // その時間帯に「毎日 need 人」を確保するのに必要な軸保有者数を見積もる。
+    // 1人あたりの供給 ≒ (出勤率) × 0.7（軸でも3割は反対帯に入るため）
+    let coverage = 0;
+    const holders = flexible
+      .filter(s => !taken.has(s.id) && (s.skills || []).includes(req.name))
+      .sort((a, b) => cap(b) - cap(a)); // 出勤日数が多い（＝頼れる）人から
+    for (const s of holders) {
+      if (coverage >= req.need) break;
+      assignBand(s, req.band);
+      coverage += (cap(s) / days) * 0.7;
+    }
+  });
+
   flexible.forEach(s => {
+    if (taken.has(s.id)) return;
     const needE = demand.early - assigned.early;
     const needL = demand.late  - assigned.late;
     const band  = needE >= needL ? 'early' : 'late';
-    map[s.id] = band;
-    // 軸にしても3割程度は反対帯に入る前提で供給をカウント
-    assigned[band] += cap(s) * 0.7;
-    assigned[band === 'early' ? 'late' : 'early'] += cap(s) * 0.3;
+    assignBand(s, band);
   });
   return map;
 }
