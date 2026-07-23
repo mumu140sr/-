@@ -728,16 +728,20 @@ function renderSkillsPanel() {
   container.innerHTML = skills.map((sk, i) => {
     const target = sk.target || 'late';
     const req    = (sk.req != null ? sk.req : (sk.lateReq || 0));
+    const min    = (sk.min != null ? sk.min : req);
     return `
-    <div class="skill-row" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <div class="skill-row" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
       <input type="text" value="${escapeHtml(sk.name)}" data-skill-idx="${i}" data-skill-field="name"
              style="width:140px" placeholder="スキル名（例: 営業）"/>
       <select data-skill-idx="${i}" data-skill-field="target" style="width:72px">
         <option value="late"  ${target === 'late'  ? 'selected' : ''}>遅番</option>
         <option value="early" ${target === 'early' ? 'selected' : ''}>早番</option>
       </select>
-      <span class="hint">に必要な人数:</span>
+      <span class="hint">目標人数:</span>
       <input type="number" min="0" max="20" value="${req}" data-skill-idx="${i}" data-skill-field="req"
+             style="width:56px"/>
+      <span class="hint" title="この人数を下回ると🔴絶対NG。目標に届かなくても最低ライン以上なら🟡注意どまり。">最低ライン:</span>
+      <input type="number" min="0" max="20" value="${min}" data-skill-idx="${i}" data-skill-field="min"
              style="width:56px"/>
       <button class="btn-icon" data-skill-del="${i}" title="削除">🗑</button>
     </div>`;
@@ -752,6 +756,16 @@ function renderSkillsPanel() {
       if (field === 'req') {
         AppState.skills[idx].req = parseInt(e.target.value) || 0;
         delete AppState.skills[idx].lateReq; // 旧フィールドを掃除
+        // 目標を下げたら最低ラインが目標を超えないよう丸める
+        if (AppState.skills[idx].min != null && AppState.skills[idx].min > AppState.skills[idx].req) {
+          AppState.skills[idx].min = AppState.skills[idx].req;
+        }
+        renderSkillsPanel();
+      } else if (field === 'min') {
+        let m = parseInt(e.target.value);
+        if (isNaN(m) || m < 0) m = 0;
+        const req = (AppState.skills[idx].req != null ? AppState.skills[idx].req : 0);
+        AppState.skills[idx].min = Math.min(m, req); // 最低ライン ≤ 目標
       } else if (field === 'target') {
         AppState.skills[idx].target = e.target.value;
       } else {

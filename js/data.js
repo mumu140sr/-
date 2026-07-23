@@ -88,7 +88,8 @@ const DEFAULT_PENALTIES = {
   eventAbsent:       20000, // イベント日に対象スタッフが休んでいる
   restPairBonus:       100, // 2連休以上のまとまった休みへのボーナス（スコアから減算）
   nightAfterWork:     8000, // 夜勤翌日に休みでない（夜勤明けは必ず休み）
-  skillLateShortage:  9000, // 遅番に必要スキル保有者が不足（1人あたり）
+  skillLateShortage:  9000, // 遅番に必要スキル保有者が最低ラインを下回る（1人あたり・🔴）
+  skillSoftShortage:  1200, // 最低ラインは満たすが目標に届かない（1人あたり・🟡）
   bandConcentration:  1500, // 早番・遅番の片寄せ（少ない方の時間帯の日数×。切替を根本から減らす）
 };
 

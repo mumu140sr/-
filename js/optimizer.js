@@ -1458,8 +1458,14 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
   // 「営業は遅番に2人」等のスキルは、保有者が同じ日に休みすぎると物理的に
   // 満たせなくなる。自動配置の有給・公休では、その日の残り保有者が
   // 必要数を割り込むような日を避ける（buffer=1: 1人余裕を残す → 0: ちょうど → 無効）。
+  // ガードは「最低ライン(min)」基準: 目標(need)ではなく絶対に割ってはいけない
+  // 人数を守る。これで目標2・最低1なら、保有者の休みが1人残る日までは許容される。
   const skillList = (AppState.skills || [])
-    .map(sk => ({ name: sk.name, need: (sk.req != null ? sk.req : (sk.lateReq || 0)) }))
+    .map(sk => {
+      const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
+      const min  = (sk.min != null && sk.min >= 0 && sk.min <= need) ? sk.min : need;
+      return { name: sk.name, need: min };
+    })
     .filter(k => k.need > 0);
   const holderRest = {}, holderTotal = {};
   skillList.forEach(k => {
@@ -2484,6 +2490,9 @@ function calculateScore(shifts, allowedShifts, days, P) {
       skills.forEach(sk => {
         const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
         if (!need) return;
+        // 最低ライン min: これを下回ると🔴（強）、min〜need未満は🟡（弱）。
+        // 未設定なら min=need（従来どおり不足はすべて強ペナルティ）。
+        const min = (sk.min != null && sk.min >= 0 && sk.min <= need) ? sk.min : need;
         const early = (sk.target || 'late') === 'early';
         let have = 0;
         staff.forEach(s => {
@@ -2491,7 +2500,12 @@ function calculateScore(shifts, allowedShifts, days, P) {
           const inTarget = early ? isEarlyCategory(sh) : isLate(sh);
           if (isWork(sh) && inTarget && (s.skills || []).includes(sk.name)) have++;
         });
-        if (have < need) score += (need - have) * (P.skillLateShortage || 9000);
+        if (have < min) {
+          score += (min - have) * (P.skillLateShortage || 9000);              // 最低ライン割れ（強）
+          score += (need - min) * (P.skillSoftShortage || 1200);
+        } else if (have < need) {
+          score += (need - have) * (P.skillSoftShortage || 1200);              // 目標には届かない（弱）
+        }
       });
     }
 
@@ -2922,10 +2936,12 @@ function checkViolations(shifts) {
     }
   }
 
-  // スキル別: 指定の時間帯（早番/遅番）に必要なスキル保有者が足りているか
+  // スキル別: 指定の時間帯（早番/遅番）に必要なスキル保有者が足りているか。
+  // 最低ライン min を下回る＝🔴(skill-late)、min〜目標未満＝🟡(skill-short)。
   (AppState.skills || []).forEach(sk => {
     const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
     if (!need) return;
+    const min = (sk.min != null && sk.min >= 0 && sk.min <= need) ? sk.min : need;
     const target = sk.target || 'late';
     const label  = target === 'early' ? '早番' : '遅番';
     const inTarget = (sh) => target === 'early' ? isEarlyCategory(sh) : isLate(sh);
@@ -2935,11 +2951,17 @@ function checkViolations(shifts) {
         const sh = (shifts[s.id] || {})[d] || '';
         if (isWork(sh) && inTarget(sh) && (s.skills || []).includes(sk.name)) have++;
       });
-      if (have < need) {
+      if (have < min) {
         violations.push({
           staffId: null, day: d, type: 'skill-late',
-          message: `🚨 ${d}日 ${label}に「${sk.name}」できる人が${have}人（${need}人必要）`,
+          message: `🚨 ${d}日 ${label}に「${sk.name}」できる人が${have}人（最低${min}人必要）`,
           action:  `「${sk.name}」スキルのある人を${label}に配置してください`,
+        });
+      } else if (have < need) {
+        violations.push({
+          staffId: null, day: d, type: 'skill-short',
+          message: `⚠️ ${d}日 ${label}に「${sk.name}」できる人が${have}人（目標${need}人・最低${min}人はOK）`,
+          action:  `可能なら「${sk.name}」スキルのある人をもう1人${label}に配置してください`,
         });
       }
     }
