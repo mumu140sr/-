@@ -454,14 +454,17 @@ function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
   const tryRestAndHandoff = (X, d, curMust) => {
     if (!_polishMovable(shifts, X, d) || !isWork(shifts[X][d])) return null;
     const role = shifts[X][d];
-    // 前後どちらかで働いている人を優先（渡した先が新たな単発出勤にならない）
+    // 優先順: ①休みが余っている人（余セル or 公休が目標超過 → 渡しても公休不足にならない）
+    //         ②前後どちらかで働いている人（渡した先が新たな単発出勤にならない）
     const cands = staffList
       .filter(Y => Y.id !== X && _polishMovable(shifts, Y.id, d) &&
                    !isWork(shifts[Y.id][d]) && (allowedOf[Y.id] || []).includes(role))
       .sort((a, b) => {
+        const surplus = s => (shifts[s.id][d] === '余' ||
+                              countOff(shifts, s, days) > (s.maxOff || 0)) ? 0 : 1;
         const adj = s => ((d > 1 && isWork(shifts[s.id][d - 1])) ||
                           (d < days && isWork(shifts[s.id][d + 1]))) ? 0 : 1;
-        return adj(a) - adj(b);
+        return (surplus(a) - surplus(b)) || (adj(a) - adj(b));
       });
     for (const Y of cands) {
       const bx = shifts[X][d], by = shifts[Y.id][d];
@@ -479,6 +482,9 @@ function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
     const targets = vios.filter(v =>
       (v.type === 'single-work' || v.type === 'consecutive' || v.type === 'off-count') &&
       v.staffId && idset.has(v.staffId));
+    // 最優先3項目（人員不足はguaranteeが担当）: 連勤超過・公休不足を単発より先に処理
+    const TP = { 'consecutive': 0, 'off-count': 0, 'single-work': 1 };
+    targets.sort((a, b) => (TP[a.type] ?? 2) - (TP[b.type] ?? 2));
     for (const v of targets) {
       const X = v.staffId;
       // 休ませる候補日: 単発はその日、連勤はブロック途中、公休不足は全出勤日

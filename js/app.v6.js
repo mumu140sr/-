@@ -129,14 +129,20 @@ function setupGeneratePanel() {
         }
       }
 
-      // 最良案: 違反件数 → スコア の順で比較
+      // 最良案の比較キー: 【最優先】人員不足＋公休不足＋連勤超過の件数 → 🔴総数 → 総違反数
+      const PRIORITY3 = ['understaff', 'off-count', 'consecutive'];
+      const p3Count = vs => vs.filter(v => PRIORITY3.includes(v.type)).length;
+      const mustCount = vs => (typeof isMustViolation === 'function')
+        ? vs.filter(v => isMustViolation(v.type)).length : vs.length;
+      const keyOf3 = vs => [p3Count(vs), mustCount(vs), vs.length];
+      const betterKey = (a, b) => {
+        for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] < b[i]; }
+        return false;
+      };
+
       let bestIdx = 0;
       candidates.forEach((c, i) => {
-        const b = candidates[bestIdx];
-        if (c.violations.length < b.violations.length ||
-            (c.violations.length === b.violations.length && c.result.score < b.result.score)) {
-          bestIdx = i;
-        }
+        if (betterKey(keyOf3(c.violations), keyOf3(candidates[bestIdx].violations))) bestIdx = i;
       });
       const best = candidates[bestIdx];
       AppState.shifts     = best.shifts;
@@ -185,17 +191,18 @@ function setupGeneratePanel() {
         const BUDGET_MS = 9.5 * 60 * 1000; // 全体10分に収まるよう少し余裕を持たせる
         const repairRunner = (typeof repairScheduleViaWorker === 'function')
           ? repairScheduleViaWorker : repairSchedule;
-        const keyOf = vs => [mustLeft(vs), vs.length];               // [🔴件数, 総件数]
-        const better = (a, b) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+        // 比較キー: 【最優先3項目】人員不足・公休不足・連勤超過 → 🔴総数 → 総違反数
+        const keyOf = keyOf3;
+        const better = betterKey;
 
         let bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
         let bestVios   = AppState.violations.slice();
         let bestKey    = keyOf(bestVios);
         let round = 0;
 
-        while (bestKey[0] > 0 && (Date.now() - startedAt) < BUDGET_MS) {
+        while (bestKey[1] > 0 && (Date.now() - startedAt) < BUDGET_MS) {
           round++;
-          const note = `｜現在の最良 🔴${bestKey[0]}件（保持中・悪化しません）`;
+          const note = `｜現在の最良 最優先${bestKey[0]}件・🔴${bestKey[1]}件（保持中・悪化しません）`;
           const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = `🔴を減らすため別案を生成中（${round}巡目）… ${msg}${note}`; };
           try {
             // 1巡ごとに複数案を並列生成し、そのバッチの最良を採用
@@ -227,7 +234,7 @@ function setupGeneratePanel() {
         result.score        = bestVios.length;
         result.success      = bestVios.length === 0;
         result.candidateSummary = (result.candidateSummary ? result.candidateSummary + '　' : '') +
-          `時間予算内で${round}巡探索 → 最良 🔴${bestKey[0]}件 / 総${bestVios.length}件`;
+          `時間予算内で${round}巡探索 → 最良 最優先${bestKey[0]}件・🔴${bestKey[1]}件 / 総${bestVios.length}件`;
       }
 
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
