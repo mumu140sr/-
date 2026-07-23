@@ -78,12 +78,8 @@ async function optimizeSchedule(progressCallback) {
   groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   // なお残る不足は二部マッチングで確実に埋める（多段の玉突きも解く）
   groups.forEach(g => guaranteeDayStaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
-  // 単発出勤（🔴）を人数を変えずに解消
-  groups.forEach(g => eliminateSingleWork(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
-  // 最後に、人数を変えない同日役割入替でリズム違反だけを掃除（人員不足は増えない）
-  fixLockedBoundaryLates(AppState.shifts);
-  mustFirstSwapPolish(AppState.shifts, 10);
-  AppState.violations = sameDaySwapPolish(AppState.shifts, 12);
+  // 総合仕上げ: 🔴も🟡も含めて総数を減らす（人員不足は毎回再保証・悪化なし）
+  AppState.violations = finalPolishLoop(AppState.shifts, groups, 6);
   AppState.generated  = true;
 
   // restPairBonus でスコアが負になり得るため、成功判定は違反件数で行う
@@ -247,11 +243,8 @@ async function repairSchedule(progressCallback) {
   // 最後の一手（無条件）: 採用する盤面の人員不足を必ず潰す。修復の採否が
   // 「違反総数」基準のため、総数が少ない代わりに不足の残る案を選びうるのを補償する。
   groups.forEach(g => guaranteeDayStaffingReal(finalShifts, g.staff, g.reqs, g.dailyReqs));
-  groups.forEach(g => eliminateSingleWork(finalShifts, g.staff, g.reqs, g.dailyReqs));
-  // 人数を変えない同日役割入替でリズム違反を掃除（人員不足は増えない）
-  fixLockedBoundaryLates(finalShifts);
-  mustFirstSwapPolish(finalShifts, 10);
-  const finalViolations = sameDaySwapPolish(finalShifts, 12);
+  // 総合仕上げ: 🔴も🟡も含めて総数を減らす（人員不足は毎回再保証・悪化なし）
+  const finalViolations = finalPolishLoop(finalShifts, groups, 6);
   AppState.shifts     = finalShifts;
   AppState.violations = finalViolations;
   return { score: finalViolations.length, violations: finalViolations,
@@ -667,6 +660,40 @@ function mustFirstSwapPolish(shifts, maxRounds) {
     if (!changed) break;
   }
   return vios;
+}
+
+/**
+ * 総合仕上げ: 🔴も🟡も含めて違反総数を減らすことを目指し、各種の掃除を
+ * 収束するまで反復する。各パスは「違反が減る手だけ」採用し、人員不足は
+ * 毎回 guaranteeDayStaffingReal で再保証するため増えない。最良盤面を保持し、
+ * 改善が止まったら最良に戻して終了する（悪化しない）。
+ * @returns {Array} 最終 violations
+ */
+function finalPolishLoop(shifts, groups, maxRounds) {
+  const guard = () => groups.forEach(g =>
+    guaranteeDayStaffingReal(shifts, g.staff, g.reqs, g.dailyReqs));
+  const single = () => groups.forEach(g =>
+    eliminateSingleWork(shifts, g.staff, g.reqs, g.dailyReqs));
+
+  let best      = checkViolations(shifts).length;
+  let bestBoard = deepCopyShifts(shifts);
+  for (let round = 0; round < (maxRounds || 6) && best > 0; round++) {
+    violationPolish(shifts, 4);   // 総数を減らす（人員不足を作りうる）
+    guard();                      // 不足を必ず再保証
+    single();                     // 単発出勤（🔴）を人数不変で解消
+    fixLockedBoundaryLates(shifts);
+    mustFirstSwapPolish(shifts, 8); // 🔴優先の同日交換
+    const vios = sameDaySwapPolish(shifts, 12); // 人数不変のリズム掃除
+    if (vios.length < best) {
+      best = vios.length;
+      bestBoard = deepCopyShifts(shifts);
+    } else {
+      // 改善が止まった → 最良盤面へ戻して終了（悪化させない）
+      for (const sid in bestBoard) shifts[sid] = Object.assign({}, bestBoard[sid]);
+      break;
+    }
+  }
+  return checkViolations(shifts);
 }
 
 function sameDaySwapPolish(shifts, maxRounds) {
