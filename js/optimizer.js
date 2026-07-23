@@ -76,6 +76,8 @@ async function optimizeSchedule(progressCallback) {
   // 強制フィルが生んだ単発出勤・切替を掃除（違反件数が減る手だけ採用＝人員不足は増えない）
   violationPolish(AppState.shifts, 4);
   groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
+  // なお残る不足は二部マッチングで確実に埋める（多段の玉突きも解く）
+  groups.forEach(g => guaranteeDayStaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   AppState.violations = checkViolations(AppState.shifts);
   AppState.generated  = true;
 
@@ -190,6 +192,7 @@ async function repairSchedule(progressCallback) {
     markSurplusRest(merged); // 修復後も公休ちょうど＋余に整える
     // 最終保証: 修復後も人員不足を全体盤面で潰す（実ロックのみ尊重）
     groups.forEach(g => forceFillUnderstaffingReal(merged, g.staff, g.reqs, g.dailyReqs));
+    groups.forEach(g => guaranteeDayStaffingReal(merged, g.staff, g.reqs, g.dailyReqs));
     return { shifts: merged, violations: checkViolations(merged) };
   };
 
@@ -234,18 +237,17 @@ async function repairSchedule(progressCallback) {
   progressCallback && progressCallback(100, `修復完了 — 残りエラー ${bestViolations.length}件`);
 
   AppState.generated = true;
-  if (bestViolations.length < origViolations.length) {
-    AppState.shifts     = bestShifts;
-    AppState.violations = bestViolations;
-    return { score: bestViolations.length, violations: bestViolations,
-             success: bestViolations.length === 0, improved: true,
-             before: origViolations.length, after: bestViolations.length };
-  }
-  AppState.shifts     = origShifts;
-  AppState.violations = origViolations;
-  return { score: origViolations.length, violations: origViolations,
-           success: origViolations.length === 0, improved: false,
-           before: origViolations.length, after: origViolations.length };
+  const improved   = bestViolations.length < origViolations.length;
+  const finalShifts = improved ? bestShifts : origShifts;
+  // 最後の一手（無条件）: 採用する盤面の人員不足を必ず潰す。修復の採否が
+  // 「違反総数」基準のため、総数が少ない代わりに不足の残る案を選びうるのを補償する。
+  groups.forEach(g => guaranteeDayStaffingReal(finalShifts, g.staff, g.reqs, g.dailyReqs));
+  const finalViolations = checkViolations(finalShifts);
+  AppState.shifts     = finalShifts;
+  AppState.violations = finalViolations;
+  return { score: finalViolations.length, violations: finalViolations,
+           success: finalViolations.length === 0, improved: finalViolations.length < origViolations.length,
+           before: origViolations.length, after: finalViolations.length };
 }
 
 /**
@@ -912,6 +914,102 @@ function forceFillUnderstaffing(shifts, locked, staff, allowedShifts, days, dayR
     });
   }
   return remaining;
+}
+
+/**
+ * 人員不足の最終保証（二部マッチング版）。
+ * まだ不足が残る日について、その日に出られる（＝希望休・有給でない）全員を
+ * 対象に、担当可能な役職スロットへ二部マッチング（Kuhn法）で割り当て直す。
+ * 多段の玉突きも自動で解けるため、その日に物理的に人がいる限り必ず埋まる。
+ * 不足が残っている日だけを対象にするので、問題ない日のリズムは崩さない。
+ * @returns {number} それでも埋まらなかった不足コマ数（＝物理的に不可能）
+ */
+function guaranteeDayStaffingReal(shifts, staffList, reqs, dailyReqs) {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const shiftKeys = getWorkShiftKeys();
+  const allowedOf = {};
+  staffList.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    allowedOf[s.id] = base;
+  });
+  const dayReq = (sh, d) => getDayReq(reqs || AppState.roleRequirements, dailyReqs || {}, sh, d);
+  let stillShort = 0;
+
+  for (let d = 1; d <= days; d++) {
+    // この日が不足しているか（不足していなければ触らない）
+    const isShort = shiftKeys.some(k => {
+      const req = dayReq(k, d); if (!req) return false;
+      return staffList.filter(s => shifts[s.id][d] === k).length < req;
+    });
+    if (!isShort) continue;
+
+    // 必要スロットを展開（固定・希望出勤で既に埋まっている分は差し引く）
+    const lockedRole = {};
+    const avail = [];
+    staffList.forEach(s => {
+      const fx = (AppState.fixedShifts[s.id] || {})[d];
+      const rq = (AppState.requests[s.id]    || {})[d];
+      if ((rq && isOff(rq)) || shifts[s.id][d] === '有') return; // その日は出られない
+      if (fx || (rq && isWork(rq))) { lockedRole[shifts[s.id][d]] = (lockedRole[shifts[s.id][d]] || 0) + 1; return; }
+      avail.push(s);
+    });
+    const occ = Object.assign({}, lockedRole);
+    const slots = []; // 割り当て対象の空きスロット（役職名の配列）
+    shiftKeys.forEach(k => {
+      let need = dayReq(k, d); if (!need) return;
+      while (need-- > 0) { if (occ[k] > 0) occ[k]--; else slots.push(k); }
+    });
+    if (!slots.length) continue;
+
+    // Kuhn法: 左=スロット, 右=avail の人。現在の割当を種にして無駄な入替を避ける
+    const matchSlot   = new Array(slots.length).fill(null); // slotIdx -> personId
+    const matchPerson = {};                                 // personId -> slotIdx
+    avail.forEach(s => {
+      const cur = shifts[s.id][d];
+      if (!isWork(cur)) return;
+      const si = slots.findIndex((r, i) => r === cur && matchSlot[i] === null);
+      if (si >= 0 && allowedOf[s.id].includes(cur)) { matchSlot[si] = s.id; matchPerson[s.id] = si; }
+    });
+    const personById = {}; avail.forEach(s => personById[s.id] = s);
+    const tryAug = (si, seen) => {
+      for (const s of avail) {
+        if (seen.has(s.id)) continue;
+        if (!allowedOf[s.id].includes(slots[si])) continue;
+        seen.add(s.id);
+        if (matchPerson[s.id] == null || tryAug(matchPerson[s.id], seen)) {
+          matchPerson[s.id] = si; matchSlot[si] = s.id; return true;
+        }
+      }
+      return false;
+    };
+    for (let si = 0; si < slots.length; si++) {
+      if (matchSlot[si] === null) tryAug(si, new Set());
+    }
+
+    // 全スロット埋まったら適用（埋まらないスロットがあれば物理的に不可能なので現状維持）
+    const filled = matchSlot.every(m => m !== null);
+    if (filled) {
+      avail.forEach(s => {
+        const si = matchPerson[s.id];
+        const to = (si != null) ? slots[si] : '休'; // 割当なしの人は休み
+        if (shifts[s.id][d] !== to) shifts[s.id][d] = to;
+      });
+    } else {
+      stillShort += matchSlot.filter(m => m === null).length;
+    }
+  }
+  return stillShort;
 }
 
 /**
