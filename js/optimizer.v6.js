@@ -78,7 +78,8 @@ async function optimizeSchedule(progressCallback) {
   groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   // なお残る不足は二部マッチングで確実に埋める（多段の玉突きも解く）
   groups.forEach(g => guaranteeDayStaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
-  AppState.violations = checkViolations(AppState.shifts);
+  // 最後に、人数を変えない同日役割入替でリズム違反だけを掃除（人員不足は増えない）
+  AppState.violations = sameDaySwapPolish(AppState.shifts, 12);
   AppState.generated  = true;
 
   // restPairBonus でスコアが負になり得るため、成功判定は違反件数で行う
@@ -242,7 +243,8 @@ async function repairSchedule(progressCallback) {
   // 最後の一手（無条件）: 採用する盤面の人員不足を必ず潰す。修復の採否が
   // 「違反総数」基準のため、総数が少ない代わりに不足の残る案を選びうるのを補償する。
   groups.forEach(g => guaranteeDayStaffingReal(finalShifts, g.staff, g.reqs, g.dailyReqs));
-  const finalViolations = checkViolations(finalShifts);
+  // 人数を変えない同日役割入替でリズム違反を掃除（人員不足は増えない）
+  const finalViolations = sameDaySwapPolish(finalShifts, 12);
   AppState.shifts     = finalShifts;
   AppState.violations = finalViolations;
   return { score: finalViolations.length, violations: finalViolations,
@@ -404,6 +406,63 @@ function _polishMovable(shifts, sid, d) {
  * スコア関数では拾いきれない「2手で直る」違反を確実に削る。
  * @returns {Array} 仕上げ後の violations
  */
+/**
+ * 人数を一切変えずにリズム違反だけを削る仕上げ。
+ * 「同じ日に働く2人の役割を入れ替える」手だけを使うため、各役職の人数は
+ * 常に不変 ＝ 人員不足・スキル不足を絶対に増やさない。人員不足の最終保証の
+ * 後に安全に走らせて、切替（連勤中の時間帯切替）・遅→休→早 などを掃除する。
+ * @returns {Array} 掃除後の violations
+ */
+function sameDaySwapPolish(shifts, maxRounds) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  const candsOf = {};
+  staff.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    candsOf[s.id] = base;
+  });
+  let vios = checkViolations(shifts);
+  for (let round = 0; round < maxRounds && vios.length > 0; round++) {
+    let improved = false;
+    // 違反日の周辺で、働く2人の役割を交換して違反件数が減るなら採用
+    const daysToScan = new Set();
+    vios.forEach(v => { for (let dd = v.day - 1; dd <= v.day + 1; dd++) if (dd >= 1 && dd <= days) daysToScan.add(dd); });
+    for (const d of daysToScan) {
+      for (let i = 0; i < staff.length && !improved; i++) {
+        const A = staff[i];
+        if (!_polishMovable(shifts, A.id, d)) continue;
+        const va = shifts[A.id][d];
+        if (!isWork(va)) continue;
+        for (let j = i + 1; j < staff.length; j++) {
+          const B = staff[j];
+          if (!_polishMovable(shifts, B.id, d)) continue;
+          const vb = shifts[B.id][d];
+          if (!isWork(vb) || va === vb) continue;
+          if (!candsOf[A.id].includes(vb) || !candsOf[B.id].includes(va)) continue;
+          shifts[A.id][d] = vb; shifts[B.id][d] = va;
+          const nv = checkViolations(shifts);
+          if (nv.length < vios.length) { vios = nv; improved = true; break; }
+          shifts[A.id][d] = va; shifts[B.id][d] = vb; // 戻す
+        }
+      }
+      if (improved) break;
+    }
+    if (!improved) break;
+  }
+  return vios;
+}
+
 function violationPolish(shifts, maxRounds) {
   const staff = AppState.staff || [];
   const days  = getDaysInMonth(AppState.settings.targetMonth);
@@ -1107,6 +1166,17 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
   // 副店長1人: ルール自体がオフなので制限なし（maxOff通り休める）
   const maxVmOffPerDay = vmList.length >= 2 ? vmList.length - 1 : vmList.length;
 
+  // 一般の「1日あたり休み上限」: 自動配置の休みでその日の必要総コマ数を割り込ませない。
+  // これにより、有給・公休が同じ日に偏って物理的に埋まらなくなるのを未然に防ぐ。
+  const totalReqOf = d => shiftKeys.reduce((a, k) => a + (optDayReq(k, d) || 0), 0);
+  const offByDay = {};
+  staff.forEach(s => {
+    for (let d = 1; d <= days; d++) {
+      if (locked[s.id][d] && isOff(shifts[s.id][d])) offByDay[d] = (offByDay[d] || 0) + 1;
+    }
+  });
+  const dayOffFull = d => (offByDay[d] || 0) >= Math.max(0, staff.length - totalReqOf(d));
+
   // Step0: 有給を目標日数まで自動配置（日付未指定分をアプリが割り当てロックする）
   // カレンダーで個別指定済みの有給はロック済みなので差し引く
   staff.forEach(s => {
@@ -1119,6 +1189,7 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
       if (locked[s.id][d]) { if (shifts[s.id][d] === '有') alreadyPaid++; continue; }
       if (eventDays[s.id] && eventDays[s.id].has(d)) continue;
       if (isVm && (vmOffByDay[d] || 0) >= maxVmOffPerDay) continue;
+      if (dayOffFull(d)) continue; // その日はこれ以上休ませると人員不足になる
       cands.push(d);
     }
     const need = Math.max(0, target - alreadyPaid);
@@ -1126,6 +1197,7 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
     cands.slice(0, need).forEach(d => {
       shifts[s.id][d] = '有';
       locked[s.id][d] = true;
+      offByDay[d] = (offByDay[d] || 0) + 1;
       if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
     });
   });
@@ -1141,12 +1213,14 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
       if (locked[s.id][d] || (eventDays[s.id] && eventDays[s.id].has(d))) continue;
       // 副店長は、既に上限人数が休む予定の日は候補から除外（全員休みを防ぐ）
       if (isVm && (vmOffByDay[d] || 0) >= maxVmOffPerDay) continue;
+      if (dayOffFull(d)) continue; // その日はこれ以上休ませると人員不足になる
       unlockedDays.push(d);
     }
     const needMoreOff = Math.max(0, (s.maxOff || 0) - alreadyOff);
     shuffleArray(unlockedDays);
     unlockedDays.slice(0, needMoreOff).forEach(d => {
       shifts[s.id][d] = '休';
+      offByDay[d] = (offByDay[d] || 0) + 1;
       if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
     });
   });
