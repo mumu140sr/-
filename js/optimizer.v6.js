@@ -425,10 +425,12 @@ const MUST_TYPES_OPT = new Set([
 function countMustVios(vios) { return vios.filter(v => MUST_TYPES_OPT.has(v.type)).length; }
 
 /**
- * 単発出勤（前後が休みで1日だけ出勤）を、人数を変えずに解消する専用処理。
- * 単発の人 X を休ませ、その枠を「同じ日に休んでいて前後どちらかで働いている」
- * 同僚 Y に渡す。役職の人数は不変なので人員不足は増えない。🔴違反（単発含む）が
- * 減る入替だけを採用する。
+ * 🔴リズム違反（単発出勤・連勤超過）を、人数を変えずに解消する専用処理。
+ * 違反者 X をある1日休ませ、その枠を「同じ日に休んでいて前後どちらかで働いている」
+ * 同僚 Y に渡す。役職の人数は不変なので人員不足は増えない。
+ *  - 単発出勤: 孤立した勤務日(その日)で X を休ませる
+ *  - 連勤超過: 連勤ブロックの途中の日で X を休ませて連勤を断ち切る
+ * 🔴違反が減る入替だけを採用する。
  * @returns {Array} 処理後の violations
  */
 function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
@@ -450,26 +452,43 @@ function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
     allowedOf[s.id] = base;
   });
   const idset = new Set(staffList.map(s => s.id));
+  // その日に X を休ませ、枠を休んでいる同僚 Y に渡す（人数不変で🔴が減れば採用）
+  const tryRestAndHandoff = (X, d, curMust) => {
+    if (!_polishMovable(shifts, X, d) || !isWork(shifts[X][d])) return null;
+    const role = shifts[X][d];
+    for (const Y of staffList) {
+      if (Y.id === X || !_polishMovable(shifts, Y.id, d)) continue;
+      if (isWork(shifts[Y.id][d])) continue;                       // Y はその日休み
+      if (!(allowedOf[Y.id] || []).includes(role)) continue;
+      const bx = shifts[X][d], by = shifts[Y.id][d];
+      shifts[X][d] = '休'; shifts[Y.id][d] = role;
+      const nv = checkViolations(shifts), nm = countMustVios(nv);
+      if (nm < curMust) return { nv, nm };
+      shifts[X][d] = bx; shifts[Y.id][d] = by;                     // 改善しなければ戻す
+    }
+    return null;
+  };
   let vios = checkViolations(shifts);
   let must = countMustVios(vios);
-  for (let guard = 0; guard < 8; guard++) {
+  for (let guard = 0; guard < 12; guard++) {
     let changed = false;
-    const sw = vios.filter(v => v.type === 'single-work' && v.staffId && idset.has(v.staffId));
-    for (const v of sw) {
-      const X = v.staffId, d = v.day;
-      if (!_polishMovable(shifts, X, d)) continue;
-      const role = shifts[X][d];
-      for (const Y of staffList) {
-        if (Y.id === X || !_polishMovable(shifts, Y.id, d)) continue;
-        if (isWork(shifts[Y.id][d])) continue;                     // Y はその日休みであること
-        const adj = (d > 1 && isWork(shifts[Y.id][d - 1])) ||
-                    (d < days && isWork(shifts[Y.id][d + 1]));      // Y は前後どちらかで勤務
-        if (!adj || !(allowedOf[Y.id] || []).includes(role)) continue;
-        const bx = shifts[X][d], by = shifts[Y.id][d];
-        shifts[X][d] = '休'; shifts[Y.id][d] = role;               // X を休ませ枠を Y に渡す
-        const nv = checkViolations(shifts), nm = countMustVios(nv);
-        if (nm < must) { vios = nv; must = nm; changed = true; break; }
-        shifts[X][d] = bx; shifts[Y.id][d] = by;                   // 改善しなければ戻す
+    const targets = vios.filter(v =>
+      (v.type === 'single-work' || v.type === 'consecutive') && v.staffId && idset.has(v.staffId));
+    for (const v of targets) {
+      const X = v.staffId;
+      // 休ませる候補日: 単発はその日、連勤は連勤ブロック全体（真ん中側から切る）
+      let candDays;
+      if (v.type === 'single-work') {
+        candDays = [v.day];
+      } else {
+        let a = v.day; while (a > 1 && isWork(shifts[X][a - 1])) a--;
+        let b = v.day; while (b < days && isWork(shifts[X][b + 1])) b++;
+        candDays = [];
+        for (let d = a + 1; d <= b; d++) candDays.push(d); // 先頭は避け、途中で断つ
+      }
+      for (const d of candDays) {
+        const r = tryRestAndHandoff(X, d, must);
+        if (r) { vios = r.nv; must = r.nm; changed = true; break; }
       }
       if (changed) break;
     }
@@ -1266,12 +1285,16 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
     }
     const need = Math.max(0, target - alreadyPaid);
     shuffleArray(cands);
-    cands.slice(0, need).forEach(d => {
+    let placed = 0;
+    for (const d of cands) {
+      if (placed >= need) break;
+      if (dayOffFull(d)) continue; // 混んでいる日には積まない（人員不足を防ぐ）
       shifts[s.id][d] = '有';
       locked[s.id][d] = true;
       offByDay[d] = (offByDay[d] || 0) + 1;
       if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
-    });
+      placed++;
+    }
   });
 
   // Step1: 各スタッフに公休を配置（ロック済みの公休のみ目標から差し引く。有給は別枠）
@@ -1290,11 +1313,15 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
     }
     const needMoreOff = Math.max(0, (s.maxOff || 0) - alreadyOff);
     shuffleArray(unlockedDays);
-    unlockedDays.slice(0, needMoreOff).forEach(d => {
+    let placedOff = 0;
+    for (const d of unlockedDays) {
+      if (placedOff >= needMoreOff) break;
+      if (dayOffFull(d)) continue; // 混んでいる日には積まない（人員不足を防ぐ）
       shifts[s.id][d] = '休';
       offByDay[d] = (offByDay[d] || 0) + 1;
       if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
-    });
+      placedOff++;
+    }
   });
 
   // Step2: 各日にシフトを割り当て
