@@ -410,7 +410,15 @@ function renderRoleTable() {
       </td>
       <td>
         <input type="number" min="0" max="99" value="${reqCast}"
-               data-idx="${idx}" class="role-req-cast-input" style="width:60px"/>
+               data-idx="${idx}" class="role-req-cast-input" style="width:60px"
+               ${isCombinedShift(type.key) ? 'disabled title="合算モードでは社員側の数を合計値として使います"' : ''}/>
+      </td>
+      <td style="text-align:center">
+        <label class="switch" title="社員＋キャストを合算した合計人数で判定（社員側の数を合計値として使用）">
+          <input type="checkbox" data-idx="${idx}" data-field="combined"
+                 class="role-combined-input" ${isCombinedShift(type.key) ? 'checked' : ''}/>
+          <span></span>
+        </label>
       </td>
       <td>
         <button class="btn-icon" data-del-idx="${idx}" title="削除">🗑</button>
@@ -492,6 +500,20 @@ function renderRoleTable() {
       if (!type) return;
       if (!AppState.roleRequirementsCast) AppState.roleRequirementsCast = {};
       AppState.roleRequirementsCast[type.key] = parseInt(e.target.value) || 0;
+      autoSave();
+    });
+  });
+
+  // 合算（社員＋キャスト）切替
+  tbody.querySelectorAll('.role-combined-input').forEach(el => {
+    el.addEventListener('change', e => {
+      const idx  = parseInt(e.target.dataset.idx);
+      const type = AppState.shiftTypes[idx];
+      if (!type) return;
+      if (!AppState.settings.combinedShifts) AppState.settings.combinedShifts = {};
+      if (e.target.checked) AppState.settings.combinedShifts[type.key] = true;
+      else delete AppState.settings.combinedShifts[type.key];
+      renderRoleTable(); // キャスト欄の有効/無効表示を更新
       autoSave();
     });
   });

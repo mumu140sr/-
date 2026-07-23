@@ -101,6 +101,9 @@ const AppState = {
     penaltySingleOff: true,
     maxAttempts: 250000,
     pairRestTarget: 0, // 月の連休（2連休以上）の目安回数（全体・0=指定なし。個人設定があれば個人優先）
+    // 合算モード: { シフトkey: true } … そのシフトの必要人数を社員＋キャスト合算で扱う。
+    // 1つでも合算指定があると、生成時に社員とキャストを1つのプールとして最適化する。
+    combinedShifts: {},
     penalties: { ...DEFAULT_PENALTIES },
   },
   // ユーザーが自由に定義・編集できるシフト種別
@@ -189,12 +192,46 @@ function getStaffDepartment(s) {
   return s.department === 'cast' ? 'cast' : 'employee';
 }
 
-// 部門ごとのグループ（スタッフが存在する部門のみ返す）
+// そのシフトが「合算（社員＋キャスト）」指定かどうか
+function isCombinedShift(sh) {
+  const cs = AppState.settings.combinedShifts;
+  return !!(cs && cs[sh]);
+}
+
+// 部門ごとのグループ（スタッフが存在する部門のみ返す）。
+// 合算指定シフトが1つでもあり、社員・キャスト両方が居る場合は、全員を1つの
+// プール（部門横断）として最適化する。合算シフトは1つの合計数、部門別シフトは
+// 社員＋キャストの合計人数を必要数として扱う（担当シフトとスキルで自然に振り分く）。
 function getDepartmentGroups(staffList) {
   const all = staffList || AppState.staff;
-  const groups = [];
   const emp  = all.filter(s => getStaffDepartment(s) === 'employee');
   const cast = all.filter(s => getStaffDepartment(s) === 'cast');
+  const cs   = AppState.settings.combinedShifts || {};
+  const hasCombined = Object.keys(cs).some(k => cs[k]);
+
+  if (hasCombined && emp.length && cast.length) {
+    const eReq = AppState.roleRequirements     || {};
+    const cReq = AppState.roleRequirementsCast || {};
+    const eD   = AppState.dailyRequirements     || {};
+    const cD   = AppState.dailyRequirementsCast || {};
+    const mergedReqs = {};
+    new Set([...Object.keys(eReq), ...Object.keys(cReq)]).forEach(k => {
+      // 合算指定: 社員側の数字を「合計値」として使う。部門別: 社員＋キャストの合計。
+      mergedReqs[k] = isCombinedShift(k) ? (eReq[k] || 0) : ((eReq[k] || 0) + (cReq[k] || 0));
+    });
+    const mergedDaily = {};
+    new Set([...Object.keys(eD), ...Object.keys(cD)]).forEach(k => {
+      mergedDaily[k] = {};
+      new Set([...Object.keys(eD[k] || {}), ...Object.keys(cD[k] || {})]).forEach(d => {
+        mergedDaily[k][d] = isCombinedShift(k)
+          ? (eD[k] || {})[d]
+          : (((eD[k] || {})[d] || 0) + ((cD[k] || {})[d] || 0));
+      });
+    });
+    return [{ key: 'all', label: '全体', staff: all, reqs: mergedReqs, dailyReqs: mergedDaily }];
+  }
+
+  const groups = [];
   if (emp.length)  groups.push({ key: 'employee', label: '社員',     staff: emp,  reqs: AppState.roleRequirements,     dailyReqs: AppState.dailyRequirements     || {} });
   if (cast.length) groups.push({ key: 'cast',     label: 'キャスト', staff: cast, reqs: AppState.roleRequirementsCast || {}, dailyReqs: AppState.dailyRequirementsCast || {} });
   return groups;
@@ -313,6 +350,7 @@ function loadFromStorage() {
     if (penalties.bandConcentration == null || penalties.bandConcentration === 700)
       penalties.bandConcentration = DEFAULT_PENALTIES.bandConcentration;
     Object.assign(AppState.settings, data.settings || {}, { penalties });
+    if (!AppState.settings.combinedShifts) AppState.settings.combinedShifts = {}; // 旧データ補完
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
     AppState.shiftTypes = (data.shiftTypes || getDefaultShiftTypes()).map(t =>
