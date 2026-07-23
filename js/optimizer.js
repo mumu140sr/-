@@ -71,7 +71,12 @@ async function optimizeSchedule(progressCallback) {
 
   AppState.shifts     = mergedShifts;
   markSurplusRest(AppState.shifts); // 公休を目標数ちょうどにし、余った休みを「余」に振り分ける
-  AppState.violations = checkViolations(mergedShifts);
+  // 最終保証: 部門ごとに人員不足を全体盤面で潰す（実ロックのみ尊重）
+  groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
+  // 強制フィルが生んだ単発出勤・切替を掃除（違反件数が減る手だけ採用＝人員不足は増えない）
+  violationPolish(AppState.shifts, 4);
+  groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
+  AppState.violations = checkViolations(AppState.shifts);
   AppState.generated  = true;
 
   // restPairBonus でスコアが負になり得るため、成功判定は違反件数で行う
@@ -183,6 +188,8 @@ async function repairSchedule(progressCallback) {
       _optStaff = null; _optReqs = null; _optDailyReqs = null;
     }
     markSurplusRest(merged); // 修復後も公休ちょうど＋余に整える
+    // 最終保証: 修復後も人員不足を全体盤面で潰す（実ロックのみ尊重）
+    groups.forEach(g => forceFillUnderstaffingReal(merged, g.staff, g.reqs, g.dailyReqs));
     return { shifts: merged, violations: checkViolations(merged) };
   };
 
@@ -821,8 +828,44 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
  * ソフト制約（連勤・リズム・公休数）より人員確保を優先する。
  * @returns {number} 埋めきれず残った不足コマ数（0 なら完全充足）
  */
-function forceFillUnderstaffing(shifts, locked, staff, allowedShifts, days) {
+/**
+ * 最終保証（実ロック版）: 生成・修復の最終段で、部門ごとの必要人数に対し
+ * 人員不足を全体盤面で潰す。ロック判定は「希望休・固定・有給」の実ロックのみ
+ * （修復モードの一時ロックに縛られない）ため、埋められる限り必ず埋める。
+ * @returns {number} 埋めきれなかった不足コマ数
+ */
+function forceFillUnderstaffingReal(shifts, staffList, reqs, dailyReqs) {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const locked = {};
+  const allowed = {};
+  staffList.forEach(s => {
+    locked[s.id] = {};
+    for (let d = 1; d <= days; d++) {
+      const fx = (AppState.fixedShifts[s.id] || {})[d];
+      const rq = (AppState.requests[s.id]    || {})[d];
+      locked[s.id][d] = !!fx || (rq && (isOff(rq) || isWork(rq)));
+    }
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    allowed[s.id] = base;
+  });
+  const dayReq = (sh, d) => getDayReq(reqs || AppState.roleRequirements, dailyReqs || {}, sh, d);
+  return forceFillUnderstaffing(shifts, locked, staffList, allowed, days, dayReq);
+}
+
+function forceFillUnderstaffing(shifts, locked, staff, allowedShifts, days, dayReqFn) {
   const shiftKeys = getWorkShiftKeys();
+  const reqOf = dayReqFn || optDayReq;
   const movable = (s, d) => {
     if (locked[s.id][d]) return false;
     if (shifts[s.id][d] === '有') return false; // 有給は動かさない
@@ -832,7 +875,7 @@ function forceFillUnderstaffing(shifts, locked, staff, allowedShifts, days) {
   for (let d = 1; d <= days; d++) {
     const countOf = sh => staff.filter(s => shifts[s.id][d] === sh).length;
     shiftKeys.forEach(sh => {
-      const req = optDayReq(sh, d);
+      const req = reqOf(sh, d);
       if (!req) return;
       let count = countOf(sh);
       if (count >= req) return;
@@ -861,7 +904,7 @@ function forceFillUnderstaffing(shifts, locked, staff, allowedShifts, days) {
           const cur = shifts[s.id][d];
           if (!isWork(cur) || cur === sh) continue;
           if (!movable(s, d) || !canDo(s)) continue;
-          if (countOf(cur) <= optDayReq(cur, d)) continue; // 移すと今度は元が不足するので不可
+          if (countOf(cur) <= reqOf(cur, d)) continue; // 移すと今度は元が不足するので不可
           shifts[s.id][d] = sh; count++;
         }
       }
