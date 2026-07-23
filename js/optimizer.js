@@ -807,7 +807,68 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
     bestScore = hillClimbPolish(bestShifts, locked, staff, allowedShifts, days, P, 2);
   }
 
+  // 最終保証: 人員不足は絶対に残さない。埋められる日は必ず埋める（強制フィル）。
+  // 希望休・固定・有給で動かせず物理的に人が足りない日だけが残る。
+  forceFillUnderstaffing(bestShifts, locked, staff, allowedShifts, days);
+
   return { shifts: bestShifts, score: bestScore };
+}
+
+/**
+ * 人員不足を絶対に残さないための最終強制フィル。
+ * 不足しているシフトに、①休み ②「余」 ③同日の過剰シフトの人 の順で
+ * 担当可能な人を移して埋める。ロック（希望休・固定・有給）は動かさない。
+ * ソフト制約（連勤・リズム・公休数）より人員確保を優先する。
+ * @returns {number} 埋めきれず残った不足コマ数（0 なら完全充足）
+ */
+function forceFillUnderstaffing(shifts, locked, staff, allowedShifts, days) {
+  const shiftKeys = getWorkShiftKeys();
+  const movable = (s, d) => {
+    if (locked[s.id][d]) return false;
+    if (shifts[s.id][d] === '有') return false; // 有給は動かさない
+    return true;
+  };
+  let remaining = 0;
+  for (let d = 1; d <= days; d++) {
+    const countOf = sh => staff.filter(s => shifts[s.id][d] === sh).length;
+    shiftKeys.forEach(sh => {
+      const req = optDayReq(sh, d);
+      if (!req) return;
+      let count = countOf(sh);
+      if (count >= req) return;
+
+      const canDo = s => (allowedShifts[s.id] || []).includes(sh);
+      // d 日に出勤させたときの連勤の長さ（前後の連続勤務）。小さいほど連勤になりにくい
+      const consLenIfWork = s => {
+        let n = 1, dd = d - 1;
+        while (dd >= 1  && isWork(shifts[s.id][dd])) { n++; dd--; }
+        dd = d + 1;
+        while (dd <= days && isWork(shifts[s.id][dd])) { n++; dd++; }
+        return n;
+      };
+      // ① 休み（余含む）から補充。連勤になりにくい人（前後が休みの人）を優先
+      const resting = staff
+        .filter(s => movable(s, d) && canDo(s) && !isWork(shifts[s.id][d]))
+        .sort((a, b) => consLenIfWork(a) - consLenIfWork(b));
+      for (const s of resting) {
+        if (count >= req) break;
+        shifts[s.id][d] = sh; count++;
+      }
+      // ② 同日の「過剰な」シフトから玉突きで移す（移動元が req 超過のときだけ）
+      if (count < req) {
+        for (const s of staff) {
+          if (count >= req) break;
+          const cur = shifts[s.id][d];
+          if (!isWork(cur) || cur === sh) continue;
+          if (!movable(s, d) || !canDo(s)) continue;
+          if (countOf(cur) <= optDayReq(cur, d)) continue; // 移すと今度は元が不足するので不可
+          shifts[s.id][d] = sh; count++;
+        }
+      }
+      if (count < req) remaining += (req - count); // 物理的に不可能な分
+    });
+  }
+  return remaining;
 }
 
 /**
