@@ -670,29 +670,80 @@ function mustFirstSwapPolish(shifts, maxRounds) {
  * @returns {Array} 最終 violations
  */
 function finalPolishLoop(shifts, groups, maxRounds) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
   const guard = () => groups.forEach(g =>
     guaranteeDayStaffingReal(shifts, g.staff, g.reqs, g.dailyReqs));
   const single = () => groups.forEach(g =>
     eliminateSingleWork(shifts, g.staff, g.reqs, g.dailyReqs));
 
-  let best      = checkViolations(shifts).length;
-  let bestBoard = deepCopyShifts(shifts);
-  for (let round = 0; round < (maxRounds || 6) && best > 0; round++) {
-    violationPolish(shifts, 4);   // 総数を減らす（人員不足を作りうる）
-    guard();                      // 不足を必ず再保証
-    single();                     // 単発出勤（🔴）を人数不変で解消
+  // 各スタッフの担当可能シフト（研修除外・prefs適合）
+  const candsOf = {};
+  staff.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh); return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    candsOf[s.id] = base;
+  });
+
+  // 磨きひとまとめ（各パスは違反が減る手だけ採用。人員不足は毎回再保証）
+  const polishOnce = () => {
+    violationPolish(shifts, 4);
+    guard();
+    single();
     fixLockedBoundaryLates(shifts);
-    mustFirstSwapPolish(shifts, 8); // 🔴優先の同日交換
-    const vios = sameDaySwapPolish(shifts, 12); // 人数不変のリズム掃除
-    if (vios.length < best) {
-      best = vios.length;
-      bestBoard = deepCopyShifts(shifts);
+    mustFirstSwapPolish(shifts, 8);
+    return sameDaySwapPolish(shifts, 12).length;
+  };
+
+  // 揺さぶり: 同じ日に働く2人の役割をランダムに入れ替える（人数不変＝人員不足を作らない）。
+  // 違反日周辺を優先的に狙って、局所最適から抜け出しやすくする。
+  const perturb = (n, vios) => {
+    const vdays = vios.filter(v => v.day >= 1).map(v => v.day);
+    for (let k = 0; k < n; k++) {
+      const d = (vdays.length && Math.random() < 0.7)
+        ? vdays[Math.floor(Math.random() * vdays.length)]
+        : Math.floor(Math.random() * days) + 1;
+      const workers = staff.filter(s => _polishMovable(shifts, s.id, d) && isWork(shifts[s.id][d]));
+      if (workers.length < 2) continue;
+      const A = workers[Math.floor(Math.random() * workers.length)];
+      const B = workers[Math.floor(Math.random() * workers.length)];
+      if (A.id === B.id) continue;
+      const va = shifts[A.id][d], vb = shifts[B.id][d];
+      if (va === vb || !candsOf[A.id].includes(vb) || !candsOf[B.id].includes(va)) continue;
+      shifts[A.id][d] = vb; shifts[B.id][d] = va;
+    }
+  };
+
+  // まず磨いて基準を作る
+  let best      = polishOnce();
+  let bestBoard = deepCopyShifts(shifts);
+  let bestVios  = checkViolations(shifts);
+
+  // 軽い basin hopping: 揺さぶり→再磨き。改善したら採用、しなければ最良へ戻す
+  // （絶対に悪化しない）。連続で改善が無ければ打ち切る（時間対効果のバランス）。
+  const rounds = (maxRounds || 8);
+  let stale = 0;
+  for (let round = 0; round < rounds && best > 0; round++) {
+    const strength = 2 + Math.min(4, stale); // 停滞するほど少し大きく揺さぶる
+    perturb(strength, bestVios);
+    const n = polishOnce();
+    if (n < best) {
+      best = n; bestBoard = deepCopyShifts(shifts); bestVios = checkViolations(shifts); stale = 0;
     } else {
-      // 改善が止まった → 最良盤面へ戻して終了（悪化させない）
-      for (const sid in bestBoard) shifts[sid] = Object.assign({}, bestBoard[sid]);
-      break;
+      for (const sid in bestBoard) shifts[sid] = Object.assign({}, bestBoard[sid]); // 最良へ復帰
+      if (++stale >= 4) break; // 4回連続で改善なし → 打ち切り
     }
   }
+  for (const sid in bestBoard) shifts[sid] = Object.assign({}, bestBoard[sid]);
   return checkViolations(shifts);
 }
 

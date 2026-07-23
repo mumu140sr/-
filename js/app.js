@@ -92,7 +92,7 @@ function setupGeneratePanel() {
         : optimizeSchedule;
 
       // 複数案を生成して最良案を採用
-      const numCand = Math.max(1, Math.min(5,
+      const numCand = Math.max(1, Math.min(12,
         parseInt(document.getElementById('numCandidates')?.value) || 3));
       AppState.settings.numCandidates = numCand;
 
