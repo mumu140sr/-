@@ -78,6 +78,8 @@ async function optimizeSchedule(progressCallback) {
   groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   // なお残る不足は二部マッチングで確実に埋める（多段の玉突きも解く）
   groups.forEach(g => guaranteeDayStaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
+  // 単発出勤（🔴）を人数を変えずに解消
+  groups.forEach(g => eliminateSingleWork(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   // 最後に、人数を変えない同日役割入替でリズム違反だけを掃除（人員不足は増えない）
   AppState.violations = sameDaySwapPolish(AppState.shifts, 12);
   AppState.generated  = true;
@@ -243,6 +245,7 @@ async function repairSchedule(progressCallback) {
   // 最後の一手（無条件）: 採用する盤面の人員不足を必ず潰す。修復の採否が
   // 「違反総数」基準のため、総数が少ない代わりに不足の残る案を選びうるのを補償する。
   groups.forEach(g => guaranteeDayStaffingReal(finalShifts, g.staff, g.reqs, g.dailyReqs));
+  groups.forEach(g => eliminateSingleWork(finalShifts, g.staff, g.reqs, g.dailyReqs));
   // 人数を変えない同日役割入替でリズム違反を掃除（人員不足は増えない）
   const finalViolations = sameDaySwapPolish(finalShifts, 12);
   AppState.shifts     = finalShifts;
@@ -413,6 +416,68 @@ function _polishMovable(shifts, sid, d) {
  * 後に安全に走らせて、切替（連勤中の時間帯切替）・遅→休→早 などを掃除する。
  * @returns {Array} 掃除後の violations
  */
+// 🔴絶対NG扱いの違反タイプ（表示側の分類と揃える）。単発出勤も含む。
+const MUST_TYPES_OPT = new Set([
+  'understaff', 'skill-late', 'consecutive', 'resp-duplicate', 'hierarchy',
+  'vicemanager-absent', 'single-work', 'pref-mismatch', 'role-mismatch',
+  'event-absent', 'night-after-work',
+]);
+function countMustVios(vios) { return vios.filter(v => MUST_TYPES_OPT.has(v.type)).length; }
+
+/**
+ * 単発出勤（前後が休みで1日だけ出勤）を、人数を変えずに解消する専用処理。
+ * 単発の人 X を休ませ、その枠を「同じ日に休んでいて前後どちらかで働いている」
+ * 同僚 Y に渡す。役職の人数は不変なので人員不足は増えない。🔴違反（単発含む）が
+ * 減る入替だけを採用する。
+ * @returns {Array} 処理後の violations
+ */
+function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const allowedOf = {};
+  staffList.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    allowedOf[s.id] = base;
+  });
+  const idset = new Set(staffList.map(s => s.id));
+  let vios = checkViolations(shifts);
+  let must = countMustVios(vios);
+  for (let guard = 0; guard < 8; guard++) {
+    let changed = false;
+    const sw = vios.filter(v => v.type === 'single-work' && v.staffId && idset.has(v.staffId));
+    for (const v of sw) {
+      const X = v.staffId, d = v.day;
+      if (!_polishMovable(shifts, X, d)) continue;
+      const role = shifts[X][d];
+      for (const Y of staffList) {
+        if (Y.id === X || !_polishMovable(shifts, Y.id, d)) continue;
+        if (isWork(shifts[Y.id][d])) continue;                     // Y はその日休みであること
+        const adj = (d > 1 && isWork(shifts[Y.id][d - 1])) ||
+                    (d < days && isWork(shifts[Y.id][d + 1]));      // Y は前後どちらかで勤務
+        if (!adj || !(allowedOf[Y.id] || []).includes(role)) continue;
+        const bx = shifts[X][d], by = shifts[Y.id][d];
+        shifts[X][d] = '休'; shifts[Y.id][d] = role;               // X を休ませ枠を Y に渡す
+        const nv = checkViolations(shifts), nm = countMustVios(nv);
+        if (nm < must) { vios = nv; must = nm; changed = true; break; }
+        shifts[X][d] = bx; shifts[Y.id][d] = by;                   // 改善しなければ戻す
+      }
+      if (changed) break;
+    }
+    if (!changed) break;
+  }
+  return vios;
+}
+
 function sameDaySwapPolish(shifts, maxRounds) {
   const staff = AppState.staff || [];
   const days  = getDaysInMonth(AppState.settings.targetMonth);
