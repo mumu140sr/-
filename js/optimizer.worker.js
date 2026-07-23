@@ -5,7 +5,7 @@
 
 // data.js と optimizer.js を Worker スコープに取り込む
 // importScripts は Worker 専用 API
-self.importScripts('data.js?v=72', 'optimizer.js?v=72');
+self.importScripts('data.js?v=73', 'optimizer.js?v=73');
 
 /**
  * メインスレッドからのリクエスト受信

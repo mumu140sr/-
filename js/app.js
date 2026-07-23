@@ -148,8 +148,14 @@ function setupGeneratePanel() {
             `案${i + 1}: 違反${c.violations.length}件 / スコア${c.result.score}${i === bestIdx ? ' ←採用' : ''}`).join('　')
         : null;
 
-      // 仕上げ: 違反が残っていれば自動でエラー修正まで走らせて最良の状態にする
-      if (best.violations.length > 0) {
+      // 🔴絶対NG（人員不足・スキル・連勤超過・単発出勤など）の残数。
+      // 重い自動修正・再生成は「🔴が残るときだけ」動かして時間を節約する
+      // （🟡注意 は "できれば" なので、消したいときは手動で 🛠 自動修正 を使う）。
+      const mustLeft = vs => (typeof isMustViolation === 'function')
+        ? vs.filter(v => isMustViolation(v.type)).length : vs.length;
+
+      // 仕上げ: 🔴が残っていれば自動でエラー修正まで走らせて最良の状態にする
+      if (mustLeft(best.violations) > 0) {
         $text.textContent = '仕上げ中（エラーを自動修正）...';
         try {
           const repairRunner = (typeof repairScheduleViaWorker === 'function')
@@ -173,9 +179,9 @@ function setupGeneratePanel() {
         }
       }
 
-      // B. まだ違反が多く残る場合のみ、反復回数を自動で増やして再挑戦（最良を保持）
-      // 3件以下ならフル再生成より手動修正の方が早いためスキップ（時間短縮）
-      if (result.violations.length > 3) {
+      // B. 🔴絶対NG がまだ残る場合のみ、反復回数を増やして再挑戦（最良を保持）。
+      // 🔴が0なら（🟡だけなら）フル再生成はしない ＝ 大幅な時間短縮。
+      if (mustLeft(result.violations) > 0) {
         let bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
         let bestVios   = AppState.violations.slice();
         const origMax  = AppState.settings.maxAttempts;

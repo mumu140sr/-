@@ -860,6 +860,7 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
   const coolingRate  = Math.pow(0.01 / T, 1.0 / maxAttempts);
   const reportInterval = Math.max(500, Math.floor(maxAttempts / 200));
   const lastBestUpdate = { attempt: 0 };
+  let genuineLastImprove = 0; // リヒートに影響されない「本当の最良更新」時刻（早期終了用）
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     T *= coolingRate;
@@ -918,10 +919,16 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
         bestScore = newScore;
         bestShifts = deepCopyShifts(shifts);
         lastBestUpdate.attempt = attempt;
+        genuineLastImprove = attempt;
       }
     } else {
       undoFn();
     }
+
+    // 早期終了: 予算の4割を過ぎ、かつ2割の区間ずっと最良が更新されなければ
+    // 収束とみなして打ち切る（品質はほぼ変えずに無駄な反復を削る）。
+    // 修復モードは範囲が狭く収束が速いので対象外にしない。
+    if (attempt > maxAttempts * 0.4 && attempt - genuineLastImprove > maxAttempts * 0.2) break;
 
     if (attempt % reportInterval === 0) {
       const pct = Math.floor((attempt / maxAttempts) * 100);
