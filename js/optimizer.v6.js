@@ -2567,10 +2567,14 @@ function calculateScore(shifts, allowedShifts, days, P) {
         }
 
         consWork++;
-        const myMaxCons = getMaxConsFor(s); // 個人の連勤上限
+        const myMaxCons = getMaxConsFor(s); // 個人の連勤上限（基本ライン）
         if (consWork > myMaxCons) {
-          const over = consWork - myMaxCons;
-          score += P.consBase * over + P.consSq * over * over;
+          // 基本ライン+1（例: 5連勤）までは「どうしても時のみ」の🟡（軽い）。
+          // 絶対上限（基本ライン+1）を超える（例: 6連勤）と🔴（重い）。
+          const softOver = 1;                                  // ちょうど+1日ぶん
+          const hardOver = consWork - (myMaxCons + 1);         // +2日め以降
+          score += (P.consSoft || 2000) * Math.min(softOver, consWork - myMaxCons);
+          if (hardOver > 0) score += P.consBase * hardOver + P.consSq * hardOver * hardOver;
         }
 
         // 個人希望: 土日休み（土日に出勤したら減点）
@@ -2751,14 +2755,20 @@ function checkViolations(shifts) {
 
       if (isWork(cur)) {
         consWork++;
-        const myMaxCons = getMaxConsFor(s); // 個人の連勤上限（未設定なら全体設定）
-        if (consWork > myMaxCons && !reportedDays.has(d)) {
+        const myMaxCons = getMaxConsFor(s); // 基本ライン（4 or 個人設定）
+        // 基本ライン+1（例:5連勤）= 🟡（どうしても時のみ許容）、+2以上（例:6連勤）= 🔴
+        if (consWork === myMaxCons + 1) {
+          violations.push({
+            staffId: s.id, day: d, type: 'consecutive-soft',
+            message: `⚠️ ${consWork}連勤（基本${myMaxCons}日・どうしても時のみ許容${s.personalMaxCons > 0 ? '・個人設定' : ''}）`,
+            action:  'できれば他の日と入れ替えて休みを挟んでください',
+          });
+        } else if (consWork === myMaxCons + 2) {
           violations.push({
             staffId: s.id, day: d, type: 'consecutive',
-            message: `🚨 ${consWork}連勤（上限${myMaxCons}${s.personalMaxCons > 0 ? '・個人設定' : ''}）`,
+            message: `🚨 ${consWork}連勤（絶対上限${myMaxCons + 1}日を超過${s.personalMaxCons > 0 ? '・個人設定' : ''}）`,
             action:  '他の日と入れ替えて休みを挟んでください',
           });
-          reportedDays.add(d);
         }
 
         // 個人希望（絶対）: 土日休み
