@@ -179,37 +179,55 @@ function setupGeneratePanel() {
         }
       }
 
-      // B. 🔴絶対NG がまだ残る場合のみ、反復回数を増やして再挑戦（最良を保持）。
-      // 🔴が0なら（🟡だけなら）フル再生成はしない ＝ 大幅な時間短縮。
+      // B. 🔴絶対NG が残る間、時間予算いっぱい（最大約9.5分）まで案を作り続け、
+      // 🔴が最少の案を残す（🔴同数なら総違反が少ない方）。🔴が0なら即終了。
       if (mustLeft(result.violations) > 0) {
-        let bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
-        let bestVios   = AppState.violations.slice();
-        const origMax  = AppState.settings.maxAttempts;
+        const BUDGET_MS = 9.5 * 60 * 1000; // 全体10分に収まるよう少し余裕を持たせる
         const repairRunner = (typeof repairScheduleViaWorker === 'function')
           ? repairScheduleViaWorker : repairSchedule;
-        for (let retry = 1; retry <= 1 && bestVios.length > 0; retry++) {
-          const boosted = Math.min(1000000, Math.floor(origMax * (1 + 0.7 * retry)));
-          if (boosted <= origMax) break;
-          AppState.settings.maxAttempts = boosted;
-          $text.textContent = `違反${bestVios.length}件 → 別の案をもう1回生成して比較します（現在の最良${bestVios.length}件は保持中）…`;
+        const keyOf = vs => [mustLeft(vs), vs.length];               // [🔴件数, 総件数]
+        const better = (a, b) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+
+        let bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
+        let bestVios   = AppState.violations.slice();
+        let bestKey    = keyOf(bestVios);
+        let round = 0;
+
+        while (bestKey[0] > 0 && (Date.now() - startedAt) < BUDGET_MS) {
+          round++;
+          const note = `｜現在の最良 🔴${bestKey[0]}件（保持中・悪化しません）`;
+          const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = `🔴を減らすため別案を生成中（${round}巡目）… ${msg}${note}`; };
           try {
-            const keepNote = `｜現在の最良 ${bestVios.length}件は保持中（悪化しません）`;
-            await runner((pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = `再挑戦${retry}: ${msg}${keepNote}`; });
-            if (AppState.violations.length > 0) {
-              await repairRunner((pct, msg) => { $text.textContent = `再挑戦${retry} 仕上げ: ${msg}${keepNote}`; });
+            // 1巡ごとに複数案を並列生成し、そのバッチの最良を採用
+            let got = null;
+            if (canParallel) {
+              const cands = await optimizeCandidatesParallel(numCand, prog);
+              if (cands && cands.length) {
+                let bi = 0;
+                cands.forEach((c, i) => { if (better(keyOf(c.violations), keyOf(cands[bi].violations))) bi = i; });
+                AppState.shifts = cands[bi].shifts; AppState.violations = cands[bi].violations; got = true;
+              }
             }
-            if (AppState.violations.length < bestVios.length) {
+            if (!got) { await runner(prog); }
+            // 🔴が残るなら自動修正で仕上げ
+            if (mustLeft(AppState.violations) > 0) {
+              await repairRunner((pct, msg) => { $text.textContent = `🔴を減らすため仕上げ中（${round}巡目）… ${msg}${note}`; });
+            }
+            const key = keyOf(AppState.violations);
+            if (better(key, bestKey)) {
+              bestKey = key;
               bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
               bestVios   = AppState.violations.slice();
             }
-          } catch (_) { /* この再挑戦は失敗、最良を維持 */ }
+          } catch (_) { /* この巡回は失敗、最良を維持 */ }
         }
-        AppState.settings.maxAttempts = origMax; // 元に戻す
-        AppState.shifts     = bestShifts;         // 最良を確定
+        AppState.shifts     = bestShifts;
         AppState.violations = bestVios;
         result.violations   = bestVios;
         result.score        = bestVios.length;
         result.success      = bestVios.length === 0;
+        result.candidateSummary = (result.candidateSummary ? result.candidateSummary + '　' : '') +
+          `時間予算内で${round}巡探索 → 最良 🔴${bestKey[0]}件 / 総${bestVios.length}件`;
       }
 
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
