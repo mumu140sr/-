@@ -82,6 +82,7 @@ async function optimizeSchedule(progressCallback) {
   groups.forEach(g => eliminateSingleWork(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   // 最後に、人数を変えない同日役割入替でリズム違反だけを掃除（人員不足は増えない）
   fixLockedBoundaryLates(AppState.shifts);
+  mustFirstSwapPolish(AppState.shifts, 10);
   AppState.violations = sameDaySwapPolish(AppState.shifts, 12);
   AppState.generated  = true;
 
@@ -249,6 +250,7 @@ async function repairSchedule(progressCallback) {
   groups.forEach(g => eliminateSingleWork(finalShifts, g.staff, g.reqs, g.dailyReqs));
   // 人数を変えない同日役割入替でリズム違反を掃除（人員不足は増えない）
   fixLockedBoundaryLates(finalShifts);
+  mustFirstSwapPolish(finalShifts, 10);
   const finalViolations = sameDaySwapPolish(finalShifts, 12);
   AppState.shifts     = finalShifts;
   AppState.violations = finalViolations;
@@ -578,6 +580,91 @@ function fixLockedBoundaryLates(shifts) {
         shifts[s.id][d] = cur; shifts[p.id][d] = pv; // 減らなければ戻す
       }
     }
+  }
+  return vios;
+}
+
+/**
+ * 🔴絶対NGを最優先で消す同日役割交換パス。
+ * 同じ日に働く2人の役割を交換する（人数不変）。🔴が1件でも減るなら、
+ * 代わりに🟡（切替・リズム）が増えても採用する。
+ * 例: 営業スキルが遅番に足りない日、早番にいる営業持ちと遅番の非保有者を交換。
+ * @returns {Array} 処理後の violations
+ */
+function mustFirstSwapPolish(shifts, maxRounds) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  const candsOf = {};
+  staff.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    candsOf[s.id] = base;
+  });
+  let vios = checkViolations(shifts);
+  let must = countMustVios(vios);
+  for (let round = 0; round < (maxRounds || 10) && must > 0; round++) {
+    let changed = false;
+    const mustVios = vios.filter(v => MUST_TYPES_OPT.has(v.type) && v.day >= 1);
+    for (const v of mustVios) {
+      for (let d = Math.max(1, v.day - 1); d <= Math.min(days, v.day + 1) && !changed; d++) {
+        for (let i = 0; i < staff.length && !changed; i++) {
+          const A = staff[i];
+          if (!_polishMovable(shifts, A.id, d)) continue;
+          const va = shifts[A.id][d];
+          if (!isWork(va)) continue;
+          for (let j = i + 1; j < staff.length; j++) {
+            const B = staff[j];
+            if (!_polishMovable(shifts, B.id, d)) continue;
+            const vb = shifts[B.id][d];
+            if (!isWork(vb) || va === vb) continue;
+            if (!candsOf[A.id].includes(vb) || !candsOf[B.id].includes(va)) continue;
+            shifts[A.id][d] = vb; shifts[B.id][d] = va;
+            const nv = checkViolations(shifts), nm = countMustVios(nv);
+            if (nm < must) { vios = nv; must = nm; changed = true; break; }
+            shifts[A.id][d] = va; shifts[B.id][d] = vb;
+          }
+        }
+      }
+      // スキル不足: 保有者が全員働いていても足りない日は、休んでいる保有者に
+      // 非保有者の枠を引き継がせ、非保有者を休ませる（人数不変）
+      if (!changed && v.type === 'skill-late') {
+        const d = v.day;
+        const sk = (AppState.skills || []).find(k => v.message && v.message.includes(k.name));
+        const skName = sk ? sk.name : null;
+        const target = (sk && sk.target) === 'early' ? 'early' : 'late';
+        const inBand = sh => target === 'early' ? (isEarlyCategory(sh) && !isTraining(sh)) : isLate(sh);
+        if (skName) {
+          const holders = staff.filter(s => (s.skills || []).includes(skName) &&
+            _polishMovable(shifts, s.id, d) && !isWork(shifts[s.id][d]));
+          const nonHolders = staff.filter(s => !(s.skills || []).includes(skName) &&
+            _polishMovable(shifts, s.id, d) && isWork(shifts[s.id][d]) && inBand(shifts[s.id][d]));
+          for (const H of holders) {
+            for (const N of nonHolders) {
+              const role = shifts[N.id][d];
+              if (!candsOf[H.id].includes(role)) continue;
+              const bh = shifts[H.id][d], bn = shifts[N.id][d];
+              shifts[H.id][d] = role; shifts[N.id][d] = '休';
+              const nv = checkViolations(shifts), nm = countMustVios(nv);
+              if (nm < must) { vios = nv; must = nm; changed = true; break; }
+              shifts[H.id][d] = bh; shifts[N.id][d] = bn;
+            }
+            if (changed) break;
+          }
+        }
+      }
+      if (changed) break;
+    }
+    if (!changed) break;
   }
   return vios;
 }
@@ -1367,6 +1454,34 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
   });
   const dayOffFull = d => (offByDay[d] || 0) >= Math.max(0, staff.length - totalReqOf(d));
 
+  // スキル保有者の休み集中ガード:
+  // 「営業は遅番に2人」等のスキルは、保有者が同じ日に休みすぎると物理的に
+  // 満たせなくなる。自動配置の有給・公休では、その日の残り保有者が
+  // 必要数を割り込むような日を避ける（buffer=1: 1人余裕を残す → 0: ちょうど → 無効）。
+  const skillList = (AppState.skills || [])
+    .map(sk => ({ name: sk.name, need: (sk.req != null ? sk.req : (sk.lateReq || 0)) }))
+    .filter(k => k.need > 0);
+  const holderRest = {}, holderTotal = {};
+  skillList.forEach(k => {
+    holderRest[k.name] = {}; holderTotal[k.name] = 0;
+    staff.forEach(s => {
+      if (!(s.skills || []).includes(k.name)) return;
+      holderTotal[k.name]++;
+      for (let d = 1; d <= days; d++) {
+        if (locked[s.id][d] && isOff(shifts[s.id][d])) {
+          holderRest[k.name][d] = (holderRest[k.name][d] || 0) + 1;
+        }
+      }
+    });
+  });
+  const skillBlocked = (s, d, buffer) => skillList.some(k => {
+    if (!(s.skills || []).includes(k.name)) return false;
+    return holderTotal[k.name] - ((holderRest[k.name][d] || 0) + 1) < k.need + buffer;
+  });
+  const noteSkillRest = (s, d) => skillList.forEach(k => {
+    if ((s.skills || []).includes(k.name)) holderRest[k.name][d] = (holderRest[k.name][d] || 0) + 1;
+  });
+
   // Step0: 有給を目標日数まで自動配置（日付未指定分をアプリが割り当てロックする）
   // カレンダーで個別指定済みの有給はロック済みなので差し引く
   staff.forEach(s => {
@@ -1385,14 +1500,21 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
     const need = Math.max(0, target - alreadyPaid);
     shuffleArray(cands);
     let placed = 0;
-    for (const d of cands) {
+    // buffer=1: 保有者に1人余裕を残す日を優先 → 0: ちょうどの日も許可 → -9: ガード無効
+    for (const buffer of [1, 0, -9]) {
+      for (const d of cands) {
+        if (placed >= need) break;
+        if (shifts[s.id][d] === '有') continue; // 前のパスで配置済み
+        if (dayOffFull(d)) continue; // 混んでいる日には積まない（人員不足を防ぐ）
+        if (buffer > -9 && skillBlocked(s, d, buffer)) continue;
+        shifts[s.id][d] = '有';
+        locked[s.id][d] = true;
+        offByDay[d] = (offByDay[d] || 0) + 1;
+        noteSkillRest(s, d);
+        if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
+        placed++;
+      }
       if (placed >= need) break;
-      if (dayOffFull(d)) continue; // 混んでいる日には積まない（人員不足を防ぐ）
-      shifts[s.id][d] = '有';
-      locked[s.id][d] = true;
-      offByDay[d] = (offByDay[d] || 0) + 1;
-      if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
-      placed++;
     }
   });
 
@@ -1413,13 +1535,20 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
     const needMoreOff = Math.max(0, (s.maxOff || 0) - alreadyOff);
     shuffleArray(unlockedDays);
     let placedOff = 0;
-    for (const d of unlockedDays) {
+    // 有給と同様、スキル保有者の休みが同じ日に集中しないよう段階的に緩めながら配置
+    for (const buffer of [1, 0, -9]) {
+      for (const d of unlockedDays) {
+        if (placedOff >= needMoreOff) break;
+        if (shifts[s.id][d] === '休') continue; // 前のパスで配置済み
+        if (dayOffFull(d)) continue; // 混んでいる日には積まない（人員不足を防ぐ）
+        if (buffer > -9 && skillBlocked(s, d, buffer)) continue;
+        shifts[s.id][d] = '休';
+        offByDay[d] = (offByDay[d] || 0) + 1;
+        noteSkillRest(s, d);
+        if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
+        placedOff++;
+      }
       if (placedOff >= needMoreOff) break;
-      if (dayOffFull(d)) continue; // 混んでいる日には積まない（人員不足を防ぐ）
-      shifts[s.id][d] = '休';
-      offByDay[d] = (offByDay[d] || 0) + 1;
-      if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
-      placedOff++;
     }
   });
 
