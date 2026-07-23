@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=81" />
+<link rel="stylesheet" href="css/style.css?v=80" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -134,21 +134,6 @@
           </thead>
           <tbody id="roleTableBody"></tbody>
         </table>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3 style="cursor:pointer" onclick="toggleWeekdayReqPanel()">🗓 曜日別必要人数 <span id="weekdayReqToggle">▶ 展開</span></h3>
-      <div id="weekdayReqPanel" style="display:none">
-        <p class="hint">曜日ごとに必要人数を変えられます（例: 金土日は遅番4、月〜木は遅番3）。空欄はデフォルトの必要人数を使用。特定日だけ変えたい場合は下の「日別必要人数」が最優先されます。</p>
-        <div style="margin-bottom:6px">
-          <label>部門: </label>
-          <select id="weekdayReqDept" style="width:110px">
-            <option value="employee">社員</option>
-            <option value="cast">キャスト</option>
-          </select>
-        </div>
-        <div id="weekdayReqContent"></div>
       </div>
     </div>
 
@@ -322,11 +307,11 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=81"></script>
-<script src="js/optimizer.v6.js?v=81"></script>
-<script src="js/worker-client.v6.js?v=81"></script>
-<script src="js/ai-explain.v6.js?v=81"></script>
-<script src="js/ui.v6.js?v=81"></script>
-<script src="js/app.v6.js?v=81"></script>
+<script src="js/data.v6.js?v=80"></script>
+<script src="js/optimizer.v6.js?v=80"></script>
+<script src="js/worker-client.v6.js?v=80"></script>
+<script src="js/ai-explain.v6.js?v=80"></script>
+<script src="js/ui.v6.js?v=80"></script>
+<script src="js/app.v6.js?v=80"></script>
 </body>
 </html>

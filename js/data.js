@@ -120,9 +120,6 @@ const AppState = {
   dailyRequirements: {},
   // キャスト部門の日別必要人数
   dailyRequirementsCast: {},
-  // 曜日別必要人数 { shiftKey: { 0..6: 人数 } } 0=日..6=土。空なら基本値。日付上書きが最優先。
-  weekdayRequirements: {},
-  weekdayRequirementsCast: {},
   // スキル要件 [{ name: '営業', lateReq: 2 }] — 遅番にそのスキル保有者が lateReq 人以上必要
   skills: [],
   // スタッフ一覧
@@ -233,25 +230,12 @@ function getDepartmentGroups(staffList) {
           : (((eD[k] || {})[d] || 0) + ((cD[k] || {})[d] || 0));
       });
     });
-    // 曜日別も同様にマージ（合算指定は社員側、部門別は合算）
-    const eW = AppState.weekdayRequirements || {}, cW = AppState.weekdayRequirementsCast || {};
-    const mergedWeekday = {};
-    new Set([...Object.keys(eW), ...Object.keys(cW)]).forEach(k => {
-      mergedWeekday[k] = {};
-      for (let w = 0; w <= 6; w++) {
-        const ev = (eW[k] || {})[w], cv = (cW[k] || {})[w];
-        if (isCombinedShift(k)) { if (ev != null && ev !== '') mergedWeekday[k][w] = ev; }
-        else if ((ev != null && ev !== '') || (cv != null && cv !== '')) {
-          mergedWeekday[k][w] = (parseInt(ev) || 0) + (parseInt(cv) || 0);
-        }
-      }
-    });
-    return [{ key: 'all', label: '全体', staff: all, reqs: mergedReqs, dailyReqs: mergedDaily, weekdayReqs: mergedWeekday }];
+    return [{ key: 'all', label: '全体', staff: all, reqs: mergedReqs, dailyReqs: mergedDaily }];
   }
 
   const groups = [];
-  if (emp.length)  groups.push({ key: 'employee', label: '社員',     staff: emp,  reqs: AppState.roleRequirements,     dailyReqs: AppState.dailyRequirements     || {}, weekdayReqs: AppState.weekdayRequirements     || {} });
-  if (cast.length) groups.push({ key: 'cast',     label: 'キャスト', staff: cast, reqs: AppState.roleRequirementsCast || {}, dailyReqs: AppState.dailyRequirementsCast || {}, weekdayReqs: AppState.weekdayRequirementsCast || {} });
+  if (emp.length)  groups.push({ key: 'employee', label: '社員',     staff: emp,  reqs: AppState.roleRequirements,     dailyReqs: AppState.dailyRequirements     || {} });
+  if (cast.length) groups.push({ key: 'cast',     label: 'キャスト', staff: cast, reqs: AppState.roleRequirementsCast || {}, dailyReqs: AppState.dailyRequirementsCast || {} });
   return groups;
 }
 
@@ -276,15 +260,9 @@ function isNight(shift) {
 }
 
 // 日別必要人数を取得（per-day override がなければデフォルト値を返す）
-// 必要人数の解決順: 日付ごとの上書き ＞ 曜日ごとの設定 ＞ 基本値
-function getDayReq(reqs, dailyReqs, shiftKey, day, weekdayReqs) {
+function getDayReq(reqs, dailyReqs, shiftKey, day) {
   const override = (dailyReqs || {})[shiftKey];
   if (override && override[day] != null) return override[day];
-  const wr = (weekdayReqs || {})[shiftKey];
-  if (wr) {
-    const w = getWeekday(AppState.settings.targetMonth, day); // 0=日..6=土
-    if (wr[w] != null && wr[w] !== '') return parseInt(wr[w]) || 0;
-  }
   return reqs[shiftKey] || 0;
 }
 
@@ -331,8 +309,6 @@ function saveToStorage() {
       roleRequirementsCast: AppState.roleRequirementsCast,
       dailyRequirements:    AppState.dailyRequirements,
       dailyRequirementsCast: AppState.dailyRequirementsCast,
-      weekdayRequirements:     AppState.weekdayRequirements,
-      weekdayRequirementsCast: AppState.weekdayRequirementsCast,
       skills:               AppState.skills,
       staff:                AppState.staff,
       requests:             AppState.requests,
@@ -387,8 +363,6 @@ function loadFromStorage() {
     AppState.roleRequirementsCast  = data.roleRequirementsCast  || {};
     AppState.dailyRequirements     = data.dailyRequirements     || {};
     AppState.dailyRequirementsCast = data.dailyRequirementsCast || {};
-    AppState.weekdayRequirements     = data.weekdayRequirements     || {};
-    AppState.weekdayRequirementsCast = data.weekdayRequirementsCast || {};
     AppState.skills                = Array.isArray(data.skills) ? data.skills : [];
 
     // events（v4以降）
@@ -465,8 +439,6 @@ function resetAll() {
   AppState.roleRequirementsCast  = {};
   AppState.dailyRequirements     = {};
   AppState.dailyRequirementsCast = {};
-  AppState.weekdayRequirements     = {};
-  AppState.weekdayRequirementsCast = {};
   AppState.skills                = [];
   AppState.settings.penalties = { ...DEFAULT_PENALTIES };
   _staffIdCounter = 1;

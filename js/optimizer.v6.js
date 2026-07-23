@@ -29,13 +29,12 @@ const SOLO_SHIFT_KEYS = ['早責', '遅責', '早総務', '遅総務'];
 
 // 部門別最適化中のスタッフ・必要人数（AppState を書き換えると実行中の保存で
 // データが破損するため、optimizer 内部変数で切り替える）
-let _optStaff = null, _optReqs = null, _optDailyReqs = null, _optWeekdayReqs = null;
+let _optStaff = null, _optReqs = null, _optDailyReqs = null;
 function optStaff()      { return _optStaff      || AppState.staff; }
 function optReqs()       { return _optReqs       || AppState.roleRequirements; }
 function optDailyReqs()  { return _optDailyReqs  || AppState.dailyRequirements || {}; }
-function optWeekdayReqs(){ return _optWeekdayReqs || AppState.weekdayRequirements || {}; }
-// 必要人数（日付上書き → 曜日別 → デフォルト req の順で参照）
-function optDayReq(sh, d) { return getDayReq(optReqs(), optDailyReqs(), sh, d, optWeekdayReqs()); }
+// 日別必要人数（per-day override → デフォルト req の順で参照）
+function optDayReq(sh, d) { return getDayReq(optReqs(), optDailyReqs(), sh, d); }
 
 /**
  * シフト最適化のメインエントリ
@@ -55,7 +54,6 @@ async function optimizeSchedule(progressCallback) {
       _optStaff     = g.staff;
       _optReqs      = g.reqs;
       _optDailyReqs = g.dailyReqs;
-      _optWeekdayReqs = g.weekdayReqs;
       const groupProgress = (pct, msg) => {
         const mapped = Math.floor((gi * 100 + pct) / groups.length);
         const label  = groups.length > 1 ? `【${g.label}】${msg}` : msg;
@@ -69,18 +67,17 @@ async function optimizeSchedule(progressCallback) {
     _optStaff     = null;
     _optReqs      = null;
     _optDailyReqs = null;
-    _optWeekdayReqs = null;
   }
 
   AppState.shifts     = mergedShifts;
   markSurplusRest(AppState.shifts); // 公休を目標数ちょうどにし、余った休みを「余」に振り分ける
   // 最終保証: 部門ごとに人員不足を全体盤面で潰す（実ロックのみ尊重）
-  groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs, g.weekdayReqs));
+  groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   // 強制フィルが生んだ単発出勤・切替を掃除（違反件数が減る手だけ採用＝人員不足は増えない）
   violationPolish(AppState.shifts, 4);
-  groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs, g.weekdayReqs));
+  groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   // なお残る不足は二部マッチングで確実に埋める（多段の玉突きも解く）
-  groups.forEach(g => guaranteeDayStaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs, g.weekdayReqs));
+  groups.forEach(g => guaranteeDayStaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   // 単発出勤（🔴）を人数を変えずに解消
   groups.forEach(g => eliminateSingleWork(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   // 最後に、人数を変えない同日役割入替でリズム違反だけを掃除（人員不足は増えない）
@@ -186,7 +183,7 @@ async function repairSchedule(progressCallback) {
         }
         if (cells.size === 0 && staffAll.size === 0) continue;
 
-        _optStaff = g.staff; _optReqs = g.reqs; _optDailyReqs = g.dailyReqs; _optWeekdayReqs = g.weekdayReqs;
+        _optStaff = g.staff; _optReqs = g.reqs; _optDailyReqs = g.dailyReqs;
         const groupProgress = (pct, msg) => {
           const mapped = Math.floor((gi * 100 + pct) / groups.length);
           progressCallback && progressCallback(mapped, `${passLabel} ` + msg);
@@ -195,12 +192,12 @@ async function repairSchedule(progressCallback) {
         Object.assign(merged, res.shifts);
       }
     } finally {
-      _optStaff = null; _optReqs = null; _optDailyReqs = null; _optWeekdayReqs = null;
+      _optStaff = null; _optReqs = null; _optDailyReqs = null;
     }
     markSurplusRest(merged); // 修復後も公休ちょうど＋余に整える
     // 最終保証: 修復後も人員不足を全体盤面で潰す（実ロックのみ尊重）
-    groups.forEach(g => forceFillUnderstaffingReal(merged, g.staff, g.reqs, g.dailyReqs, g.weekdayReqs));
-    groups.forEach(g => guaranteeDayStaffingReal(merged, g.staff, g.reqs, g.dailyReqs, g.weekdayReqs));
+    groups.forEach(g => forceFillUnderstaffingReal(merged, g.staff, g.reqs, g.dailyReqs));
+    groups.forEach(g => guaranteeDayStaffingReal(merged, g.staff, g.reqs, g.dailyReqs));
     return { shifts: merged, violations: checkViolations(merged) };
   };
 
@@ -249,7 +246,7 @@ async function repairSchedule(progressCallback) {
   const finalShifts = improved ? bestShifts : origShifts;
   // 最後の一手（無条件）: 採用する盤面の人員不足を必ず潰す。修復の採否が
   // 「違反総数」基準のため、総数が少ない代わりに不足の残る案を選びうるのを補償する。
-  groups.forEach(g => guaranteeDayStaffingReal(finalShifts, g.staff, g.reqs, g.dailyReqs, g.weekdayReqs));
+  groups.forEach(g => guaranteeDayStaffingReal(finalShifts, g.staff, g.reqs, g.dailyReqs));
   groups.forEach(g => eliminateSingleWork(finalShifts, g.staff, g.reqs, g.dailyReqs));
   // 人数を変えない同日役割入替でリズム違反を掃除（人員不足は増えない）
   fixLockedBoundaryLates(finalShifts);
@@ -1175,7 +1172,7 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
  * （修復モードの一時ロックに縛られない）ため、埋められる限り必ず埋める。
  * @returns {number} 埋めきれなかった不足コマ数
  */
-function forceFillUnderstaffingReal(shifts, staffList, reqs, dailyReqs, weekdayReqs) {
+function forceFillUnderstaffingReal(shifts, staffList, reqs, dailyReqs) {
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const locked = {};
   const allowed = {};
@@ -1200,7 +1197,7 @@ function forceFillUnderstaffingReal(shifts, staffList, reqs, dailyReqs, weekdayR
     }
     allowed[s.id] = base;
   });
-  const dayReq = (sh, d) => getDayReq(reqs || AppState.roleRequirements, dailyReqs || {}, sh, d, weekdayReqs || {});
+  const dayReq = (sh, d) => getDayReq(reqs || AppState.roleRequirements, dailyReqs || {}, sh, d);
   return forceFillUnderstaffing(shifts, locked, staffList, allowed, days, dayReq);
 }
 
@@ -1263,7 +1260,7 @@ function forceFillUnderstaffing(shifts, locked, staff, allowedShifts, days, dayR
  * 不足が残っている日だけを対象にするので、問題ない日のリズムは崩さない。
  * @returns {number} それでも埋まらなかった不足コマ数（＝物理的に不可能）
  */
-function guaranteeDayStaffingReal(shifts, staffList, reqs, dailyReqs, weekdayReqs) {
+function guaranteeDayStaffingReal(shifts, staffList, reqs, dailyReqs) {
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const shiftKeys = getWorkShiftKeys();
   const allowedOf = {};
@@ -1282,7 +1279,7 @@ function guaranteeDayStaffingReal(shifts, staffList, reqs, dailyReqs, weekdayReq
     }
     allowedOf[s.id] = base;
   });
-  const dayReq = (sh, d) => getDayReq(reqs || AppState.roleRequirements, dailyReqs || {}, sh, d, weekdayReqs || {});
+  const dayReq = (sh, d) => getDayReq(reqs || AppState.roleRequirements, dailyReqs || {}, sh, d);
   let stillShort = 0;
 
   for (let d = 1; d <= days; d++) {
@@ -3008,7 +3005,7 @@ function checkViolations(shifts) {
         if (counts[sh] !== undefined) counts[sh]++;
       });
       shiftKeys.forEach(k => {
-        const req = getDayReq(g.reqs, g.dailyReqs || {}, k, d, g.weekdayReqs || {});
+        const req = getDayReq(g.reqs, g.dailyReqs || {}, k, d);
         if (req && counts[k] < req) {
           violations.push({
             staffId: null, day: d, type: 'understaff',
@@ -3190,7 +3187,7 @@ function analyzeRootCauses() {
   staff.forEach(s => { availableWork += Math.max(0, days - (s.maxOff || 0) - (s.paidLeave || 0)); });
   groups.forEach(g => workKeys.forEach(key => {
     if (!(g.reqs[key] > 0)) return;
-    for (let d = 1; d <= days; d++) requiredWork += getDayReq(g.reqs, g.dailyReqs || {}, key, d, g.weekdayReqs || {});
+    for (let d = 1; d <= days; d++) requiredWork += getDayReq(g.reqs, g.dailyReqs || {}, key, d);
   }));
   if (requiredWork > availableWork) {
     causes.push({

@@ -562,66 +562,6 @@ function toggleDailyReqPanel() {
   if (open) renderDailyReqPanel();
 }
 
-function toggleWeekdayReqPanel() {
-  const panel  = document.getElementById('weekdayReqPanel');
-  const toggle = document.getElementById('weekdayReqToggle');
-  if (!panel) return;
-  const open = panel.style.display === 'none';
-  panel.style.display = open ? '' : 'none';
-  if (toggle) toggle.textContent = open ? '▼ 折りたたむ' : '▶ 展開';
-  if (open) renderWeekdayReqPanel();
-}
-
-function renderWeekdayReqPanel() {
-  const container = document.getElementById('weekdayReqContent');
-  if (!container) return;
-  const dept = (document.getElementById('weekdayReqDept') || {}).value || 'employee';
-  const store = dept === 'cast'
-    ? (AppState.weekdayRequirementsCast = AppState.weekdayRequirementsCast || {})
-    : (AppState.weekdayRequirements     = AppState.weekdayRequirements     || {});
-  const baseReqs = dept === 'cast' ? (AppState.roleRequirementsCast || {}) : AppState.roleRequirements;
-  const wlabels = ['日', '月', '火', '水', '木', '金', '土'];
-  const workTypes = AppState.shiftTypes.filter(t => !t.isTraining);
-
-  let html = '<div class="table-wrap"><table class="role-table"><thead><tr><th>シフト</th>';
-  wlabels.forEach((w, i) => {
-    const color = i === 0 ? '#e53e3e' : (i === 6 ? '#3182ce' : '#444');
-    html += `<th style="color:${color}">${w}</th>`;
-  });
-  html += '<th>基本値</th></tr></thead><tbody>';
-  workTypes.forEach(t => {
-    html += `<tr><td style="font-weight:700;white-space:nowrap">${escapeHtml(t.key)}</td>`;
-    for (let w = 0; w <= 6; w++) {
-      const v = (store[t.key] || {})[w];
-      html += `<td><input type="number" min="0" max="99" value="${v != null ? v : ''}"
-        placeholder="-" data-wd-key="${escapeHtml(t.key)}" data-wd-w="${w}"
-        style="width:48px" /></td>`;
-    }
-    html += `<td class="hint">${baseReqs[t.key] != null ? baseReqs[t.key] : 0}</td></tr>`;
-  });
-  html += '</tbody></table></div>';
-  container.innerHTML = html;
-
-  container.querySelectorAll('input[data-wd-key]').forEach(el => {
-    el.addEventListener('change', e => {
-      const key = e.target.dataset.wdKey;
-      const w   = parseInt(e.target.dataset.wdW);
-      if (!store[key]) store[key] = {};
-      const val = e.target.value.trim();
-      if (val === '' || val === '-') delete store[key][w];
-      else store[key][w] = parseInt(val) || 0;
-      if (Object.keys(store[key]).length === 0) delete store[key];
-      autoSave();
-    });
-  });
-
-  const deptSel = document.getElementById('weekdayReqDept');
-  if (deptSel && !deptSel._bound) {
-    deptSel._bound = true;
-    deptSel.addEventListener('change', renderWeekdayReqPanel);
-  }
-}
-
 function renderDailyReqPanel() {
   const container = document.getElementById('dailyReqContent');
   if (!container) return;
