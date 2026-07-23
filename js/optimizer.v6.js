@@ -81,6 +81,7 @@ async function optimizeSchedule(progressCallback) {
   // 単発出勤（🔴）を人数を変えずに解消
   groups.forEach(g => eliminateSingleWork(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
   // 最後に、人数を変えない同日役割入替でリズム違反だけを掃除（人員不足は増えない）
+  fixLockedBoundaryLates(AppState.shifts);
   AppState.violations = sameDaySwapPolish(AppState.shifts, 12);
   AppState.generated  = true;
 
@@ -247,6 +248,7 @@ async function repairSchedule(progressCallback) {
   groups.forEach(g => guaranteeDayStaffingReal(finalShifts, g.staff, g.reqs, g.dailyReqs));
   groups.forEach(g => eliminateSingleWork(finalShifts, g.staff, g.reqs, g.dailyReqs));
   // 人数を変えない同日役割入替でリズム違反を掃除（人員不足は増えない）
+  fixLockedBoundaryLates(finalShifts);
   const finalViolations = sameDaySwapPolish(finalShifts, 12);
   AppState.shifts     = finalShifts;
   AppState.violations = finalViolations;
@@ -456,43 +458,126 @@ function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
   const tryRestAndHandoff = (X, d, curMust) => {
     if (!_polishMovable(shifts, X, d) || !isWork(shifts[X][d])) return null;
     const role = shifts[X][d];
-    for (const Y of staffList) {
-      if (Y.id === X || !_polishMovable(shifts, Y.id, d)) continue;
-      if (isWork(shifts[Y.id][d])) continue;                       // Y はその日休み
-      if (!(allowedOf[Y.id] || []).includes(role)) continue;
+    // 前後どちらかで働いている人を優先（渡した先が新たな単発出勤にならない）
+    const cands = staffList
+      .filter(Y => Y.id !== X && _polishMovable(shifts, Y.id, d) &&
+                   !isWork(shifts[Y.id][d]) && (allowedOf[Y.id] || []).includes(role))
+      .sort((a, b) => {
+        const adj = s => ((d > 1 && isWork(shifts[s.id][d - 1])) ||
+                          (d < days && isWork(shifts[s.id][d + 1]))) ? 0 : 1;
+        return adj(a) - adj(b);
+      });
+    for (const Y of cands) {
       const bx = shifts[X][d], by = shifts[Y.id][d];
       shifts[X][d] = '休'; shifts[Y.id][d] = role;
       const nv = checkViolations(shifts), nm = countMustVios(nv);
-      if (nm < curMust) return { nv, nm };
+      if (nm < curMust.must) return { nv, nm }; // 🔴が確実に減る手だけ採用
       shifts[X][d] = bx; shifts[Y.id][d] = by;                     // 改善しなければ戻す
     }
     return null;
   };
   let vios = checkViolations(shifts);
   let must = countMustVios(vios);
-  for (let guard = 0; guard < 12; guard++) {
+  for (let guard = 0; guard < 16; guard++) {
     let changed = false;
     const targets = vios.filter(v =>
-      (v.type === 'single-work' || v.type === 'consecutive') && v.staffId && idset.has(v.staffId));
+      (v.type === 'single-work' || v.type === 'consecutive') &&
+      v.staffId && idset.has(v.staffId));
     for (const v of targets) {
       const X = v.staffId;
-      // 休ませる候補日: 単発はその日、連勤は連勤ブロック全体（真ん中側から切る）
+      // 休ませる候補日: 単発はその日、連勤はブロック途中、切替/遅→早は当日と前日
       let candDays;
       if (v.type === 'single-work') {
         candDays = [v.day];
-      } else {
+      } else if (v.type === 'consecutive') {
         let a = v.day; while (a > 1 && isWork(shifts[X][a - 1])) a--;
         let b = v.day; while (b < days && isWork(shifts[X][b + 1])) b++;
         candDays = [];
         for (let d = a + 1; d <= b; d++) candDays.push(d); // 先頭は避け、途中で断つ
+      } else {
+        candDays = [v.day - 1, v.day].filter(d => d >= 1);
       }
       for (const d of candDays) {
-        const r = tryRestAndHandoff(X, d, must);
+        const r = tryRestAndHandoff(X, d, { must, total: vios.length });
         if (r) { vios = r.nv; must = r.nm; changed = true; break; }
+      }
+      // 単発出勤は逆方向も試す: 隣の日に X の出勤を伸ばして連勤化する
+      // （X がその日働く代わりに、働いていた Y を休ませる。人数は不変）
+      if (!changed && v.type === 'single-work') {
+        for (const d of [v.day - 1, v.day + 1]) {
+          if (d < 1 || d > days) continue;
+          if (!_polishMovable(shifts, X, d) || isWork(shifts[X][d])) continue;
+          for (const Y of staffList) {
+            if (Y.id === X || !_polishMovable(shifts, Y.id, d)) continue;
+            const role = shifts[Y.id][d];
+            if (!isWork(role) || !(allowedOf[X] || []).includes(role)) continue;
+            const bx = shifts[X][d], by = shifts[Y.id][d];
+            shifts[X][d] = role; shifts[Y.id][d] = '休';
+            const nv = checkViolations(shifts), nm = countMustVios(nv);
+            if (nm < must) { vios = nv; must = nm; changed = true; break; }
+            shifts[X][d] = bx; shifts[Y.id][d] = by;
+          }
+          if (changed) break;
+        }
       }
       if (changed) break;
     }
     if (!changed) break;
+  }
+  return vios;
+}
+
+/**
+ * 固定セル境界の遅番を直す専用パス。
+ * 「翌日が固定の研修/早番系」なのに当日が遅番だと、遅→研/遅→早のエラーが
+ * 必ず出る。当日の遅番を、同じ日に早番系で働く人と役割交換して解消する。
+ * 同日の勤務者同士の交換なので各役職の人数は不変（🔴に影響しない）。
+ * 各境界は1回だけ処理するためループしない。
+ * @returns {Array} 処理後の violations
+ */
+function fixLockedBoundaryLates(shifts) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  const candsOf = {};
+  staff.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    candsOf[s.id] = base;
+  });
+  const isLockedCell = (sid, d) =>
+    !!(AppState.fixedShifts[sid] || {})[d] ||
+    (() => { const rq = (AppState.requests[sid] || {})[d]; return rq && (isOff(rq) || isWork(rq)); })();
+
+  let vios = checkViolations(shifts);
+  for (const s of staff) {
+    for (let d = 1; d < days; d++) {
+      const nx = shifts[s.id][d + 1];
+      // 翌日が「固定の早番系（研修含む）」で、当日が動かせる遅番のとき
+      if (!isLockedCell(s.id, d + 1) || !isWork(nx) || !isEarlyCategory(nx)) continue;
+      const cur = shifts[s.id][d];
+      if (!isLate(cur) || !_polishMovable(shifts, s.id, d)) continue;
+      // 同じ日に早番系で働く人と役割交換
+      for (const p of staff) {
+        if (p.id === s.id || !_polishMovable(shifts, p.id, d)) continue;
+        const pv = shifts[p.id][d];
+        if (!isWork(pv) || !isEarlyCategory(pv) || isTraining(pv)) continue;
+        if (!candsOf[s.id].includes(pv) || !candsOf[p.id].includes(cur)) continue;
+        shifts[s.id][d] = pv; shifts[p.id][d] = cur;
+        const nv = checkViolations(shifts);
+        if (nv.length < vios.length) { vios = nv; break; }
+        shifts[s.id][d] = cur; shifts[p.id][d] = pv; // 減らなければ戻す
+      }
+    }
   }
   return vios;
 }
@@ -691,6 +776,7 @@ function violationPolish(shifts, maxRounds) {
 // 「誰を早番の軸に、誰を遅番の軸にするか」をアプリ側で自動決定する。
 // ユーザーが明示的に早寄り/遅寄りを設定している人はその設定を尊重して対象外。
 let _autoBandMap = {};
+let _noLateDayMap = {}; // { staffId: Set<day> } その日は遅番禁止（翌日が固定早番系のため）
 
 function _bandOfShift(sh) {
   if (isLate(sh)) return 'late';
@@ -815,6 +901,19 @@ async function optimizeGroupSchedule(progressCallback, repairCtx) {
 
   // 自動チーム分け: 「均等」設定で両時間帯に入れる人に、早の軸/遅の軸を自動割り当て
   _autoBandMap = computeAutoBands(staff, allowedShifts, days);
+
+  // 固定セル境界の遅番禁止マップ: 翌日が「固定の早番系（研修含む）出勤」なら
+  // 当日に遅番を置くと必ず 遅→研/遅→早 エラーになるため、生成段階から禁止する
+  _noLateDayMap = {};
+  staff.forEach(s => {
+    _noLateDayMap[s.id] = new Set();
+    for (let d = 1; d < days; d++) {
+      const fx = (AppState.fixedShifts[s.id] || {})[d + 1];
+      const rq = (AppState.requests[s.id]    || {})[d + 1];
+      const nxFixed = fx || (rq && isWork(rq) ? rq : null);
+      if (nxFixed && isWork(nxFixed) && isEarlyCategory(nxFixed)) _noLateDayMap[s.id].add(d);
+    }
+  });
 
   // 2. 希望休と固定シフトをロックして初期化
   let shifts = {};
@@ -1334,7 +1433,8 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
       let placed = 0;
       // 早責・遅責は役職優先度順（上位者を優先的に責任者に据える）
       const isRespShift = sh === '早責' || sh === '遅責';
-      const candidates = avail.filter(s => shifts[s.id][d] === '' && allowedShifts[s.id].includes(sh));
+      const candidates = avail.filter(s => shifts[s.id][d] === '' && allowedShifts[s.id].includes(sh) &&
+        !(isLate(sh) && _noLateDayMap[s.id] && _noLateDayMap[s.id].has(d)));
       // 自動チーム分けの軸に合う人を優先（早番コマには早の軸の人から入れる）
       const shBand = _bandOfShift(sh);
       const bandRank = s => {
@@ -2357,6 +2457,11 @@ function calculateScore(shifts, allowedShifts, days, P) {
 
         if (isEarly(cur)) earlyCount++;
         else if (isLate(cur)) lateCount++;
+
+        // 翌日が固定の早番系（研修含む）の日に遅番はほぼ禁止（遅→研/遅→早が確定するため）
+        if (isLate(cur) && _noLateDayMap[s.id] && _noLateDayMap[s.id].has(d)) {
+          score += (P.prefMismatch || 12000);
+        }
         prevShift = cur;
 
       } else {
@@ -2654,9 +2759,10 @@ function checkViolations(shifts) {
       }
     }
 
-    // 公休不足のみ報告（超過は余剰人員のため許容）
+    // 公休不足のみ報告（超過は余剰人員のため許容）。
+    // キャストは勤務が固定契約ベースのため公休数は目安扱い（エラーにしない）。
     const diff = offCount - (s.maxOff || 0);
-    if (diff < 0) {
+    if (!isCast && diff < 0) {
       violations.push({
         staffId: s.id, day: 0, type: 'off-count',
         message: `🚨 公休数 ${offCount}日（目標${s.maxOff}日, 差${diff}）`,
