@@ -2488,6 +2488,10 @@ function checkViolations(shifts) {
     let prevShift = (consWork > 0 && s.prevLastShift) ? s.prevLastShift : '';
     let offCount  = 0;
     let offRun    = 0;
+    // キャスト（パート的な少日数勤務）は、単発出勤・長期連休・切替などの
+    // リズム系ルールを適用しない（部分勤務では自然に起きるためノイズになる）。
+    // 人員不足・スキル・担当外などの構造ルールは通常どおり適用される。
+    const isCast = getStaffDepartment(s) === 'cast';
     const effectiveAllowed = (s.allowedShifts || []).concat(['研']); // 研は全員許容
     const reportedDays = new Set();
     const wkHard     = s.weekendPref === 'hard';
@@ -2527,7 +2531,7 @@ function checkViolations(shifts) {
           reportedDays.add('sp' + d);
         }
 
-        if (settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
+        if (!isCast && settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
           violations.push({
             staffId: s.id, day: d, type: 'late-early',
             message: `🚨 ${isTraining(cur) ? '遅→研' : '遅→早'}（インターバル不足）`,
@@ -2544,7 +2548,7 @@ function checkViolations(shifts) {
           });
         }
 
-        if (consWork >= 2 && isWork(prevShift)) {
+        if (!isCast && consWork >= 2 && isWork(prevShift)) {
           const pc = getShiftCategory(prevShift), cc = getShiftCategory(cur);
           if (pc && cc && pc !== cc) {
             violations.push({
@@ -2576,7 +2580,7 @@ function checkViolations(shifts) {
         }
 
         // 単発出勤チェック（前後が両方とも非出勤）
-        if (settings.penaltySingleOff && d > 1 && d < days) {
+        if (!isCast && settings.penaltySingleOff && d > 1 && d < days) {
           const nx = (shifts[s.id] || {})[d + 1] || '';
           if (!isWork(prevShift) && !isWork(nx)) {
             violations.push({
@@ -2599,7 +2603,7 @@ function checkViolations(shifts) {
           const restLocked =
             isOff((AppState.requests[s.id]    || {})[d]) ||
             isOff((AppState.fixedShifts[s.id] || {})[d]);
-          if (offRun === 4 && !restLocked && !reportedDays.has('rest' + d)) {
+          if (!isCast && offRun === 4 && !restLocked && !reportedDays.has('rest' + d)) {
             violations.push({
               staffId: s.id, day: d, type: 'long-rest',
               message: `⚠️ ${offRun}連休以上（連休は最大3日まで）`,
@@ -2635,7 +2639,7 @@ function checkViolations(shifts) {
               action:  '休みを2連休以上にするか、時間帯を揃えてください',
             });
           }
-        } else if (settings.penaltySingleOff && d > 1 && d < days) {
+        } else if (!isCast && settings.penaltySingleOff && d > 1 && d < days) {
           const pv = (shifts[s.id] || {})[d - 1] || '';
           const nx = (shifts[s.id] || {})[d + 1] || '';
           if (isLate(pv) && isEarlyCategory(nx)) {
