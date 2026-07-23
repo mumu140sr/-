@@ -418,6 +418,7 @@ const MUST_TYPES_OPT = new Set([
   'understaff', 'skill-late', 'consecutive', 'resp-duplicate', 'hierarchy',
   'vicemanager-absent', 'single-work', 'pref-mismatch', 'role-mismatch',
   'event-absent', 'night-after-work',
+  'off-count', 'late-early', // ユーザー要望: 公休不足・遅→早(休みなし) も絶対NG
 ]);
 function countMustVios(vios) { return vios.filter(v => MUST_TYPES_OPT.has(v.type)).length; }
 
@@ -476,11 +477,11 @@ function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
   for (let guard = 0; guard < 16; guard++) {
     let changed = false;
     const targets = vios.filter(v =>
-      (v.type === 'single-work' || v.type === 'consecutive') &&
+      (v.type === 'single-work' || v.type === 'consecutive' || v.type === 'off-count') &&
       v.staffId && idset.has(v.staffId));
     for (const v of targets) {
       const X = v.staffId;
-      // 休ませる候補日: 単発はその日、連勤はブロック途中、切替/遅→早は当日と前日
+      // 休ませる候補日: 単発はその日、連勤はブロック途中、公休不足は全出勤日
       let candDays;
       if (v.type === 'single-work') {
         candDays = [v.day];
@@ -489,6 +490,10 @@ function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
         let b = v.day; while (b < days && isWork(shifts[X][b + 1])) b++;
         candDays = [];
         for (let d = a + 1; d <= b; d++) candDays.push(d); // 先頭は避け、途中で断つ
+      } else if (v.type === 'off-count') {
+        // 公休不足: 出勤している全日を候補に、余裕のある同僚へ枠を渡して X を休ませる
+        candDays = [];
+        for (let d = 1; d <= days; d++) if (isWork(shifts[X][d])) candDays.push(d);
       } else {
         candDays = [v.day - 1, v.day].filter(d => d >= 1);
       }
@@ -2645,14 +2650,11 @@ function calculateScore(shifts, allowedShifts, days, P) {
         }
 
         consWork++;
-        const myMaxCons = getMaxConsFor(s); // 個人の連勤上限（基本ライン）
+        const myMaxCons = getMaxConsFor(s); // 個人の連勤上限（超えたら絶対NG）
         if (consWork > myMaxCons) {
-          // 基本ライン+1（例: 5連勤）までは「どうしても時のみ」の🟡（軽い）。
-          // 絶対上限（基本ライン+1）を超える（例: 6連勤）と🔴（重い）。
-          const softOver = 1;                                  // ちょうど+1日ぶん
-          const hardOver = consWork - (myMaxCons + 1);         // +2日め以降
-          score += (P.consSoft || 2000) * Math.min(softOver, consWork - myMaxCons);
-          if (hardOver > 0) score += P.consBase * hardOver + P.consSq * hardOver * hardOver;
+          // 連勤上限超過は🔴（絶対NG）。個人設定で5勤OKにした人だけ5まで許容。
+          const over = consWork - myMaxCons;
+          score += P.consBase * over + P.consSq * over * over;
         }
 
         // 個人希望: 土日休み（土日に出勤したら減点）
@@ -2838,21 +2840,16 @@ function checkViolations(shifts) {
 
       if (isWork(cur)) {
         consWork++;
-        const myMaxCons = getMaxConsFor(s); // 基本ライン（4 or 個人設定）
-        // 基本ライン+1（例:5連勤）= 🟡（どうしても時のみ許容）、+2以上（例:6連勤）= 🔴
-        if (consWork === myMaxCons + 1) {
-          violations.push({
-            staffId: s.id, day: d, type: 'consecutive-soft',
-            message: `⚠️ ${consWork}連勤（基本${myMaxCons}日・どうしても時のみ許容${s.personalMaxCons > 0 ? '・個人設定' : ''}）`,
-            action:  'できれば他の日と入れ替えて休みを挟んでください',
-          });
-        } else if (consWork === myMaxCons + 2) {
+        const myMaxCons = getMaxConsFor(s); // 連勤上限（4 or 個人設定。超えたら🔴絶対NG）
+        if (consWork > myMaxCons && !reportedDays.has('cons')) {
           violations.push({
             staffId: s.id, day: d, type: 'consecutive',
-            message: `🚨 ${consWork}連勤（絶対上限${myMaxCons + 1}日を超過${s.personalMaxCons > 0 ? '・個人設定' : ''}）`,
+            message: `🚨 ${consWork}連勤（上限${myMaxCons}日を超過${s.personalMaxCons > 0 ? '・個人設定' : ''}）`,
             action:  '他の日と入れ替えて休みを挟んでください',
           });
+          reportedDays.add('cons');
         }
+        if (!isWork((shifts[s.id] || {})[d + 1] || '')) reportedDays.delete('cons'); // 連勤が切れたらリセット
 
         // 個人希望（絶対）: 土日休み
         if (wkHard && (_wdv[d] === 0 || _wdv[d] === 6)) {

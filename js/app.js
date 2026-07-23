@@ -671,6 +671,7 @@ const MUST_VIOLATION_TYPES = new Set([
   'understaff', 'skill-late', 'consecutive', 'resp-duplicate', 'hierarchy',
   'vicemanager-absent', 'single-work', 'pref-mismatch', 'role-mismatch',
   'event-absent', 'night-after-work',
+  'off-count', 'late-early', // 公休不足・遅→早(休みなし) も絶対NG
 ]);
 function isMustViolation(type) { return MUST_VIOLATION_TYPES.has(type); }
 

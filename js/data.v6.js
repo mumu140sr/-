@@ -73,7 +73,7 @@ const DEFAULT_PENALTIES = {
   consBase:         6000,  // 連勤が絶対上限（基本+1）を超過（1日あたり・🔴）
   consSq:           1000,  // 連勤超過（二乗項・🔴分のみ）
   consSoft:         2000,  // 基本ライン+1（例:5連勤）＝どうしても時のみ許容の🟡
-  lateEarly:        2500,  // 遅→早インターバル不足
+  lateEarly:        9000,  // 遅→早（休みを挟まず）— 絶対NG級（🔴）
   categorySwitch:   3000,  // 連勤中の時間帯切替（早→遅など）
   badRest:          2500,  // 遅→休→早（リズム悪）
   singleOff:          50,  // 単発休み
@@ -92,7 +92,7 @@ const DEFAULT_PENALTIES = {
   nightAfterWork:     8000, // 夜勤翌日に休みでない（夜勤明けは必ず休み）
   skillLateShortage:  9000, // 遅番に必要スキル保有者が最低ラインを下回る（1人あたり・🔴）
   skillSoftShortage:  1500, // 最低ラインは満たすが目標に届かない（1人あたり・🟡）
-  bandConcentration:  1500, // 早番・遅番の片寄せ（少ない方の時間帯の日数×。切替を根本から減らす）
+  bandConcentration:  5000, // 早番・遅番の片寄せ（少ない方の時間帯の日数×。切替を根本から減らす。検証で最適値）
 };
 
 // アプリケーションの状態
