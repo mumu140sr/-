@@ -2502,9 +2502,9 @@ function calculateScore(shifts, allowedShifts, days, P) {
         });
         if (have < min) {
           score += (min - have) * (P.skillLateShortage || 9000);              // 最低ライン割れ（強）
-          score += (need - min) * (P.skillSoftShortage || 1200);
+          score += (need - min) * (P.skillSoftShortage || 1500);
         } else if (have < need) {
-          score += (need - have) * (P.skillSoftShortage || 1200);              // 目標には届かない（弱）
+          score += (need - have) * (P.skillSoftShortage || 1500);              // 目標には届かない（弱）
         }
       });
     }
