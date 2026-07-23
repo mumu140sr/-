@@ -78,7 +78,8 @@ const DEFAULT_PENALTIES = {
   badRest:          2500,  // 遅→休→早（リズム悪）
   singleOff:          50,  // 単発休み
   singleWork:       5000,  // 単発出勤 — 絶対回避（公休4000より優先、定数系より下）
-  offShortage:       4000,  // 公休不足（1日あたり）— 【優先2】設定した公休は必ず消化させる
+  offShortage:       4000,  // 公休不足（1日あたり・線形）— 【優先2】設定した公休は必ず消化させる
+  offShortageSq:     1500,  // 公休不足の二次項 — 一人への負担集中を強く罰し全員に分散
   longRest:          2000,  // 4連休以上（自動配置分）— 【優先3】連休は最大3日まで
   offSurplus:         400,  // 公休余剰（未使用 — tryConvertSurplusRest ムーブで自然削減）
   balanceDiff:         80,  // 早遅バランスずれ（1日あたり）

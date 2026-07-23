@@ -2782,9 +2782,14 @@ function calculateScore(shifts, allowedShifts, days, P) {
       score += (pairTarget - pairRestRuns) * 800;
     }
 
-    // 公休不足のみペナルティ（余剰は余力として許容、targetedムーブで自然に削減）
+    // 公休不足のみペナルティ（余剰は余力として許容、targetedムーブで自然に削減）。
+    // 二次項を足して「一人に不足が集中」を強く罰する＝負担を全員に分散させる
+    // （例: 1人が-5 は、5人が-1 よりずっと高コストになる）。
     const offDiff = offCount - (s.maxOff || 0);
-    if (offDiff < 0) score += (-offDiff) * P.offShortage;
+    if (offDiff < 0) {
+      const short = -offDiff;
+      score += short * P.offShortage + short * short * (P.offShortageSq || 1500);
+    }
 
     // 副店長: 目標を超えた unlocked 休日にのみペナルティ（offShortage との矛盾を排除）
     // lockedOff / unlockedOff は上のループ内で既に集計済み
