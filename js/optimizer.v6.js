@@ -281,6 +281,7 @@ function suggestViolationFixes(maxItems) {
   });
 
   const baseVios = checkViolations(shifts);
+  const baseMust = countMustVios(baseVios);
   const VPRI = { 'understaff': 0, 'skill-late': 1, 'consecutive': 2, 'single-work': 3, 'hierarchy': 4, 'resp-duplicate': 4 };
   const ordered = baseVios.slice()
     .sort((a, b) => ((VPRI[a.type] ?? 9) - (VPRI[b.type] ?? 9)))
@@ -297,7 +298,10 @@ function suggestViolationFixes(maxItems) {
       if (found) return;
       apply();
       const nv = checkViolations(shifts);
-      if (nv.length < baseVios.length) found = { desc, move, after: nv.length };
+      // 🔴(人員不足など)を増やす提案は絶対に出さない。総違反が減る手のみ採用。
+      if (countMustVios(nv) <= baseMust && nv.length < baseVios.length) {
+        found = { desc, move, after: nv.length };
+      }
       undo();
     };
     const targets = v.staffId ? staff.filter(s => s.id === v.staffId) : staff;
@@ -835,18 +839,23 @@ function violationPolish(shifts, maxRounds) {
   const P = AppState.settings.penalties || {};
 
   let vios     = checkViolations(shifts);
+  let curMust  = countMustVios(vios);
   let curScore = calculateScore(shifts, allowedMap, days, P);
-  // 受理条件: 違反件数が減る手を最優先。同数でもスコアが良くなる手は受理して
-  // 「同点の壁」を越える（(件数, スコア) の辞書式で単調減少するためループしない）
+  // 受理条件（辞書式）: ①🔴(MUST)件数は絶対に増やさない → ②総違反件数が減る →
+  // ③同数ならスコア改善。これにより「リズムを直す代わりに人員不足を作る」等の
+  // 🔴を増やす手は決して採用しない（かんたん調整で定数不足が出る問題の根治）。
   const tryMove = (apply, undo) => {
     apply();
     const nv = checkViolations(shifts);
-    if (nv.length < vios.length) {
-      vios = nv;
-      curScore = calculateScore(shifts, allowedMap, days, P);
-      return true;
+    const nm = countMustVios(nv);
+    if (nm > curMust) { undo(); return false; }        // 🔴が増える手は却下
+    if (nm < curMust) {                                // 🔴が減るなら即採用
+      vios = nv; curMust = nm; curScore = calculateScore(shifts, allowedMap, days, P); return true;
     }
-    if (nv.length === vios.length) {
+    if (nv.length < vios.length) {                     // 🔴同数で総数が減る
+      vios = nv; curScore = calculateScore(shifts, allowedMap, days, P); return true;
+    }
+    if (nv.length === vios.length) {                   // 同点はスコアで前進
       const sc = calculateScore(shifts, allowedMap, days, P);
       if (sc < curScore - 1e-9) { vios = nv; curScore = sc; return true; }
     }
