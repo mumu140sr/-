@@ -488,6 +488,20 @@ function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
     }
     return null;
   };
+  // 玉突き再配置: 休ませる同僚が直接いなくても、X を休ませて空いた枠を
+  // 二部マッチングで連鎖的に埋め直す（働いている人が役を移り、最終的に余の人が入る）。
+  // guaranteeDayStaffingReal は不足日だけを対象にし、余から先に埋めるので、
+  // 人員不足0を保ったまま連鎖の受け渡しで X を休ませられる。辞書式で改善時のみ採用。
+  const tryRestViaCascade = (X, d, curKey) => {
+    if (!_polishMovable(shifts, X, d) || !isWork(shifts[X][d])) return null;
+    const snap = deepCopyShifts(shifts);
+    shifts[X][d] = '休';
+    guaranteeDayStaffingReal(shifts, staffList, reqs, dailyReqs); // 空いた枠を連鎖で再充足
+    const nv = checkViolations(shifts);
+    if (better3(key3Of(nv), curKey)) return { nv };
+    for (const sid in snap) shifts[sid] = snap[sid]; // 改善しなければ全面復帰
+    return null;
+  };
   let vios = checkViolations(shifts);
   let must = countMustVios(vios);
   for (let guard = 0; guard < 16; guard++) {
@@ -519,6 +533,18 @@ function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
       for (const d of candDays) {
         const r = tryRestAndHandoff(X, d, { must, total: vios.length });
         if (r) { vios = r.nv; must = r.nm; changed = true; break; }
+      }
+      // 直接の受け渡しで無理な連勤超過・公休不足は、玉突き再配置（多段の受け渡し）で断つ。
+      // X を休ませ、空いた枠を二部マッチングで連鎖的に埋め直す。余から充足するので
+      // 新たな公休不足を作りにくく、人員不足0も保たれる。
+      if (!changed && (v.type === 'consecutive' || v.type === 'off-count')) {
+        const curKey = key3Of(vios);
+        let tries = 0;
+        for (const d of candDays) {
+          if (tries++ >= 8) break; // 1違反あたり最大8日まで（総当たりの暴走防止）
+          const r = tryRestViaCascade(X, d, curKey);
+          if (r) { vios = r.nv; must = countMustVios(vios); changed = true; break; }
+        }
       }
       // 単発出勤は逆方向も試す: 隣の日に X の出勤を伸ばして連勤化する
       // （X がその日働く代わりに、働いていた Y を休ませる。人数は不変）
