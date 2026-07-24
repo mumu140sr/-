@@ -207,7 +207,7 @@ async function repairSchedule(progressCallback) {
     for (let pass = 0; pass < MAX_PASS && bestViolations.length > 0; pass++) {
       const label = `修復中 ${pass + 1}回目（${scope[Math.min(level, 3)]}）｜ 残りエラー ${bestViolations.length}件 →`;
       const r = await onePass(bestShifts, bestViolations, level, label);
-      if (r.violations.length < bestViolations.length) {
+      if (better3(key3Of(r.violations), key3Of(bestViolations))) {
         bestShifts = r.shifts; bestViolations = r.violations;
         level = 0; // 改善したら再び狭い範囲（安く速い）に戻す
       } else {
@@ -229,7 +229,7 @@ async function repairSchedule(progressCallback) {
       const preSurplus = deepCopyShifts(bestShifts);
       markSurplusRest(bestShifts);
       const nv = checkViolations(bestShifts);
-      if (nv.length <= bestViolations.length) bestViolations = nv;
+      if (!better3(key3Of(bestViolations), key3Of(nv))) bestViolations = nv; // 悪化しなければ採用
       else { for (const sid in preSurplus) bestShifts[sid] = preSurplus[sid]; }
       // 仕上げで改善がなければ、もう1周しても同じなので終了
       if (bestViolations.length >= beforePolish) break;
@@ -238,7 +238,7 @@ async function repairSchedule(progressCallback) {
   progressCallback && progressCallback(100, `修復完了 — 残りエラー ${bestViolations.length}件`);
 
   AppState.generated = true;
-  const improved   = bestViolations.length < origViolations.length;
+  const improved   = better3(key3Of(bestViolations), key3Of(origViolations));
   const finalShifts = improved ? bestShifts : origShifts;
   // 最後の一手（無条件）: 採用する盤面の人員不足を必ず潰す。修復の採否が
   // 「違反総数」基準のため、総数が少ない代わりに不足の残る案を選びうるのを補償する。
@@ -425,6 +425,15 @@ const MUST_TYPES_OPT = new Set([
   'off-count', 'late-early', // ユーザー要望: 公休不足・遅→早(休みなし) も絶対NG
 ]);
 function countMustVios(vios) { return vios.filter(v => MUST_TYPES_OPT.has(v.type)).length; }
+
+// 最優先3項目（ユーザー要望で絶対0）: 人員不足・公休不足・連勤超過。
+// 仕上げ・揺さぶりの採否はこの3項目を最優先し、次に🔴総数、最後に総違反数で比較する
+// （🟡は残ってよいので、🟡を増やしてでも最優先3項目を消す判断ができるようにする）。
+const P3_TYPES_OPT = new Set(['understaff', 'off-count', 'consecutive']);
+function countP3Vios(vios) { return vios.filter(v => P3_TYPES_OPT.has(v.type)).length; }
+// 辞書式キー [最優先3, 🔴総数, 総違反数]。小さいほど良い
+function key3Of(vios) { return [countP3Vios(vios), countMustVios(vios), vios.length]; }
+function better3(a, b) { for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] < b[i]; } return false; }
 
 /**
  * 🔴リズム違反（単発出勤・連勤超過）を、人数を変えずに解消する専用処理。
@@ -716,7 +725,7 @@ function finalPolishLoop(shifts, groups, maxRounds) {
     single();
     fixLockedBoundaryLates(shifts);
     mustFirstSwapPolish(shifts, 8);
-    return sameDaySwapPolish(shifts, 12).length;
+    return sameDaySwapPolish(shifts, 12); // 掃除後の violations 配列を返す
   };
 
   // 揺さぶり: 同じ日に働く2人の役割をランダムに入れ替える（人数不変＝人員不足を作らない）。
@@ -739,20 +748,22 @@ function finalPolishLoop(shifts, groups, maxRounds) {
   };
 
   // まず磨いて基準を作る
-  let best      = polishOnce();
+  let bestVios  = polishOnce();
+  let bestKey   = key3Of(bestVios);            // [最優先3, 🔴総数, 総違反数]
   let bestBoard = deepCopyShifts(shifts);
-  let bestVios  = checkViolations(shifts);
 
-  // 軽い basin hopping: 揺さぶり→再磨き。改善したら採用、しなければ最良へ戻す
-  // （絶対に悪化しない）。連続で改善が無ければ打ち切る（時間対効果のバランス）。
+  // 軽い basin hopping: 揺さぶり→再磨き。辞書式キーで改善したら採用、しなければ最良へ
+  // 戻す（絶対に悪化しない）。最優先3項目(不足/公休/連勤)を最優先で消し、そのためなら
+  // 🟡が増えてもよい。連続で改善が無ければ打ち切る（時間対効果のバランス）。
   const rounds = (maxRounds || 8);
   let stale = 0;
-  for (let round = 0; round < rounds && best > 0; round++) {
+  for (let round = 0; round < rounds && bestKey[2] > 0; round++) {
     const strength = 2 + Math.min(4, stale); // 停滞するほど少し大きく揺さぶる
     perturb(strength, bestVios);
-    const n = polishOnce();
-    if (n < best) {
-      best = n; bestBoard = deepCopyShifts(shifts); bestVios = checkViolations(shifts); stale = 0;
+    const nv = polishOnce();
+    const nk = key3Of(nv);
+    if (better3(nk, bestKey)) {
+      bestKey = nk; bestBoard = deepCopyShifts(shifts); bestVios = nv; stale = 0;
     } else {
       for (const sid in bestBoard) shifts[sid] = Object.assign({}, bestBoard[sid]); // 最良へ復帰
       if (++stale >= 4) break; // 4回連続で改善なし → 打ち切り
@@ -801,7 +812,9 @@ function sameDaySwapPolish(shifts, maxRounds) {
           if (!candsOf[A.id].includes(vb) || !candsOf[B.id].includes(va)) continue;
           shifts[A.id][d] = vb; shifts[B.id][d] = va;
           const nv = checkViolations(shifts);
-          if (nv.length < vios.length) { vios = nv; improved = true; break; }
+          // 最優先3(不足/公休/連勤)→🔴総数→総数の辞書式で改善する入替だけ採用。
+          // 🔴を増やして🟡を減らす（総数だけ下げる）手は採らない。
+          if (better3(key3Of(nv), key3Of(vios))) { vios = nv; improved = true; break; }
           shifts[A.id][d] = va; shifts[B.id][d] = vb; // 戻す
         }
       }
@@ -1325,10 +1338,18 @@ function forceFillUnderstaffing(shifts, locked, staff, allowedShifts, days, dayR
         while (dd <= days && isWork(shifts[s.id][dd])) { n++; dd++; }
         return n;
       };
-      // ① 休み（余含む）から補充。連勤になりにくい人（前後が休みの人）を優先
+      // ① 休み（余含む）から補充。
+      //    まず「余（余剰休み）」を先に消費し、目標公休（公休）は極力崩さない
+      //    ＝人員不足を埋めても公休不足を新たに作らない。同カテゴリ内では
+      //    連勤になりにくい人（前後が休みの人）を優先する。
+      const isSurplus = s => shifts[s.id][d] === '余';
       const resting = staff
         .filter(s => movable(s, d) && canDo(s) && !isWork(shifts[s.id][d]))
-        .sort((a, b) => consLenIfWork(a) - consLenIfWork(b));
+        .sort((a, b) => {
+          const sa = isSurplus(a) ? 0 : 1, sb = isSurplus(b) ? 0 : 1;
+          if (sa !== sb) return sa - sb;               // 余を先に使う
+          return consLenIfWork(a) - consLenIfWork(b);  // 次に連勤になりにくい人
+        });
       for (const s of resting) {
         if (count >= req) break;
         shifts[s.id][d] = sh; count++;
@@ -1397,6 +1418,13 @@ function guaranteeDayStaffingReal(shifts, staffList, reqs, dailyReqs) {
       if ((rq && isOff(rq)) || shifts[s.id][d] === '有') return; // その日は出られない
       if (fx || (rq && isWork(rq))) { lockedRole[shifts[s.id][d]] = (lockedRole[shifts[s.id][d]] || 0) + 1; return; }
       avail.push(s);
+    });
+    // マッチングで休みの人を引き込む際の優先順位: 既に出勤中(0) → 余剰休み「余」(1)
+    // → 目標公休など(2)。これで不足を埋めるとき「余」を先に消費し、目標公休を
+    // 崩して公休不足を新たに作ることを避ける（最大マッチングの充足性は不変）。
+    avail.sort((a, b) => {
+      const rank = s => isWork(shifts[s.id][d]) ? 0 : (shifts[s.id][d] === '余' ? 1 : 2);
+      return rank(a) - rank(b);
     });
     const occ = Object.assign({}, lockedRole);
     const slots = []; // 割り当て対象の空きスロット（役職名の配列）
