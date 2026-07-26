@@ -658,31 +658,35 @@ function setupResultPanel() {
       if ($bar)  $bar.style.width = '0%';
       if ($text) $text.textContent = 'エラー箇所を修復中...';
 
+      const before = AppState.violations.length;
+      const backup = JSON.parse(JSON.stringify(AppState.shifts));
       try {
-        const runner = (typeof repairScheduleViaWorker === 'function')
-          ? repairScheduleViaWorker : repairSchedule;
-        const res = await runner((pct, msg) => {
+        if (typeof optimizeScheduleMILP !== 'function') throw new Error('数理最適化モジュール未読込（再読込してください）');
+        // 🔒で固定したセルは保持し、それ以外を数理最適化で最適化し直す（悪化しない保証つき）
+        const res = await optimizeScheduleMILP((pct, msg) => {
           if ($bar)  $bar.style.width = pct + '%';
-          if ($text) $text.textContent = msg;
+          if ($text) $text.textContent = '数理最適化で修復中: ' + msg;
         });
-
-        if ($bar) $bar.style.width = '100%';
-        renderResultTable();
-        document.getElementById('reportCard').style.display = 'block';
-        renderReport({ success: res.success, score: res.violations.length, violations: res.violations });
-
-        if (res.improved) {
-          if ($text) $text.textContent = `修復完了: 違反 ${res.before}件 → ${res.after}件`;
-          toast(`✅ エラーを ${res.before - res.after}件 減らしました（${res.before}→${res.after}件）`, 'success', 5000);
+        const after = res.violations.length;
+        if (after < before) {
+          if ($bar) $bar.style.width = '100%';
+          renderResultTable();
+          document.getElementById('reportCard').style.display = 'block';
+          renderReport({ success: res.success, score: after, violations: res.violations });
+          if ($text) $text.textContent = `修復完了: 違反 ${before}件 → ${after}件`;
+          toast(`✅ 数理最適化でエラーを ${before - after}件 減らしました（🔒は保持）`, 'success', 5000);
         } else {
-          // 悪化させないので元のまま。積んだ履歴は無駄なので捨てる
+          // 改善なし → 完全に元へ戻す（悪化させない）
+          AppState.shifts = backup; AppState.violations = checkViolations(backup);
           if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-          if ($text) $text.textContent = `自動では改善できませんでした（違反 ${res.before}件）`;
-          toast('自動では改善できませんでした。残りは手動修正が必要です', 'info', 5000);
+          renderResultTable();
+          if ($text) $text.textContent = `これ以上は改善できませんでした（違反 ${before}件）`;
+          toast('これ以上は数理最適化でも減らせませんでした。関係する🔒を解除すると改善する場合があります', 'info', 6000);
         }
         saveToStorage();
       } catch (e) {
         console.error(e);
+        AppState.shifts = backup; AppState.violations = checkViolations(backup);
         if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
         toast('修復中にエラーが発生しました: ' + e.message, 'error');
       } finally {
@@ -712,21 +716,18 @@ function setupResultPanel() {
 
       btnQuick.disabled = true;
       btnQuick.textContent = '⏳ 調整中...';
-      // 描画を1フレーム挟んでからサッと実行（violationPolish は焼きなましなしの高速探索）
-      setTimeout(() => {
+      // 🔒は保持したまま、短時間の数理最適化でサッと再調整（悪化しない保証つき）
+      (async () => {
         try {
-          violationPolish(AppState.shifts, 4);
-          markSurplusRest(AppState.shifts); // 公休超過を余に整える
-          AppState.violations = checkViolations(AppState.shifts);
-          if (AppState.violations.length >= before) {
-            // 改善なし → 完全に元へ戻す
+          if (typeof optimizeScheduleMILP !== 'function') throw new Error('数理最適化モジュール未読込（再読込してください）');
+          const res = await optimizeScheduleMILP(() => {}, { timeLimit: 25 });
+          if (res.violations.length >= before) {
             AppState.shifts = backup;
             AppState.violations = checkViolations(backup);
             if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-            toast('🧩では直せませんでした（変更なし）。編集済み🔒のマスは動かせないため、' +
-                  'より強力な「🛠 エラーを自動修正」を試すか、関係する🔒を解除してください', 'info', 6000);
+            toast('🧩では直せませんでした（変更なし）。より時間をかける「🛠 エラーを自動修正」を試すか、関係する🔒を解除してください', 'info', 6000);
           } else {
-            toast(`🧩 エラー ${before}件 → ${AppState.violations.length}件 に調整（Ctrl+Zで戻せます）`, 'success', 4000);
+            toast(`🧩 エラー ${before}件 → ${res.violations.length}件 に調整（🔒は保持・Ctrl+Zで戻せます）`, 'success', 4000);
           }
           renderResultTable();
           const reportCard = document.getElementById('reportCard');
@@ -738,13 +739,14 @@ function setupResultPanel() {
         } catch (e) {
           console.error(e);
           AppState.shifts = backup;
+          AppState.violations = checkViolations(backup);
           if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
           toast('調整中にエラーが発生しました: ' + e.message, 'error');
         } finally {
           btnQuick.disabled = false;
           btnQuick.textContent = '🧩 かんたん調整';
         }
-      }, 50);
+      })();
     });
   }
 

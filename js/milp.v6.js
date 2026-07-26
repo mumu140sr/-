@@ -20,7 +20,8 @@ function _milpPayload() {
   };
 }
 
-function optimizeScheduleMILP(onProgress) {
+function optimizeScheduleMILP(onProgress, opts) {
+  const timeLimitOverride = (opts && opts.timeLimit) || null;
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
@@ -49,6 +50,6 @@ function optimizeScheduleMILP(onProgress) {
       if (m.type === 'error') { cleanup(); worker.terminate(); reject(new Error(m.message || '数理最適化エラー')); return; }
     };
     worker.onerror = (err) => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化Workerエラー: ' + (err.message || 'ソルバーの読込みに失敗しました'))); };
-    worker.postMessage({ type: 'milp', appState: _milpPayload() });
+    worker.postMessage({ type: 'milp', appState: _milpPayload(), timeLimitOverride });
   });
 }
