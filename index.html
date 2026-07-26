@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=96" />
+<link rel="stylesheet" href="css/style.css?v=97" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -61,11 +61,6 @@
         <label>連休の目安回数（月・全体）</label>
         <input type="number" id="pairRestTarget" min="0" max="10" value="0" style="width:70px" />
         <span class="hint">全員に月◯回の2連休以上を目安として入れます（0=指定なし。スタッフ個人の設定があればそちらを優先）</span>
-      </div>
-      <div class="form-row">
-        <label>焼きなまし反復回数</label>
-        <input type="number" id="maxAttempts" min="10000" max="1000000" step="10000" value="500000" />
-        <span class="hint">多いほど精度UP、時間も増えます（推奨: 500000）</span>
       </div>
     </div>
 
@@ -238,24 +233,11 @@
   <section class="tab-panel" id="panel-generate">
     <h2>⑤ 自動生成</h2>
     <div class="card">
-      <p>設定をもとにシフトを自動生成します。生成方式を選べます。</p>
+      <p>設定をもとに<b>数理最適化</b>で、数学的に最良のシフトを計算します。</p>
       <div class="form-row">
-        <label>生成方式</label>
-        <select id="genMethod" style="min-width:230px">
-          <option value="anneal" selected>焼きなまし法（従来・複数案）</option>
-          <option value="milp">数理最適化（ベータ・厳密／推奨）</option>
-        </select>
-        <span class="hint">数理最適化は「数学的に最良の表」を計算します（初回だけソルバー読込あり）。</span>
-      </div>
-      <div class="form-row">
-        <label>数理最適化の時間上限（秒）</label>
+        <label>計算時間の上限（秒）</label>
         <input type="number" id="milpTimeLimit" min="15" max="540" step="15" value="90" style="width:70px" />
-        <span class="hint">【数理最適化用】この秒数までに“ほぼ最良の表”を返します。遅いと感じたら短く（例:30〜60秒）。データが大きいほど時間がかかります。</span>
-      </div>
-      <div class="form-row">
-        <label>生成する案の数</label>
-        <input type="number" id="numCandidates" min="1" max="12" value="5" style="width:60px" />
-        <span class="hint">【焼きなまし用】複数案を生成して最も違反が少ない案を自動採用します（多いほど時間がかかります）</span>
+        <span class="hint">この秒数までに“ほぼ最良の表”を返します。遅いと感じたら短く（例:30〜60秒）。データが大きいほど時間がかかります。初回だけソルバー読込で数秒余分にかかります。</span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="btnGenerate" class="btn btn-large btn-primary">🚀 シフト自動生成を実行</button>
@@ -337,12 +319,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=96"></script>
-<script src="js/optimizer.v6.js?v=96"></script>
-<script src="js/worker-client.v6.js?v=96"></script>
-<script src="js/ai-explain.v6.js?v=96"></script>
-<script src="js/ui.v6.js?v=96"></script>
-<script src="js/milp.v6.js?v=96"></script>
-<script src="js/app.v6.js?v=96"></script>
+<script src="js/data.v6.js?v=97"></script>
+<script src="js/optimizer.v6.js?v=97"></script>
+<script src="js/worker-client.v6.js?v=97"></script>
+<script src="js/ai-explain.v6.js?v=97"></script>
+<script src="js/ui.v6.js?v=97"></script>
+<script src="js/milp.v6.js?v=97"></script>
+<script src="js/app.v6.js?v=97"></script>
 </body>
 </html>

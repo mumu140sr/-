@@ -124,213 +124,43 @@ function setupGeneratePanel() {
     $area.style.display = 'block';
     $report.style.display = 'none';
     $bar.style.width = '0%';
-    $text.textContent = 'バックグラウンドで初期解を生成中...';
+    $text.textContent = '数理最適化の準備中...';
 
     const startedAt = Date.now();
     try {
-      // 生成方式: 数理最適化(ベータ) が選ばれていれば MILP で解く
-      const method = (document.getElementById('genMethod') || {}).value || 'anneal';
-      if (method === 'milp' && typeof optimizeScheduleMILP === 'function') {
-        try {
-          const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + msg; };
-          const res = await optimizeScheduleMILP(prog);
-          $bar.style.width = '100%';
-          $text.textContent = '数理最適化: 結果を画面に表示中...';
-          try {
-            renderReport({ success: res.success, score: res.score, violations: res.violations,
-              candidateSummary: `数理最適化（厳密解）で生成 — 違反${res.violations.length}件` });
-          } catch (rErr) { console.error('[generate] レポート表示でエラー（表は表示します）:', rErr); }
-          renderResultTable();
-          toast(`数理最適化で生成しました（違反${res.violations.length}件）`, res.success ? 'success' : 'info', 5000);
-          return; // finally でボタン復帰
-        } catch (milpErr) {
-          console.error('[generate] 数理最適化に失敗、焼きなましにフォールバック:', milpErr);
-          toast('数理最適化に失敗したため、焼きなましで生成します（' + milpErr.message + '）', 'info', 6000);
-          // 下の焼きなまし処理へフォールバック
-        }
+      // 生成は数理最適化(MILP)のみ。焼きなまし法による生成は廃止。
+      if (typeof optimizeScheduleMILP !== 'function') {
+        throw new Error('数理最適化モジュールが未読込です。ページを再読み込み（Ctrl+Shift+R）してください。');
       }
-      // Worker 版を使う（フォールバック付き）
-      const runner = (typeof optimizeScheduleViaWorker === 'function')
-        ? optimizeScheduleViaWorker
-        : optimizeSchedule;
-
-      // 複数案を生成して最良案を採用
-      const numCand = Math.max(1, Math.min(12,
-        parseInt(document.getElementById('numCandidates')?.value) || 3));
-      AppState.settings.numCandidates = numCand;
-
-      let candidates = [];
-      const canParallel = numCand > 1 &&
-        typeof optimizeCandidatesParallel === 'function' && typeof Worker !== 'undefined';
-      if (canParallel) {
-        // 複数案を並列 Worker で同時生成（マルチコア活用 → 1案分の時間で全案完成）
-        try {
-          candidates = await optimizeCandidatesParallel(numCand, (pct, msg) => {
-            $bar.style.width = pct + '%';
-            $text.textContent = msg;
-          });
-        } catch (e) {
-          console.warn('並列生成に失敗、逐次生成にフォールバック:', e);
-          candidates = [];
-        }
-      }
-      if (candidates.length === 0) {
-        // フォールバック: 逐次生成
-        for (let ci = 0; ci < numCand; ci++) {
-          const res = await runner((pct, msg) => {
-            const mapped = Math.floor((ci * 100 + pct) / numCand);
-            $bar.style.width = mapped + '%';
-            $text.textContent = numCand > 1 ? `案${ci + 1}/${numCand}: ${msg}` : msg;
-          });
-          candidates.push({
-            result:     res,
-            shifts:     AppState.shifts,
-            violations: AppState.violations,
-          });
-          // 十分良い案（違反2件以下）が出たら早期終了
-          if (res.violations.length <= 2) break;
-        }
-      }
-
-      // 最良案の比較キー: 【最優先】人員不足＋公休不足＋連勤超過の件数 → 🔴総数 → 総違反数
-      const PRIORITY3 = ['understaff', 'off-count', 'consecutive'];
-      const p3Count = vs => vs.filter(v => PRIORITY3.includes(v.type)).length;
-      const mustCount = vs => (typeof isMustViolation === 'function')
-        ? vs.filter(v => isMustViolation(v.type)).length : vs.length;
-      const keyOf3 = vs => [p3Count(vs), mustCount(vs), vs.length];
-      const betterKey = (a, b) => {
-        for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] < b[i]; }
-        return false;
-      };
-
-      let bestIdx = 0;
-      candidates.forEach((c, i) => {
-        if (betterKey(keyOf3(c.violations), keyOf3(candidates[bestIdx].violations))) bestIdx = i;
-      });
-      const best = candidates[bestIdx];
-      AppState.shifts     = best.shifts;
-      AppState.violations = best.violations;
-      AppState.generated  = true;
-      const result = best.result;
-      result.candidateSummary = candidates.length > 1
-        ? candidates.map((c, i) =>
-            `案${i + 1}: 違反${c.violations.length}件 / スコア${c.result.score}${i === bestIdx ? ' ←採用' : ''}`).join('　')
-        : null;
-
-      // 🔴絶対NG（人員不足・スキル・連勤超過・単発出勤など）の残数。
-      // 重い自動修正・再生成は「🔴が残るときだけ」動かして時間を節約する
-      // （🟡注意 は "できれば" なので、消したいときは手動で 🛠 自動修正 を使う）。
-      const mustLeft = vs => (typeof isMustViolation === 'function')
-        ? vs.filter(v => isMustViolation(v.type)).length : vs.length;
-
-      // 仕上げ: 🔴が残っていれば自動でエラー修正まで走らせて最良の状態にする
-      if (mustLeft(best.violations) > 0) {
-        $text.textContent = '仕上げ中（エラーを自動修正）...';
-        try {
-          const repairRunner = (typeof repairScheduleViaWorker === 'function')
-            ? repairScheduleViaWorker : repairSchedule;
-          const rep = await repairRunner((pct, msg) => {
-            $bar.style.width = pct + '%';
-            $text.textContent = msg;
-          });
-          // repair は AppState.shifts/violations を更新済み。結果に反映
-          const beforeN = result.violations.length;
-          result.violations = AppState.violations;
-          result.score      = AppState.violations.length;
-          result.success    = AppState.violations.length === 0;
-          if (rep && rep.improved) {
-            result.candidateSummary = (result.candidateSummary ? result.candidateSummary + '　' : '') +
-              `自動修正: 違反${beforeN}→${AppState.violations.length}件`;
-          }
-        } catch (repErr) {
-          console.error('[generate] 仕上げの自動修正に失敗（生成結果のまま続行）:', repErr);
-          toast('仕上げの自動修正に失敗しました。🛠 エラーを自動修正 を手動でお試しください', 'info', 5000);
-        }
-      }
-
-      // B. 🔴絶対NG が残る間、時間予算いっぱい（最大約9.5分）まで案を作り続け、
-      // 🔴が最少の案を残す（🔴同数なら総違反が少ない方）。🔴が0なら即終了。
-      if (mustLeft(result.violations) > 0) {
-        const BUDGET_MS = 9.5 * 60 * 1000; // 全体10分に収まるよう少し余裕を持たせる
-        const repairRunner = (typeof repairScheduleViaWorker === 'function')
-          ? repairScheduleViaWorker : repairSchedule;
-        // 比較キー: 【最優先3項目】人員不足・公休不足・連勤超過 → 🔴総数 → 総違反数
-        const keyOf = keyOf3;
-        const better = betterKey;
-
-        let bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
-        let bestVios   = AppState.violations.slice();
-        let bestKey    = keyOf(bestVios);
-        let round = 0;
-
-        while (bestKey[1] > 0 && (Date.now() - startedAt) < BUDGET_MS) {
-          round++;
-          const note = `｜現在の最良 最優先${bestKey[0]}件・🔴${bestKey[1]}件（保持中・悪化しません）`;
-          const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = `🔴を減らすため別案を生成中（${round}巡目）… ${msg}${note}`; };
-          try {
-            // 1巡ごとに複数案を並列生成し、そのバッチの最良を採用
-            let got = null;
-            if (canParallel) {
-              const cands = await optimizeCandidatesParallel(numCand, prog);
-              if (cands && cands.length) {
-                let bi = 0;
-                cands.forEach((c, i) => { if (better(keyOf(c.violations), keyOf(cands[bi].violations))) bi = i; });
-                AppState.shifts = cands[bi].shifts; AppState.violations = cands[bi].violations; got = true;
-              }
-            }
-            if (!got) { await runner(prog); }
-            // 🔴が残るなら自動修正で仕上げ
-            if (mustLeft(AppState.violations) > 0) {
-              await repairRunner((pct, msg) => { $text.textContent = `🔴を減らすため仕上げ中（${round}巡目）… ${msg}${note}`; });
-            }
-            const key = keyOf(AppState.violations);
-            if (better(key, bestKey)) {
-              bestKey = key;
-              bestShifts = JSON.parse(JSON.stringify(AppState.shifts));
-              bestVios   = AppState.violations.slice();
-            }
-          } catch (_) { /* この巡回は失敗、最良を維持 */ }
-        }
-        AppState.shifts     = bestShifts;
-        AppState.violations = bestVios;
-        result.violations   = bestVios;
-        result.score        = bestVios.length;
-        result.success      = bestVios.length === 0;
-        result.candidateSummary = (result.candidateSummary ? result.candidateSummary + '　' : '') +
-          `時間予算内で${round}巡探索 → 最良 最優先${bestKey[0]}件・🔴${bestKey[1]}件 / 総${bestVios.length}件`;
-      }
-
+      const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + msg; };
+      const res = await optimizeScheduleMILP(prog);
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
-      $text.textContent = `完了！ 最終スコア: ${result.score} (${elapsed}秒)`;
-
-      // 生成直後の状態を履歴の出発点にする（以後の手動編集を Ctrl+Z で戻せる）
+      $text.textContent = `完了！ 違反 ${res.violations.length}件（${elapsed}秒）`;
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
-
-      // レポート表示
       $report.style.display = 'block';
-      renderReport(result);
-
-      // 自動でシフト表タブへ → 余剰があればポップアップ案内
+      try {
+        renderReport({ success: res.success, score: res.score, violations: res.violations,
+          candidateSummary: `数理最適化で生成 — 違反${res.violations.length}件（${elapsed}秒）` });
+      } catch (rErr) { console.error('[generate] レポート表示でエラー（表は表示します）:', rErr); }
+      renderResultTable();
       setTimeout(() => {
-        document.querySelector('.tab[data-tab="result"]').click();
+        const rt = document.querySelector('.tab[data-tab="result"]'); if (rt) rt.click();
         if (typeof showSurplusPopup === 'function') showSurplusPopup();
       }, 800);
-
-      if (result.success) {
-        toast('🎉 シフト生成完了！全ルールクリア！', 'success', 5000);
-      } else {
-        toast(`シフト生成完了（${result.violations.length}件の違反あり）`, 'info', 5000);
-      }
+      if (res.success) toast('🎉 シフト生成完了！全ルールクリア！', 'success', 5000);
+      else toast(`シフト生成完了（違反${res.violations.length}件）`, 'info', 5000);
       saveToStorage();
+      return;
     } catch (e) {
       console.error(e);
       if (e && /terminated|cancel/i.test(e.message || '')) {
-        toast('最適化を中止しました', 'info');
-        $text.textContent = '中止しました';
+        toast('生成を中止しました', 'info'); $text.textContent = '中止しました';
       } else {
-        toast('エラーが発生しました: ' + e.message, 'error');
+        toast('数理最適化に失敗しました: ' + e.message, 'error', 7000);
+        $text.textContent = 'エラー: ' + e.message;
       }
+      return;
     } finally {
       btn.disabled = false;
       btn.textContent = '🚀 シフト自動生成を実行';

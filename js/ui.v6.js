@@ -113,7 +113,7 @@ function setupSettingsPanel() {
   $maxCons.value     = AppState.settings.maxConsecutive;
   $forbidLE.checked  = AppState.settings.forbidLateEarly;
   $penaltySO.checked = AppState.settings.penaltySingleOff;
-  $maxAtt.value      = AppState.settings.maxAttempts;
+  if ($maxAtt) $maxAtt.value = AppState.settings.maxAttempts; // 焼きなまし廃止でUIから削除済み（後方互換で保護）
   const $pairRest = document.getElementById('pairRestTarget');
   if ($pairRest) {
     $pairRest.value = AppState.settings.pairRestTarget || 0;
@@ -154,7 +154,7 @@ function setupSettingsPanel() {
     AppState.settings.penaltySingleOff = $penaltySO.checked;
     autoSave();
   });
-  $maxAtt.addEventListener('change', () => {
+  if ($maxAtt) $maxAtt.addEventListener('change', () => {
     AppState.settings.maxAttempts = parseInt($maxAtt.value) || 200000;
     autoSave();
   });
