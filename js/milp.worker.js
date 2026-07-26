@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=94', 'optimizer.js?v=94', 'milp-core.js?v=94');
+self.importScripts('data.js?v=95', 'optimizer.js?v=95', 'milp-core.js?v=95');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=94'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=95'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -51,10 +51,14 @@ self.addEventListener('message', async (e) => {
       MILP.applyGroupSolution(m, sol, shifts);
       gi++;
     }
-    post(85, '仕上げ中（公休の整理・検証）...');
+    post(85, '仕上げ中：公休を整理中...');
     AppState.shifts = shifts;
-    if (typeof markSurplusRest === 'function') markSurplusRest(shifts);
-    const violations = checkViolations(shifts);
+    try { if (typeof markSurplusRest === 'function') markSurplusRest(shifts); }
+    catch (e1) { self.postMessage({ type: 'progress', pct: 88, label: '公休整理をスキップ（' + e1.message + '）' }); }
+    post(92, '仕上げ中：違反を検証中...');
+    let violations = [];
+    try { violations = checkViolations(shifts); }
+    catch (e2) { violations = []; self.postMessage({ type: 'progress', pct: 95, label: '検証をスキップ（' + e2.message + '）' }); }
     AppState.violations = violations;
     self.postMessage({ type: 'done', shifts, violations });
   } catch (err) {

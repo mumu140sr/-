@@ -135,8 +135,11 @@ function setupGeneratePanel() {
           const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + msg; };
           const res = await optimizeScheduleMILP(prog);
           $bar.style.width = '100%';
-          renderReport({ success: res.success, score: res.score, violations: res.violations,
-            candidateSummary: `数理最適化（厳密解）で生成 — 違反${res.violations.length}件` });
+          $text.textContent = '数理最適化: 結果を画面に表示中...';
+          try {
+            renderReport({ success: res.success, score: res.score, violations: res.violations,
+              candidateSummary: `数理最適化（厳密解）で生成 — 違反${res.violations.length}件` });
+          } catch (rErr) { console.error('[generate] レポート表示でエラー（表は表示します）:', rErr); }
           renderResultTable();
           toast(`数理最適化で生成しました（違反${res.violations.length}件）`, res.success ? 'success' : 'info', 5000);
           return; // finally でボタン復帰
