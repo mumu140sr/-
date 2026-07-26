@@ -3530,6 +3530,64 @@ function runAIDiagnosis() {
   });
   if (surplus === Infinity) surplus = 0;
 
+  // ── 3.6. スキル（営業など）の日別“物理的”実現可能性（避けられる/避けられない判定）──
+  //   各日、そのスキルを持ち対象帯（早/遅）で働ける人が何人いるか（希望休・有給・固定・早遅可を考慮）。
+  //   利用可能人数が最低ラインを割る日=🔴、目標を割る日=🟡は、どう配置しても避けられない（人員構成の限界）。
+  (AppState.skills || []).forEach(sk => {
+    const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
+    if (!need) return;
+    const min   = (sk.min != null && sk.min >= 0 && sk.min <= need) ? sk.min : need;
+    const early = (sk.target || 'late') === 'early';
+    const bandLabel = early ? '早番' : '遅番';
+    const holders = staff.filter(s => (s.skills || []).includes(sk.name));
+    const inBand = k => early ? isEarlyCategory(k) : isLate(k);
+    const belowMin = [], belowTarget = [];
+    for (let d = 1; d <= days; d++) {
+      let avail = 0;
+      holders.forEach(s => {
+        const rq = (AppState.requests[s.id] || {})[d];
+        if (rq && isOff(rq)) return;                                   // 希望休・有給などで不在
+        const fx = (AppState.fixedShifts[s.id] || {})[d];
+        if (fx) { if (isWork(fx) && inBand(fx) && !isTraining(fx)) avail++; return; } // 固定シフト
+        const canBand = (s.allowedShifts || []).some(k => inBand(k) && !isTraining(k));
+        const prefOk  = early ? (!s.prefs || s.prefs.includes('早可')) : (!s.prefs || s.prefs.includes('遅可'));
+        if (canBand && prefOk) avail++;
+      });
+      if (avail < min) belowMin.push(d);
+      else if (avail < need) belowTarget.push(d);
+    }
+    const daysStr = arr => (arr.length > 12 ? arr.slice(0, 12).join('・') + `…（計${arr.length}日）` : arr.join('・')) + '日';
+    if (belowMin.length) {
+      results.push({
+        level: 'error',
+        title: `🔴【避けられない】${sk.name}が最低${min}人に届かない日 ${belowMin.length}日`,
+        detail: `${bandLabel}に「${sk.name}」できる人が最低${min}人必要ですが、次の日は出られる保有者が${min}人未満です` +
+          `（希望休・有給・固定を除いた実数／保有者は全${holders.length}人）:\n${daysStr(belowMin)}\n` +
+          `→ これらの日はどう配置しても不足します（生成では消せません）。`,
+        suggestion: `該当日の希望休・有給をずらす、または「${sk.name}」ができる人を増やすと解消します。`,
+      });
+    }
+    if (belowTarget.length) {
+      results.push({
+        level: 'warning',
+        title: `🟡【避けられない】${sk.name}が目標${need}人に届かない日 ${belowTarget.length}日`,
+        detail: `${bandLabel}に「${sk.name}」を${need}人置きたい日のうち、出られる保有者が${need}人未満なのは:\n${daysStr(belowTarget)}\n` +
+          `→ 最低ライン（${min}人）は満たせるので🟡。人員的な限界なので、この🟡は残っても問題ありません。`,
+        suggestion: `完全に無くすには保有者を増やすか、該当日だけ「日別必要人数」で目標を${Math.max(min, need - 1)}人に下げてください。`,
+      });
+    }
+    if (!belowMin.length && !belowTarget.length && holders.length) {
+      results.push({
+        level: 'ok',
+        title: `✅ ${sk.name} は人員的には毎日 目標${need}人を出せます`,
+        detail: `全${days}日で、${bandLabel}に出られる「${sk.name}」保有者は常に${need}人以上います（＝${sk.name}だけを見れば可能）。\n` +
+          `→ それでもスキル不足が出る場合は、保有者が同じ日に他の役割（早責など）や公休と取り合いになるのが原因で、\n` +
+          `　“避けられる”タイプです。案数を増やす・再生成・🛠自動修正で減らせる可能性が高いです。`,
+        suggestion: null,
+      });
+    }
+  });
+
   // ── 3.5. イベント整合性（希望休との衝突） ──────────────────
   (AppState.events || []).forEach(ev => {
     if (!ev || !ev.day) return;

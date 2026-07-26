@@ -56,10 +56,52 @@ function setupHeaderActions() {
   });
 }
 
+// 実現性チェック（生成前）: 各エラーが「避けられる/避けられない」かを判定して表示
+function showFeasibilityModal() {
+  if (!AppState.staff.length || !AppState.settings.targetMonth) {
+    toast('スタッフと対象年月を設定してください', 'error');
+    return;
+  }
+  const items = (typeof runAIDiagnosis === 'function') ? runAIDiagnosis() : [];
+  const colors = {
+    error:   { bg: '#fff5f5', border: '#fc8181', title: '#742a2a', body: '#9b2335' },
+    warning: { bg: '#fffaf0', border: '#f6ad55', title: '#744210', body: '#975a16' },
+    info:    { bg: '#ebf8ff', border: '#63b3ed', title: '#2a4365', body: '#2c5282' },
+    ok:      { bg: '#f0fff4', border: '#68d391', title: '#22543d', body: '#276749' },
+  };
+  const body = items.map(d => {
+    const c = colors[d.level] || colors.info;
+    const detail = escapeHtml(d.detail || '').replace(/\n/g, '<br>');
+    return `<div style="background:${c.bg};border-left:4px solid ${c.border};padding:10px 12px;margin:8px 0;border-radius:6px">
+      <div style="font-weight:600;color:${c.title};margin-bottom:4px">${escapeHtml(d.title)}</div>
+      <div style="color:${c.body};font-size:13px;line-height:1.6">${detail}</div>
+      ${d.suggestion ? `<div style="margin-top:6px;color:#2c5282;font-size:13px">💡 ${escapeHtml(d.suggestion)}</div>` : ''}
+    </div>`;
+  }).join('') || '<p>データが不足しています。</p>';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+  modal.innerHTML = `<div style="background:#fff;border-radius:12px;max-width:720px;width:100%;max-height:85vh;overflow:auto;padding:20px">
+    <h3 style="margin:0 0 4px">🔍 実現性チェック（避けられる / 避けられない）</h3>
+    <p class="hint" style="margin:0 0 12px">
+      🔴🟡【避けられない】＝人員構成の限界。配置を変えても消せません（設定/人員の見直しが必要）。<br>
+      それ以外のエラーは「避けられる」＝生成や🛠自動修正で消せます。
+    </p>
+    ${body}
+    <div style="text-align:right;margin-top:12px"><button id="feasClose" class="btn btn-primary">閉じる</button></div>
+  </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.querySelector('#feasClose').addEventListener('click', close);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+}
+
 // ⑤ 自動生成パネル
 function setupGeneratePanel() {
   const btn = document.getElementById('btnGenerate');
   const btnCancel = document.getElementById('btnCancelGenerate');
+  const btnFeas = document.getElementById('btnFeasibility');
+  if (btnFeas) btnFeas.addEventListener('click', showFeasibilityModal);
 
   btn.addEventListener('click', async () => {
     if (AppState.staff.length === 0) {

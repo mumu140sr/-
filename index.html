@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=91" />
+<link rel="stylesheet" href="css/style.css?v=92" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -246,9 +246,13 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="btnGenerate" class="btn btn-large btn-primary">🚀 シフト自動生成を実行</button>
+        <button id="btnFeasibility" class="btn btn-large" style="background:#38a169;color:#fff">🔍 実現性チェック（生成前）</button>
         <button id="btnCancelGenerate" class="btn btn-large" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button>
       </div>
-      <p class="hint" style="margin-top:8px">バックグラウンドで処理されるため、実行中もアプリは操作可能です。</p>
+      <p class="hint" style="margin-top:8px">
+        バックグラウンドで処理されるため、実行中もアプリは操作可能です。<br>
+        「🔍 実現性チェック」を押すと、<b>生成する前に</b>「どのエラーが人員的に避けられないか／配置で避けられるか」を判定します。
+      </p>
       <div id="progressArea" style="display:none">
         <div class="progress-info">
           <span id="progressText">準備中...</span>
@@ -320,11 +324,11 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=91"></script>
-<script src="js/optimizer.v6.js?v=91"></script>
-<script src="js/worker-client.v6.js?v=91"></script>
-<script src="js/ai-explain.v6.js?v=91"></script>
-<script src="js/ui.v6.js?v=91"></script>
-<script src="js/app.v6.js?v=91"></script>
+<script src="js/data.v6.js?v=92"></script>
+<script src="js/optimizer.v6.js?v=92"></script>
+<script src="js/worker-client.v6.js?v=92"></script>
+<script src="js/ai-explain.v6.js?v=92"></script>
+<script src="js/ui.v6.js?v=92"></script>
+<script src="js/app.v6.js?v=92"></script>
 </body>
 </html>
