@@ -424,7 +424,22 @@ const MUST_TYPES_OPT = new Set([
   'event-absent', 'night-after-work',
   'off-count', 'late-early', // ユーザー要望: 公休不足・遅→早(休みなし) も絶対NG
 ]);
-function countMustVios(vios) { return vios.filter(v => MUST_TYPES_OPT.has(v.type)).length; }
+// 設定不可（安全のため常に既定）のルール: 人員不足・公休不足・連勤超過・担当外シフト。
+const RULE_LOCKED = new Set(['understaff', 'off-count', 'consecutive', 'role-mismatch']);
+// ルールの強弱レベルを取得: 'off' | 'should' | 'must'。
+// 固定ルールと未設定は既定分類（MUST_TYPES_OPT にあれば must、無ければ should）。
+function getRuleLevel(type) {
+  if (!RULE_LOCKED.has(type)) {
+    const cfg = (AppState.settings && AppState.settings.ruleLevels) || {};
+    const v = cfg[type];
+    if (v === 'off' || v === 'should' || v === 'must') return v;
+  }
+  return MUST_TYPES_OPT.has(type) ? 'must' : 'should';
+}
+// そのルールが有効か（off でない）。スコアのペナルティ抑制に使う。
+function ruleOn(type) { return getRuleLevel(type) !== 'off'; }
+// 🔴（must）扱いの違反数。設定でmustにした/した分を動的に数える。
+function countMustVios(vios) { return vios.filter(v => getRuleLevel(v.type) === 'must').length; }
 
 // 最優先3項目（ユーザー要望で絶対0）: 人員不足・公休不足・連勤超過。
 // 仕上げ・揺さぶりの採否はこの3項目を最優先し、次に🔴総数、最後に総違反数で比較する
@@ -2627,14 +2642,14 @@ function calculateScore(shifts, allowedShifts, days, P) {
     // 毎日、副店長が出勤 or 早責・遅責の両方がチーフ以上で埋まっていること
     const chiefCovered = respEarlyPerson && respLatePerson &&
       getStaffPriority(respEarlyPerson) <= 2 && getStaffPriority(respLatePerson) <= 2;
-    if (hasVice && viceWorking === 0 && !chiefCovered) score += (P.viceManagerDailyAbsent || 9000);
+    if (hasVice && viceWorking === 0 && !chiefCovered && ruleOn('vicemanager-absent')) score += (P.viceManagerDailyAbsent || 9000);
     shiftKeys.forEach(k => {
       const req = optDayReq(k, d);
       if (!req) return;
       const diff = req - counts[k];
       if (diff > 0) score += diff * P.understaff;
       // 責任者・総務（早責/遅責/早総/遅総）は同じ時間帯に2人いてはいけないため重罰
-      else if (diff < 0) score += (-diff) * (SOLO_SHIFT_KEYS.includes(k) ? P.respDuplicate : P.overstaff);
+      else if (diff < 0) score += (-diff) * ((SOLO_SHIFT_KEYS.includes(k) && ruleOn('resp-duplicate')) ? P.respDuplicate : P.overstaff);
     });
 
     // スキル別: 指定時間帯（早番/遅番）に必要なスキル保有者数を満たすか
@@ -2654,10 +2669,10 @@ function calculateScore(shifts, allowedShifts, days, P) {
           if (isWork(sh) && inTarget && (s.skills || []).includes(sk.name)) have++;
         });
         if (have < min) {
-          score += (min - have) * (P.skillLateShortage || 9000);              // 最低ライン割れ（強）
-          score += (need - min) * (P.skillSoftShortage || 1500);
+          if (ruleOn('skill-late'))  score += (min - have) * (P.skillLateShortage || 9000); // 最低ライン割れ（強）
+          if (ruleOn('skill-short')) score += (need - min) * (P.skillSoftShortage || 1500);
         } else if (have < need) {
-          score += (need - have) * (P.skillSoftShortage || 1500);              // 目標には届かない（弱）
+          if (ruleOn('skill-short')) score += (need - have) * (P.skillSoftShortage || 1500); // 目標には届かない（弱）
         }
       });
     }
@@ -2668,14 +2683,14 @@ function calculateScore(shifts, allowedShifts, days, P) {
           isWork(shifts[s.id][d]) && isEarlyCategory(shifts[s.id][d]) && !isTraining(shifts[s.id][d]) &&
           (allowedShifts[s.id] || s.allowedShifts || []).includes('早責') &&
           getStaffPriority(s) < getStaffPriority(respEarlyPerson))) {
-      score += P.hierarchyViolation;
+      if (ruleOn('hierarchy')) score += P.hierarchyViolation;
     }
     if (respLatePerson && staff.some(s =>
           s.id !== respLatePerson.id &&
           isWork(shifts[s.id][d]) && isLate(shifts[s.id][d]) &&
           (allowedShifts[s.id] || s.allowedShifts || []).includes('遅責') &&
           getStaffPriority(s) < getStaffPriority(respLatePerson))) {
-      score += P.hierarchyViolation;
+      if (ruleOn('hierarchy')) score += P.hierarchyViolation;
     }
   }
 
@@ -2684,7 +2699,7 @@ function calculateScore(shifts, allowedShifts, days, P) {
     if (!ev || !ev.day || ev.day < 1 || ev.day > days) return;
     (ev.staffIds || []).forEach(sid => {
       if (!shifts[sid]) return; // 他部門のスタッフは対象外
-      if (!isWork(shifts[sid][ev.day])) score += (P.eventAbsent || 20000);
+      if (!isWork(shifts[sid][ev.day]) && ruleOn('event-absent')) score += (P.eventAbsent || 20000);
     });
   });
 
@@ -2728,28 +2743,28 @@ function calculateScore(shifts, allowedShifts, days, P) {
         }
 
         // 個人希望: 土日休み（土日に出勤したら減点）
-        if (wkW && (_wd[d] === 0 || _wd[d] === 6)) score += wkW;
+        if (wkW && (_wd[d] === 0 || _wd[d] === 6) && ruleOn('weekend-pref')) score += wkW;
         // 個人希望: 分散派（勤務は3連勤前後まで。4日目以降に減点）
-        if (styleSpread && consWork > 3) score += styleW;
+        if (styleSpread && consWork > 3 && ruleOn('rest-style')) score += styleW;
 
         // 遅→早禁止
-        if (AppState.settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
+        if (AppState.settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur) && ruleOn('late-early')) {
           score += P.lateEarly;
         }
 
         // prefs（早遅希望）違反: checkViolations と整合させてスコアに反映
-        if (s.prefs && s.prefs.length > 0) {
+        if (s.prefs && s.prefs.length > 0 && ruleOn('pref-mismatch')) {
           if (isEarlyCategory(cur) && !s.prefs.includes('早可')) score += (P.prefMismatch || 12000);
           if (isLate(cur)          && !s.prefs.includes('遅可')) score += (P.prefMismatch || 12000);
         }
 
         // 夜勤翌日は必ず休み
-        if (isNight(prevShift)) score += (P.nightAfterWork || 8000);
+        if (isNight(prevShift) && ruleOn('night-after-work')) score += (P.nightAfterWork || 8000);
 
         // 連勤中の時間帯切替
         if (consWork >= 2 && isWork(prevShift)) {
           const pc = getShiftCategory(prevShift), cc = getShiftCategory(cur);
-          if (pc && cc && pc !== cc) score += P.categorySwitch;
+          if (pc && cc && pc !== cc && ruleOn('category-switch')) score += P.categorySwitch;
         }
 
         if (isEarly(cur)) earlyCount++;
@@ -2782,7 +2797,7 @@ function calculateScore(shifts, allowedShifts, days, P) {
               const restLocked =
                 isOff((AppState.requests[s.id]    || {})[d]) ||
                 isOff((AppState.fixedShifts[s.id] || {})[d]);
-              if (!restLocked) score += (P.longRest || 2000);
+              if (!restLocked && ruleOn('long-rest')) score += (P.longRest || 2000);
             }
           } else {
             pubRun = 0; // 「余」は連休を分断
@@ -2793,13 +2808,13 @@ function calculateScore(shifts, allowedShifts, days, P) {
         // 個人希望: 連休派（ポツンと1日だけの休みに減点 → 連休にまとまる方向へ）
         if (stylePair && cur !== '余' && d > 1 && d < days) {
           const pvP = shifts[s.id][d - 1], nxP = shifts[s.id][d + 1];
-          if (isWork(pvP) && isWork(nxP)) score += styleW;
+          if (isWork(pvP) && isWork(nxP) && ruleOn('rest-style')) score += styleW;
         }
 
         // 個人ルール: 遅→早の切替時は2連休以上必須（遅→休1日→早 を強く禁止）
         if (s.needPairRest && d > 1 && d < days) {
           const pv2 = shifts[s.id][d - 1], nx2 = shifts[s.id][d + 1];
-          if (isWork(pv2) && isWork(nx2) && isLate(pv2) && isEarlyCategory(nx2)) {
+          if (isWork(pv2) && isWork(nx2) && isLate(pv2) && isEarlyCategory(nx2) && ruleOn('pair-rest')) {
             score += (P.lateEarly || 2500) * 2;
           }
         }
@@ -2808,7 +2823,8 @@ function calculateScore(shifts, allowedShifts, days, P) {
         if (AppState.settings.penaltySingleOff && d > 1 && d < days) {
           const pv = shifts[s.id][d - 1], nx = shifts[s.id][d + 1];
           if (isWork(pv) && isWork(nx)) {
-            score += (isLate(pv) && isEarlyCategory(nx)) ? P.badRest : P.singleOff;
+            if (isLate(pv) && isEarlyCategory(nx)) { if (ruleOn('bad-rest')) score += P.badRest; }
+            else score += P.singleOff;
           }
         }
         prevShift = cur;
@@ -2838,7 +2854,7 @@ function calculateScore(shifts, allowedShifts, days, P) {
     if (AppState.settings.penaltySingleOff) {
       for (let d = 2; d < days; d++) {
         if (!isWork(shifts[s.id][d])) continue;
-        if (!isWork(shifts[s.id][d - 1]) && !isWork(shifts[s.id][d + 1])) score += P.singleWork;
+        if (!isWork(shifts[s.id][d - 1]) && !isWork(shifts[s.id][d + 1]) && ruleOn('single-work')) score += P.singleWork;
       }
     }
 
@@ -3215,7 +3231,8 @@ function checkViolations(shifts) {
     }
   });
 
-  return violations;
+  // ルール設定が off の違反タイプは報告しない（既定では off は無いので従来どおり）
+  return violations.filter(v => getRuleLevel(v.type) !== 'off');
 }
 
 // ===== 特別日ロジック =====

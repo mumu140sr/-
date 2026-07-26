@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=90" />
+<link rel="stylesheet" href="css/style.css?v=91" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -66,6 +66,19 @@
         <label>焼きなまし反復回数</label>
         <input type="number" id="maxAttempts" min="10000" max="1000000" step="10000" value="500000" />
         <span class="hint">多いほど精度UP、時間も増えます（推奨: 500000）</span>
+      </div>
+    </div>
+
+    <!-- ルールごとの強弱（ON/OFF） -->
+    <div class="card">
+      <h3 style="cursor:pointer" onclick="toggleRuleLevelsPanel()">🎚️ ルールごとの強弱（ON/OFF） <span id="ruleLevelsToggle">▶ 展開</span></h3>
+      <div id="ruleLevelsPanel" style="display:none">
+        <p class="hint">
+          各ルールを <b>🔴絶対</b>（必ず守る）／<b>🟡できれば</b>（なるべく守る・残ってもOK）／<b>OFF</b>（使わない）で切り替えられます。
+          店舗ごとの運用に合わせてください。<b>人員不足・公休不足・連勤超過・担当外シフト</b>は安全のため固定（変更不可）です。
+          既定のままなら従来と同じ動作です。
+        </p>
+        <div id="ruleLevelsInputs"></div>
       </div>
     </div>
 
@@ -307,11 +320,11 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=90"></script>
-<script src="js/optimizer.v6.js?v=90"></script>
-<script src="js/worker-client.v6.js?v=90"></script>
-<script src="js/ai-explain.v6.js?v=90"></script>
-<script src="js/ui.v6.js?v=90"></script>
-<script src="js/app.v6.js?v=90"></script>
+<script src="js/data.v6.js?v=91"></script>
+<script src="js/optimizer.v6.js?v=91"></script>
+<script src="js/worker-client.v6.js?v=91"></script>
+<script src="js/ai-explain.v6.js?v=91"></script>
+<script src="js/ui.v6.js?v=91"></script>
+<script src="js/app.v6.js?v=91"></script>
 </body>
 </html>

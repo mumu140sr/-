@@ -106,6 +106,10 @@ const AppState = {
     // 合算モード: { シフトkey: true } … そのシフトの必要人数を社員＋キャスト合算で扱う。
     // 1つでも合算指定があると、生成時に社員とキャストを1つのプールとして最適化する。
     combinedShifts: {},
+    // ルールごとの強弱設定 { 違反type: 'off' | 'should' | 'must' }。
+    // 未設定のtypeは既定分類（MUST_TYPES_OPT にあれば must、無ければ should）を使う。
+    // 空 {} なら全ルール既定＝従来と同じ挙動。人員不足/公休不足/連勤超過/担当外は固定。
+    ruleLevels: {},
     penalties: { ...DEFAULT_PENALTIES },
   },
   // ユーザーが自由に定義・編集できるシフト種別
@@ -353,6 +357,7 @@ function loadFromStorage() {
       penalties.bandConcentration = DEFAULT_PENALTIES.bandConcentration;
     Object.assign(AppState.settings, data.settings || {}, { penalties });
     if (!AppState.settings.combinedShifts) AppState.settings.combinedShifts = {}; // 旧データ補完
+    if (!AppState.settings.ruleLevels || typeof AppState.settings.ruleLevels !== 'object') AppState.settings.ruleLevels = {}; // 旧データ補完
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
     AppState.shiftTypes = (data.shiftTypes || getDefaultShiftTypes()).map(t =>

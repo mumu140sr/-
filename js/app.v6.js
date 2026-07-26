@@ -698,7 +698,11 @@ const MUST_VIOLATION_TYPES = new Set([
   'event-absent', 'night-after-work',
   'off-count', 'late-early', // 公休不足・遅→早(休みなし) も絶対NG
 ]);
-function isMustViolation(type) { return MUST_VIOLATION_TYPES.has(type); }
+// ルール強弱設定があればそれに従う（optimizer.js の getRuleLevel）。無ければ既定分類。
+function isMustViolation(type) {
+  if (typeof getRuleLevel === 'function') return getRuleLevel(type) === 'must';
+  return MUST_VIOLATION_TYPES.has(type);
+}
 
 // ⑥ 結果パネル
 function setupResultPanel() {

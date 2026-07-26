@@ -58,6 +58,8 @@ function refreshAllUI() {
   // ペナルティパネルが開いていれば再描画
   const pp = document.getElementById('penaltyPanel');
   if (pp && pp.style.display !== 'none') renderPenaltyInputs();
+  const rp = document.getElementById('ruleLevelsPanel');
+  if (rp && rp.style.display !== 'none') renderRuleLevels();
 
   renderRoleTable();
   renderStaffTable();
@@ -319,6 +321,73 @@ function renderPenaltyInputs() {
       const key = e.target.dataset.pkey;
       AppState.settings.penalties[key] = parseInt(e.target.value) || 0;
       autoSave();
+    });
+  });
+}
+
+// ルールごとの強弱設定 UI ------------------------------------------------
+// t=違反type, l=表示名, g=グループ, def=既定レベル, locked=変更不可
+const RULE_LEVEL_META = [
+  { g: '人員・役職', t: 'understaff',        l: '人員不足',              def: 'must', locked: true },
+  { g: '人員・役職', t: 'off-count',         l: '公休数不足',            def: 'must', locked: true },
+  { g: '人員・役職', t: 'consecutive',       l: '連勤超過',              def: 'must', locked: true },
+  { g: '人員・役職', t: 'role-mismatch',     l: '担当外シフト',          def: 'must', locked: true },
+  { g: '人員・役職', t: 'vicemanager-absent',l: '副店長不在の日',        def: 'must' },
+  { g: '人員・役職', t: 'resp-duplicate',    l: '責任者・総務の重複',    def: 'must' },
+  { g: '人員・役職', t: 'hierarchy',         l: '責任者ヒエラルキー',    def: 'must' },
+  { g: 'スキル',     t: 'skill-late',        l: 'スキル最低人数割れ',    def: 'must' },
+  { g: 'スキル',     t: 'skill-short',       l: 'スキル目標人数に不足',  def: 'should' },
+  { g: 'リズム',     t: 'late-early',        l: '遅→早（休みなし）',     def: 'must' },
+  { g: 'リズム',     t: 'night-after-work',  l: '夜勤明けの出勤',        def: 'must' },
+  { g: 'リズム',     t: 'single-work',       l: '単発出勤',              def: 'must' },
+  { g: 'リズム',     t: 'category-switch',   l: '連勤中の時間帯切替',    def: 'should' },
+  { g: 'リズム',     t: 'bad-rest',          l: '遅→休→早',             def: 'should' },
+  { g: 'リズム',     t: 'long-rest',         l: '連休4日以上',           def: 'should' },
+  { g: '個人希望',   t: 'pref-mismatch',     l: '早遅希望（早可/遅可）', def: 'must' },
+  { g: '個人希望',   t: 'weekend-pref',      l: '土日休み希望',          def: 'should' },
+  { g: '個人希望',   t: 'rest-style',        l: '休み方（連休/分散）',   def: 'should' },
+  { g: '個人希望',   t: 'pair-rest',         l: '遅→早は2連休（個人）',  def: 'should' },
+  { g: '行事',       t: 'event-absent',      l: '行事日に対象者が休み',  def: 'must' },
+];
+
+function toggleRuleLevelsPanel() {
+  const panel  = document.getElementById('ruleLevelsPanel');
+  const toggle = document.getElementById('ruleLevelsToggle');
+  if (!panel) return;
+  const isHidden = panel.style.display === 'none' || panel.style.display === '';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (toggle) toggle.textContent = isHidden ? '▼ 閉じる' : '▶ 展開';
+  if (isHidden) renderRuleLevels();
+}
+
+function renderRuleLevels() {
+  const container = document.getElementById('ruleLevelsInputs');
+  if (!container) return;
+  const cfg = AppState.settings.ruleLevels || (AppState.settings.ruleLevels = {});
+  let html = '';
+  let lastG = null;
+  RULE_LEVEL_META.forEach(r => {
+    if (r.g !== lastG) { html += `<h4 style="margin:12px 0 4px">${r.g}</h4>`; lastG = r.g; }
+    const cur = cfg[r.t] || r.def;
+    if (r.locked) {
+      html += `<div class="form-row"><label>${r.l}</label>
+        <span class="hint">🔴 絶対（固定・変更不可）</span></div>`;
+    } else {
+      const opt = (v, lbl) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${lbl}</option>`;
+      html += `<div class="form-row"><label>${r.l}</label>
+        <select data-rule="${r.t}" data-def="${r.def}" style="min-width:130px">
+          ${opt('must', '🔴 絶対')}${opt('should', '🟡 できれば')}${opt('off', '⚪ OFF（使わない）')}
+        </select></div>`;
+    }
+  });
+  container.innerHTML = html;
+  container.querySelectorAll('select[data-rule]').forEach(el => {
+    el.addEventListener('change', e => {
+      const t = e.target.dataset.rule, def = e.target.dataset.def, v = e.target.value;
+      if (v === def) delete AppState.settings.ruleLevels[t]; // 既定と同じなら未設定に戻す（空=従来）
+      else AppState.settings.ruleLevels[t] = v;
+      autoSave();
+      renderResultTable(); // 表示中の🔴/🟡分類を即反映
     });
   });
 }
