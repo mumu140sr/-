@@ -21,11 +21,10 @@ function _milpPayload() {
 }
 
 function optimizeScheduleMILP(onProgress, opts) {
-  const timeLimitOverride = (opts && opts.timeLimit) || null;
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=93'); }
+    try { worker = new Worker('js/milp.worker.js?v=99'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（10分）')); }, 600000);
     // 計算中は1回の大きな処理でバーが止まって見えるため、経過秒数を出して「動いている」ことを示す
@@ -50,6 +49,6 @@ function optimizeScheduleMILP(onProgress, opts) {
       if (m.type === 'error') { cleanup(); worker.terminate(); reject(new Error(m.message || '数理最適化エラー')); return; }
     };
     worker.onerror = (err) => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化Workerエラー: ' + (err.message || 'ソルバーの読込みに失敗しました'))); };
-    worker.postMessage({ type: 'milp', appState: _milpPayload(), timeLimitOverride });
+    worker.postMessage({ type: 'milp', appState: _milpPayload() });
   });
 }

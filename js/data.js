@@ -110,7 +110,6 @@ const AppState = {
     // 未設定のtypeは既定分類（MUST_TYPES_OPT にあれば must、無ければ should）を使う。
     // 空 {} なら全ルール既定＝従来と同じ挙動。人員不足/公休不足/連勤超過/担当外は固定。
     ruleLevels: {},
-    milpTimeLimit: 90, // 数理最適化(ベータ)の計算時間上限（秒）
     penalties: { ...DEFAULT_PENALTIES },
   },
   // ユーザーが自由に定義・編集できるシフト種別

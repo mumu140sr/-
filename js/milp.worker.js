@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=98', 'optimizer.js?v=98', 'milp-core.js?v=98');
+self.importScripts('data.js?v=99', 'optimizer.js?v=99', 'milp-core.js?v=99');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=98'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=99'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -46,10 +46,9 @@ self.addEventListener('message', async (e) => {
     for (const g of groups) {
       post(20 + Math.floor((gi / groups.length) * 60), `【${g.label || g.key}】を数理最適化で計算中...`);
       const m = MILP.buildGroupModel(g.staff, g.reqs, g.dailyReqs);
-      const timeLimit = Math.max(15, Math.min(540, parseInt(msg.timeLimitOverride) || parseInt((AppState.settings || {}).milpTimeLimit) || 90));
-      // 「証明」の詰めを省いて“ほぼ最良”で早く止める（大幅高速化・品質はほぼ同じ）。
-      // mip_abs_gap 1500 ≒ 🟡1件以内の差まで来たら停止。
-      const sol = solver.solve(m.lp, { time_limit: timeLimit, mip_rel_gap: 0.05, mip_abs_gap: 1500, presolve: 'on' });
+      // 時間で打ち切らず「最適解（数学的に最良）」を求める。
+      // gap=0 で最適が証明できるまで解く。万一の暴走防止に十分大きな安全上限(9分)だけ残す。
+      const sol = solver.solve(m.lp, { time_limit: 540, mip_rel_gap: 0, mip_abs_gap: 0, presolve: 'on' });
       MILP.applyGroupSolution(m, sol, shifts);
       gi++;
     }

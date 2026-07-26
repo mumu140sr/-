@@ -720,7 +720,7 @@ function setupResultPanel() {
       (async () => {
         try {
           if (typeof optimizeScheduleMILP !== 'function') throw new Error('数理最適化モジュール未読込（再読込してください）');
-          const res = await optimizeScheduleMILP(() => {}, { timeLimit: 25 });
+          const res = await optimizeScheduleMILP(() => {});
           if (res.violations.length >= before) {
             AppState.shifts = backup;
             AppState.violations = checkViolations(backup);
