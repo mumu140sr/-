@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=95" />
+<link rel="stylesheet" href="css/style.css?v=96" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -245,7 +245,12 @@
           <option value="anneal" selected>焼きなまし法（従来・複数案）</option>
           <option value="milp">数理最適化（ベータ・厳密／推奨）</option>
         </select>
-        <span class="hint">数理最適化は「数学的に最良の表」を計算します（初回はソルバー読込で数十秒。要ネット接続）。</span>
+        <span class="hint">数理最適化は「数学的に最良の表」を計算します（初回だけソルバー読込あり）。</span>
+      </div>
+      <div class="form-row">
+        <label>数理最適化の時間上限（秒）</label>
+        <input type="number" id="milpTimeLimit" min="15" max="540" step="15" value="90" style="width:70px" />
+        <span class="hint">【数理最適化用】この秒数までに“ほぼ最良の表”を返します。遅いと感じたら短く（例:30〜60秒）。データが大きいほど時間がかかります。</span>
       </div>
       <div class="form-row">
         <label>生成する案の数</label>
@@ -332,12 +337,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=95"></script>
-<script src="js/optimizer.v6.js?v=95"></script>
-<script src="js/worker-client.v6.js?v=95"></script>
-<script src="js/ai-explain.v6.js?v=95"></script>
-<script src="js/ui.v6.js?v=95"></script>
-<script src="js/milp.v6.js?v=95"></script>
-<script src="js/app.v6.js?v=95"></script>
+<script src="js/data.v6.js?v=96"></script>
+<script src="js/optimizer.v6.js?v=96"></script>
+<script src="js/worker-client.v6.js?v=96"></script>
+<script src="js/ai-explain.v6.js?v=96"></script>
+<script src="js/ui.v6.js?v=96"></script>
+<script src="js/milp.v6.js?v=96"></script>
+<script src="js/app.v6.js?v=96"></script>
 </body>
 </html>

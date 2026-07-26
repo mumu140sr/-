@@ -45,6 +45,8 @@ function refreshAllUI() {
   if ($maxAtt)    $maxAtt.value      = AppState.settings.maxAttempts;
   const $pairRestR = document.getElementById('pairRestTarget');
   if ($pairRestR) $pairRestR.value   = AppState.settings.pairRestTarget || 0;
+  const $milpTL = document.getElementById('milpTimeLimit');
+  if ($milpTL) $milpTL.value = AppState.settings.milpTimeLimit || 90;
 
   if ($replDays) {
     $replDays.value = Object.keys(AppState.specialDays)
@@ -117,6 +119,14 @@ function setupSettingsPanel() {
     $pairRest.value = AppState.settings.pairRestTarget || 0;
     $pairRest.addEventListener('change', () => {
       AppState.settings.pairRestTarget = parseInt($pairRest.value) || 0;
+      autoSave();
+    });
+  }
+  const $milpTL = document.getElementById('milpTimeLimit');
+  if ($milpTL) {
+    $milpTL.value = AppState.settings.milpTimeLimit || 90;
+    $milpTL.addEventListener('change', () => {
+      AppState.settings.milpTimeLimit = Math.max(15, Math.min(540, parseInt($milpTL.value) || 90));
       autoSave();
     });
   }
