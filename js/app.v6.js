@@ -128,6 +128,24 @@ function setupGeneratePanel() {
 
     const startedAt = Date.now();
     try {
+      // 生成方式: 数理最適化(ベータ) が選ばれていれば MILP で解く
+      const method = (document.getElementById('genMethod') || {}).value || 'anneal';
+      if (method === 'milp' && typeof optimizeScheduleMILP === 'function') {
+        try {
+          const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + msg; };
+          const res = await optimizeScheduleMILP(prog);
+          $bar.style.width = '100%';
+          renderReport({ success: res.success, score: res.score, violations: res.violations,
+            candidateSummary: `数理最適化（厳密解）で生成 — 違反${res.violations.length}件` });
+          renderResultTable();
+          toast(`数理最適化で生成しました（違反${res.violations.length}件）`, res.success ? 'success' : 'info', 5000);
+          return; // finally でボタン復帰
+        } catch (milpErr) {
+          console.error('[generate] 数理最適化に失敗、焼きなましにフォールバック:', milpErr);
+          toast('数理最適化に失敗したため、焼きなましで生成します（' + milpErr.message + '）', 'info', 6000);
+          // 下の焼きなまし処理へフォールバック
+        }
+      }
       // Worker 版を使う（フォールバック付き）
       const runner = (typeof optimizeScheduleViaWorker === 'function')
         ? optimizeScheduleViaWorker
