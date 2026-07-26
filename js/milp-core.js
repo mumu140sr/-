@@ -52,6 +52,17 @@
     const isTrainDay = (s, d) => { const f = fx(s, d); return f && isTraining(f); };
     const isFixWork  = (s, d) => { const f = fx(s, d); return f && isWork(f) && !isTraining(f); };
 
+    // 個人有給(有)の自動付与目標：設定 paidLeave からカレンダー指定済みの'有'を差し引いた不足分。
+    // 不足分を空き日に'有'(y変数)として配置して目標日数を満たす（社員のみ・キャスト対象外）。
+    const paidTarget = {};
+    gStaff.forEach(s => {
+      if (getStaffDepartment(s) === 'cast') { paidTarget[s.id] = 0; return; }
+      let reqPaid = 0;
+      for (let d = 1; d <= days; d++) if ((AppState.requests[s.id] || {})[d] === '有') reqPaid++;
+      paidTarget[s.id] = Math.max(0, (parseInt(s.paidLeave) || 0) - reqPaid);
+    });
+    const Y = (si, d) => `y_${si}_${d}`;
+
     const obj = [], cons = [], bin = new Set(), gen = new Set(), bnd = [];
     const addSlack = (name, ub, weight) => { gen.add(name); bnd.push(ub != null ? `0 <= ${name} <= ${ub}` : `0 <= ${name}`); if (weight > 0) obj.push(`${weight} ${name}`); };
 
@@ -68,6 +79,7 @@
         }
         if (!free(s, d)) { ks.forEach(k => { bin.add(V(si, d, roleIdx[k])); cons.push(`z_${si}_${d}_${roleIdx[k]}: ${V(si, d, roleIdx[k])} = 0`); }); continue; }
         const t = []; ks.forEach(k => { bin.add(V(si, d, roleIdx[k])); t.push(V(si, d, roleIdx[k])); });
+        if (paidTarget[s.id] > 0) { const yv = Y(si, d); bin.add(yv); t.push(yv); } // 有給候補（勤務と排他）
         if (t.length) cons.push(`one_${si}_${d}: ${t.join(' + ')} <= 1`);
       }
     });
@@ -156,6 +168,16 @@
           for (let dd = d; dd < d + win; dd++) { const o = cellTerms(s, dd); cc += o.c; t = t.concat(realT(o.w)); }
           if (t.length) { const cv = `cw_${si}_${d}`; addSlack(cv, null, wc); cons.push(`con_${si}_${d}: ${t.join(' + ')} - ${cv} <= ${maxCons - cc}`); }
         }
+        // 前月末の連勤を反映：前月から pc 連勤で入ってくる場合、月初の窓に pc を定数として加える。
+        // j 日ぶんの前月勤務＋月初(1..win-j 日)の勤務合計 ≤ maxCons。
+        const pc = Math.min(maxCons, s.prevConsecutive || 0);
+        for (let j = 1; j <= pc; j++) {
+          const lastDay = Math.min(win - j, days);
+          if (lastDay < 1) continue;
+          let cc = 0, t = [];
+          for (let dd = 1; dd <= lastDay; dd++) { const o = cellTerms(s, dd); cc += o.c; t = t.concat(realT(o.w)); }
+          if (t.length) { const cv = `cb_${si}_${j}`; addSlack(cv, null, wc); cons.push(`conb_${si}_${j}: ${t.join(' + ')} - ${cv} <= ${(maxCons - j) - cc}`); }
+        }
       }
       // 公休不足（キャストは対象外）
       if (!isCast) {
@@ -168,8 +190,18 @@
             if (isFixWork(s, d)) { fixN++; continue; }
             if (free(s, d)) allowRoles(s).forEach(k => roleT.push(V(si, d, roleIdx[k])));
           }
-          const workTarget = days - (s.maxOff || 0) - trainN - paidN;
+          const workTarget = days - (s.maxOff || 0) - trainN - paidN - (paidTarget[s.id] || 0);
           if (roleT.length) { const os = `os_${si}`; addSlack(os, null, wo); cons.push(`off_${si}: ${roleT.join(' + ')} - ${os} <= ${workTarget - fixN}`); }
+        }
+        // 有給(有)を目標日数だけ確保（不足分をソフトで強制。人員不足より弱いので、埋まっている日は無理に取らない）
+        if (paidTarget[s.id] > 0) {
+          const yt = [];
+          for (let d = 1; d <= days; d++) if (free(s, d)) yt.push(Y(si, d));
+          if (yt.length) {
+            const need = Math.min(paidTarget[s.id], yt.length);
+            const ps = `ps_${si}`; addSlack(ps, null, 6000);
+            cons.push(`paid_${si}: ${yt.join(' + ')} + ${ps} >= ${need}`);
+          }
         }
       }
       if (isCast) return; // キャストはリズム系ルール免除
@@ -233,6 +265,7 @@
         if (r === '有') { shifts[s.id][d] = '有'; continue; }
         let assigned = '休';
         roles.forEach(k => { if (!(s.allowedShifts || []).includes(k)) return; const col = sol.Columns && sol.Columns[`x_${si}_${d}_${roleIdx[k]}`]; if (col && col.Primal > 0.5) assigned = k; });
+        if (assigned === '休') { const yc = sol.Columns && sol.Columns[`y_${si}_${d}`]; if (yc && yc.Primal > 0.5) assigned = '有'; }
         shifts[s.id][d] = assigned;
       }
     });
