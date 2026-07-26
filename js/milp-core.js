@@ -201,6 +201,8 @@
             const need = Math.min(paidTarget[s.id], yt.length);
             const ps = `ps_${si}`; addSlack(ps, null, 6000);
             cons.push(`paid_${si}: ${yt.join(' + ')} + ${ps} >= ${need}`);
+            // 目標超過は禁止：余分な'有'は公休(maxOff)を削り「公休不足」を招くため、ちょうど need 日までに制限。
+            cons.push(`paidhi_${si}: ${yt.join(' + ')} <= ${need}`);
           }
         }
       }
@@ -218,6 +220,23 @@
         if (B && wCS > 0) { const v = `cs_${si}_${d}`; addSlack(v, 1, wCS); const t1 = [...realT(A.e), ...realT(B.l)]; if (t1.length) cons.push(`cs1_${si}_${d}: ${t1.join(' + ')} - ${v} <= ${1 - constOf(A.e) - constOf(B.l)}`); const t2 = [...realT(A.l), ...realT(B.e)]; if (t2.length) cons.push(`cs2_${si}_${d}: ${t2.join(' + ')} - ${v} <= ${1 - constOf(A.l) - constOf(B.e)}`); }
         if (B && C && wBR > 0) { const v = `br_${si}_${d}`; addSlack(v, 1, wBR); const t = [...realT(A.l), ...realT(C.e), ...realT(B.w).map(x => `- ${x}`), `- ${v}`]; if (realT(A.l).length && realT(C.e).length) cons.push(`br_${si}_${d}: ${t.join(' + ').replace(/\+ -/g, '-')} <= ${1 - constOf(A.l) - constOf(C.e) + B.c}`); }
         if (wLR > 0 && d + 3 <= days) { const D2 = cellTerms(s, d + 1), D3 = cellTerms(s, d + 2), D4 = cellTerms(s, d + 3); const t = [...realT(A.w), ...realT(D2.w), ...realT(D3.w), ...realT(D4.w)]; const cc = A.c + D2.c + D3.c + D4.c; if (t.length) { const v = `lr_${si}_${d}`; addSlack(v, 1, wLR); cons.push(`lr_${si}_${d}: ${t.join(' + ')} + ${v} >= ${1 - cc}`); } }
+      }
+      // 前月末シフト(prevLastShift)を反映：1日目の 遅→早（インターバル不足）と連勤中の時間帯切替。
+      // checkViolations は前月末シフトを見て罰する（consWork/prevShift）のに、生成側が無視すると
+      // 1日目に必ず違反が出る。境界を制約に加えて回避する。
+      const pls = (s.prevConsecutive > 0 && s.prevLastShift && isWork(s.prevLastShift)) ? s.prevLastShift : '';
+      if (pls) {
+        const A1 = cellTerms(s, 1);
+        const earlyD1 = realT(A1.e), lateD1 = realT(A1.l);
+        if (isLate(pls)) {
+          // 遅→早（🔴）：1日目に早番系を入れない
+          if (wLE > 0 && earlyD1.length) { const v = `leb_${si}`; addSlack(v, 1, wLE); cons.push(`leb_${si}: ${earlyD1.join(' + ')} - ${v} <= 0`); }
+          // 連勤中の時間帯切替 遅→早（🟡）：前月から連勤継続中なので該当
+          if (wCS > 0 && earlyD1.length) { const v = `csb_${si}`; addSlack(v, 1, wCS); cons.push(`csb_${si}: ${earlyD1.join(' + ')} - ${v} <= 0`); }
+        } else if (isEarlyCategory(pls)) {
+          // 連勤中の時間帯切替 早→遅（🟡）
+          if (wCS > 0 && lateD1.length) { const v = `csb_${si}`; addSlack(v, 1, wCS); cons.push(`csb_${si}: ${lateD1.join(' + ')} - ${v} <= 0`); }
+        }
       }
     });
 
