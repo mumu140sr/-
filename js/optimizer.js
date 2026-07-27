@@ -3392,6 +3392,31 @@ function runAIDiagnosis() {
     });
   }
 
+  // ── 入力チェック: 希望休（公休系のロック）が公休目標を超えている人 ──
+  // 希望休は必ず尊重（動かさない）ため、目標より多く入れると公休が目標を超える。
+  // これは「公休不足」エラーにはならないが、入力しすぎの可能性が高いので注意を出す。
+  const overReq = [];
+  staff.forEach(s => {
+    const quota = s.maxOff || 0;
+    let lockedPub = 0;
+    for (let d = 1; d <= days; d++) {
+      const rq = (AppState.requests[s.id]    || {})[d];
+      const fx = (AppState.fixedShifts[s.id] || {})[d];
+      if (isPublicOff(rq) || isPublicOff(fx)) lockedPub++;
+    }
+    if (lockedPub > quota) overReq.push({ name: s.name, lockedPub, quota });
+  });
+  if (overReq.length) {
+    results.push({
+      level: 'warning',
+      title: `⚠️ 希望休が公休目標より多い ${overReq.length}件（入力しすぎの可能性）`,
+      detail:
+        overReq.map(o => `${o.name}: 希望休(公休系) ${o.lockedPub}日 ＞ 公休目標 ${o.quota}日（+${o.lockedPub - o.quota}）`).join('\n') +
+        `\n希望休は必ず尊重して動かさないため、公休が目標を超えます。「公休不足」エラーにはなりませんが、入力ミスの可能性があります。`,
+      suggestion: `意図的でなければ、④希望休入力で対象スタッフの「休」を目標日数まで減らしてください（意図的に多く休ませる場合はそのままでOK）。`,
+    });
+  }
+
   // ── 1〜3. 部門ごとの実現可能性・カバレッジ・個別制約 ─────────
   const groups = getDepartmentGroups(staff);
   let surplus = Infinity; // 全部門の中で最も厳しい余裕（違反傾向の原因判定に使用）
