@@ -99,6 +99,13 @@
         if (need > 0) {
           const u = `u_${d}_${roleIdx[k]}`; addSlack(u, null, ruleW('understaff', P.understaff || 20000));
           cons.push(`req_${d}_${roleIdx[k]}: ${(vterms.length ? vterms.join(' + ') + ' + ' : '')}${u} >= ${need - cconst}`);
+          // 超過（定数より多い）を罰して「定数ちょうど」に寄せる。余った人手は休み(→余)に回る。
+          // SOLO役割(早責/遅責等)は下の重複制約(rd)で扱うため二重には入れない。
+          const wOver = (P.overstaff || 6000);
+          if (wOver > 0 && vterms.length && !SOLO.has(k)) {
+            const ov = `ov_${d}_${roleIdx[k]}`; addSlack(ov, null, wOver);
+            cons.push(`ovr_${d}_${roleIdx[k]}: ${vterms.join(' + ')} - ${ov} <= ${need - cconst}`);
+          }
         }
         if (SOLO.has(k) && (vterms.length)) {
           const cap = Math.max(0, (need || 1) - cconst);
