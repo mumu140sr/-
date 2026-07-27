@@ -54,9 +54,6 @@ function refreshAllUI() {
       .filter(d => AppState.specialDays[d] === 'renewal').join(',');
   }
 
-  // ペナルティパネルが開いていれば再描画
-  const pp = document.getElementById('penaltyPanel');
-  if (pp && pp.style.display !== 'none') renderPenaltyInputs();
   const rp = document.getElementById('ruleLevelsPanel');
   if (rp && rp.style.display !== 'none') renderRuleLevels();
 
@@ -254,71 +251,6 @@ function renderEventList() {
       const idx = parseInt(e.target.closest('[data-ev-del]').dataset.evDel);
       AppState.events.splice(idx, 1);
       renderEventList();
-      autoSave();
-    });
-  });
-}
-
-// ペナルティパネル開閉（index.html の onclick="togglePenaltyPanel()" から呼ばれる）
-function togglePenaltyPanel() {
-  const panel  = document.getElementById('penaltyPanel');
-  const toggle = document.getElementById('penaltyToggle');
-  if (!panel) return;
-  const isHidden = panel.style.display === 'none' || panel.style.display === '';
-  panel.style.display = isHidden ? 'block' : 'none';
-  if (toggle) toggle.textContent = isHidden ? '▼ 閉じる' : '▶ 展開';
-  if (isHidden) renderPenaltyInputs();
-}
-
-function renderPenaltyInputs() {
-  const container = document.getElementById('penaltyInputs');
-  if (!container) return;
-  container.innerHTML = '';
-
-  const P   = AppState.settings.penalties;
-  const DEF = (typeof DEFAULT_PENALTIES !== 'undefined') ? DEFAULT_PENALTIES : {};
-  const labels = {
-    understaff:      '🚨 人員不足（1人あたり）',
-    overstaff:       '⚠️ 人員超過（1人あたり）',
-    respDuplicate:   '👥 責任者・総務の重複',
-    disallowedShift: '🚫 担当外シフト',
-    consBase:        '📅 連勤超過（1日あたり）',
-    consSq:          '📅 連勤超過（二乗項）',
-    lateEarly:       '🌙→☀️ 遅→早インターバル',
-    categorySwitch:  '🔄 連勤中の時間帯切替',
-    badRest:         '💤 遅→休→早',
-    singleOff:          '🏖 単発休み',
-    singleWork:         '💼 単発出勤',
-    offShortage:        '📆 公休不足（1日あたり）',
-    balanceDiff:        '⚖️ 早遅バランスずれ',
-    viceManagerRest:    '👔 副店長が任意で休む',
-    viceManagerDailyAbsent: '👔 副店長が1人も出勤しない日',
-    hierarchyViolation: '👑 責任者ヒエラルキー違反',
-    prefMismatch:       '🕐 早遅希望違反（早可/遅可）',
-    eventAbsent:        '📌 行事日に対象者が休み',
-    restPairBonus:      '🏝 連休ボーナス（2連休以上を優先）',
-    longRest:           '🛌 4連休以上（連休は最大3日）',
-    skillLateShortage:  '🎯 スキル保有者の不足',
-    nightAfterWork:     '🌃 夜勤翌日に出勤',
-    bandConcentration:  '🔀 早番/遅番の片寄せ（切替を減らす）',
-  };
-
-  Object.entries(labels).forEach(([key, label]) => {
-    const val = P[key] != null ? P[key] : (DEF[key] || 0);
-    const div = document.createElement('div');
-    div.className = 'penalty-item';
-    div.innerHTML = `
-      <label class="penalty-label">${label}</label>
-      <input type="number" min="0" max="100000" step="100"
-             value="${val}" data-pkey="${key}" class="penalty-input"/>
-    `;
-    container.appendChild(div);
-  });
-
-  container.querySelectorAll('input[data-pkey]').forEach(el => {
-    el.addEventListener('change', e => {
-      const key = e.target.dataset.pkey;
-      AppState.settings.penalties[key] = parseInt(e.target.value) || 0;
       autoSave();
     });
   });
