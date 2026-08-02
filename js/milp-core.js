@@ -229,7 +229,15 @@
         if (Pd && B && wSW > 0 && (realT(A.w).length || A.c >= 1)) { const v = `sw_${si}_${d}`; addSlack(v, 1, wSW); const lhs = [...realT(A.w), ...realT(Pd.w).map(x => `- ${x}`), ...realT(B.w).map(x => `- ${x}`), `- ${v}`]; cons.push(`sw_${si}_${d}: ${(lhs.join(' + ').replace(/\+ -/g, '-')) || `- ${v}`} <= ${-A.c + Pd.c + B.c}`); }
         if (B && wCS > 0) { const v = `cs_${si}_${d}`; addSlack(v, 1, wCS); const t1 = [...realT(A.e), ...realT(B.l)]; if (t1.length) cons.push(`cs1_${si}_${d}: ${t1.join(' + ')} - ${v} <= ${1 - constOf(A.e) - constOf(B.l)}`); const t2 = [...realT(A.l), ...realT(B.e)]; if (t2.length) cons.push(`cs2_${si}_${d}: ${t2.join(' + ')} - ${v} <= ${1 - constOf(A.l) - constOf(B.e)}`); }
         if (B && C && wBR > 0) { const v = `br_${si}_${d}`; addSlack(v, 1, wBR); const t = [...realT(A.l), ...realT(C.e), ...realT(B.w).map(x => `- ${x}`), `- ${v}`]; if (realT(A.l).length && realT(C.e).length) cons.push(`br_${si}_${d}: ${t.join(' + ').replace(/\+ -/g, '-')} <= ${1 - constOf(A.l) - constOf(C.e) + B.c}`); }
-        if (wLR > 0 && d + 3 <= days) { const D2 = cellTerms(s, d + 1), D3 = cellTerms(s, d + 2), D4 = cellTerms(s, d + 3); const t = [...realT(A.w), ...realT(D2.w), ...realT(D3.w), ...realT(D4.w)]; const cc = A.c + D2.c + D3.c + D4.c; if (t.length) { const v = `lr_${si}_${d}`; addSlack(v, 1, wLR); cons.push(`lr_${si}_${d}: ${t.join(' + ')} + ${v} >= ${1 - cc}`); } }
+        // 連休の上限（設定日数を超える連続休みを避ける）: (上限+1)日の窓に最低1日の勤務を要求
+        if (wLR > 0) {
+          const lrWin = getMaxOffRun() + 1;
+          if (d + lrWin - 1 <= days) {
+            let t = [], cc = 0;
+            for (let k = 0; k < lrWin; k++) { const o = cellTerms(s, d + k); cc += o.c; t = t.concat(realT(o.w)); }
+            if (t.length) { const v = `lr_${si}_${d}`; addSlack(v, 1, wLR); cons.push(`lr_${si}_${d}: ${t.join(' + ')} + ${v} >= ${1 - cc}`); }
+          }
+        }
       }
       // 前月末シフト(prevLastShift)を反映：1日目の 遅→早（インターバル不足）と連勤中の時間帯切替。
       // checkViolations は前月末シフトを見て罰する（consWork/prevShift）のに、生成側が無視すると

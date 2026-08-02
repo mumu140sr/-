@@ -273,7 +273,9 @@ const RULE_LEVEL_META = [
   { g: 'リズム',     t: 'single-work',       l: '単発出勤',              def: 'must' },
   { g: 'リズム',     t: 'category-switch',   l: '連勤中の時間帯切替',    def: 'should' },
   { g: 'リズム',     t: 'bad-rest',          l: '遅→休→早',             def: 'should' },
-  { g: 'リズム',     t: 'long-rest',         l: '連休4日以上',           def: 'should' },
+  { g: 'リズム',     t: 'long-rest',         l: '連休が長すぎる',        def: 'should',
+    num: { key: 'maxConsecutiveOff', min: 1, max: 14, def: 3,
+           before: '上限', after: '日まで（これを超えるとエラー）' } },
   { g: '個人希望',   t: 'pref-mismatch',     l: '早遅希望（早可/遅可）', def: 'must' },
   { g: '個人希望',   t: 'weekend-pref',      l: '土日休み希望',          def: 'should' },
   { g: '個人希望',   t: 'rest-style',        l: '休み方（連休/分散）',   def: 'should' },
@@ -305,10 +307,20 @@ function renderRuleLevels() {
         <span class="hint">🔴 絶対（固定・変更不可）</span></div>`;
     } else {
       const opt = (v, lbl) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${lbl}</option>`;
+      // 数値設定を持つルール（例: 連休の上限日数）はスピナーも一緒に出す
+      let numHtml = '';
+      if (r.num) {
+        const nv = parseInt(AppState.settings[r.num.key]) || r.num.def;
+        numHtml = `<span class="hint" style="display:inline-flex;align-items:center;gap:6px">
+          ${r.num.before}
+          <input type="number" data-rulenum="${r.num.key}" data-numdef="${r.num.def}"
+                 min="${r.num.min}" max="${r.num.max}" value="${nv}" style="width:60px" />
+          ${r.num.after}</span>`;
+      }
       html += `<div class="form-row"><label>${r.l}</label>
         <select data-rule="${r.t}" data-def="${r.def}" style="min-width:130px">
           ${opt('must', '🔴 絶対')}${opt('should', '🟡 できれば')}${opt('off', '⚪ OFF（使わない）')}
-        </select></div>`;
+        </select>${numHtml}</div>`;
     }
   });
   container.innerHTML = html;
@@ -319,6 +331,25 @@ function renderRuleLevels() {
       else AppState.settings.ruleLevels[t] = v;
       autoSave();
       renderResultTable(); // 表示中の🔴/🟡分類を即反映
+    });
+  });
+  container.querySelectorAll('input[data-rulenum]').forEach(el => {
+    el.addEventListener('change', e => {
+      const key = e.target.dataset.rulenum;
+      const min = parseInt(e.target.min), max = parseInt(e.target.max);
+      const def = parseInt(e.target.dataset.numdef);
+      let v = parseInt(e.target.value);
+      if (!(v > 0)) v = def;
+      v = Math.max(min, Math.min(max, v));
+      e.target.value = v;
+      AppState.settings[key] = v;
+      autoSave();
+      // 判定基準が変わるので違反を取り直して表示を更新
+      if (AppState.generated && typeof checkViolations === 'function') {
+        AppState.violations = checkViolations(AppState.shifts);
+      }
+      renderResultTable();
+      toast(`連休の上限を ${v}日 に変更しました（${v + 1}日以上でエラー）`, 'info');
     });
   });
 }

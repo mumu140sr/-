@@ -110,6 +110,8 @@ const AppState = {
     // 未設定のtypeは既定分類（MUST_TYPES_OPT にあれば must、無ければ should）を使う。
     // 空 {} なら全ルール既定＝従来と同じ挙動。人員不足/公休不足/連勤超過/担当外は固定。
     ruleLevels: {},
+    // 連休（休みの連続）として許容する最大日数。これを超えると「連休◯日以上」エラー。
+    maxConsecutiveOff: 3,
     penalties: { ...DEFAULT_PENALTIES },
   },
   // ユーザーが自由に定義・編集できるシフト種別
@@ -178,6 +180,13 @@ function isOff(shift) {
 function isPublicOff(shift) {
   const t = OFF_TYPES[shift];
   return t ? !!t.countsAsPublic : false;
+}
+
+// 連休（休みの連続）として許容する最大日数（未設定なら3日）。
+// これを1日でも超えると long-rest 違反（例: 3ならば4連休以上がエラー）。
+function getMaxOffRun() {
+  const v = parseInt(AppState.settings.maxConsecutiveOff);
+  return (v > 0) ? v : 3;
 }
 
 // 個人の連勤上限（未設定・0なら全体設定 maxConsecutive を使う）
