@@ -401,8 +401,8 @@ tbody tr:hover { background: var(--surface-2); }
 /* プルダウンの選択値が切れないよう、列ごとに必要な最小幅を確保する */
 .staff-table select { padding: 6px 4px; }
 .staff-table th:nth-child(1)  { min-width: 64px; }   /* 名前 */
-.staff-table th:nth-child(2)  { min-width: 72px; }   /* 部門: キャスト */
-.staff-table th:nth-child(3)  { min-width: 74px; }   /* 役職: 副店長 */
+.staff-table th:nth-child(2)  { min-width: 84px; }   /* 部門: キャスト */
+.staff-table th:nth-child(3)  { min-width: 90px; }   /* 役職: スタッフ/リーダー */
 .staff-table th:nth-child(4)  { min-width: 130px; }  /* 担当シフト */
 .staff-table th:nth-child(9)  { min-width: 104px; }  /* 早遅バランス: 早番やや多め */
 .staff-table th:nth-child(12) { min-width: 92px; }   /* 土日休み */
