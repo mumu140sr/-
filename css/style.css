@@ -386,6 +386,21 @@ tbody tr:hover { background: var(--surface-2); }
 .staff-table input[type="number"] { width: 50px; }
 .staff-table select               { width: 100%; }
 .staff-table td                   { padding: 4px; }
+/* 見出しが狭い列で切れないよう、必ずセル内で折り返す（1文字ずつの縦積みを避ける） */
+.staff-table th {
+  vertical-align: middle;
+  line-height: 1.3;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  min-width: 46px;
+  padding: 7px 5px;
+  font-size: 12px;
+}
+.staff-table th small { display: block; font-weight: 500; font-size: 10px; opacity: .82; margin-top: 2px; }
+/* 名前・部門・役職・担当シフト・スキル列はもう少し広めに */
+.staff-table th:nth-child(1) { min-width: 64px; }
+.staff-table th:nth-child(4) { min-width: 130px; }
 
 .allowed-shifts-wrap { display: flex; flex-wrap: wrap; gap: 2px; min-width: 160px; }
 .allowed-label {
