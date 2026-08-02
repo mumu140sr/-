@@ -577,7 +577,7 @@ function renderDailyReqPanel() {
     <button id="btnClearDailyReq" class="btn" style="font-size:13px">🗑 上書き設定を全てクリア</button>
     <span class="hint" style="margin-left:8px">上書きしたセルだけ削除し、デフォルト値に戻します</span>
   </div>`;
-  html += '<table style="border-collapse:collapse;font-size:12px">';
+  html += '<table class="dailyreq-table" style="border-collapse:collapse;font-size:12px">';
   // ヘッダー1段目: 日付（曜日で色分け）
   html += '<thead><tr><th style="padding:4px 6px;border:1px solid #ccc;background:#f0f0f0;position:sticky;left:0;z-index:1">シフト / 部門</th>';
   for (let d = 1; d <= days; d++) {
@@ -1098,7 +1098,7 @@ function renderCalendar() {
     if (calGroups.length > 1) {
       const sep = document.createElement('tr');
       sep.className = 'dept-separator';
-      sep.innerHTML = `<td colspan="${days + 1}" style="background:#edf2f7;font-weight:700;padding:4px 8px">${g.label}</td>`;
+      sep.innerHTML = `<td colspan="${days + 1}" style="background:var(--surface-3);color:var(--text);font-weight:700;padding:4px 8px">${g.label}</td>`;
       tbody.appendChild(sep);
     }
     g.staff.forEach(s => {
@@ -1220,7 +1220,7 @@ function renderResultTable() {
     if (resGroups.length > 1) {
       const sep = document.createElement('tr');
       sep.className = 'dept-separator';
-      sep.innerHTML = `<td colspan="${days + STAT_COLS}" style="background:#edf2f7;font-weight:700;padding:4px 8px">${g.label}</td>`;
+      sep.innerHTML = `<td colspan="${days + STAT_COLS}" style="background:var(--surface-3);color:var(--text);font-weight:700;padding:4px 8px">${g.label}</td>`;
       tbody.appendChild(sep);
     }
 

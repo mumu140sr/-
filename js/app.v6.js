@@ -122,7 +122,7 @@ function showFeasibilityModal() {
 
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
-  modal.innerHTML = `<div style="background:#fff;border-radius:12px;max-width:720px;width:100%;max-height:85vh;overflow:auto;padding:20px">
+  modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:720px;width:100%;max-height:85vh;overflow:auto;padding:20px">
     <h3 style="margin:0 0 4px">🔍 実現性チェック（避けられる / 避けられない）</h3>
     <p class="hint" style="margin:0 0 12px">
       🔴🟡【避けられない】＝人員構成の限界。配置を変えても消せません（設定/人員の見直しが必要）。<br>

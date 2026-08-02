@@ -347,7 +347,7 @@ tbody tr:hover { background: var(--surface-2); }
 .role-table input[type="text"]   { padding: 3px 4px; }
 .role-table input[data-field="label"] { width: 88px !important; }
 .role-table input[data-field="key"]   { width: 52px !important; }
-.role-table select               { padding: 3px 4px; width: 74px !important; }
+.role-table select               { padding: 3px 4px; width: 100px !important; }
 
 .shift-preview {
   display: inline-block;
@@ -391,9 +391,16 @@ tbody tr:hover { background: var(--surface-2); }
 .allowed-label {
   display: inline-flex; align-items: center; gap: 3px;
   padding: 2px 7px; border-radius: 5px; font-size: 11px; font-weight: 700;
-  cursor: pointer; border: 1px solid rgba(0,0,0,0.08); transition: opacity .15s;
+  cursor: pointer; border: 1px solid rgba(0,0,0,0.12); transition: opacity .15s;
+  color: #23283a; /* パステル背景の上に常に濃色文字（明暗どちらでも読める） */
 }
 .allowed-label:hover { opacity: 0.85; }
+/* パステル背景が固定されたチップ類は、テーマに関わらず濃色文字で表示 */
+.shift-preview { color: #23283a; }
+
+/* 日別必要人数テーブルは明るい配色固定なので、文字も常に濃色にして読めるようにする */
+.dailyreq-table, .dailyreq-table th, .dailyreq-table td { color: #23283a !important; }
+.dailyreq-table .daily-req-input { color: #23283a !important; }
 
 .shift-pref { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
 .shift-pref label {
