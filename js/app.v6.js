@@ -591,12 +591,14 @@ function renderReport(result) {
   const must  = result.violations.filter(v => isMustViolation(v.type));
   const should = result.violations.filter(v => !isMustViolation(v.type));
 
+  // クリックでシフト表の該当コマへジャンプできるようにする
   const renderItems = (list) => list.map(v => {
     const s          = AppState.staff.find(m => m.id === v.staffId);
     const targetName = s ? s.name : '全体';
     const dayStr     = v.day > 0 ? ` (${v.day}日)` : '';
+    const jump = ` data-jump-sid="${escapeHtml(v.staffId || '')}" data-jump-day="${v.day || 0}"`;
     return `
-      <div class="violation-item">
+      <div class="violation-item is-jumpable"${jump} title="クリックでシフト表の該当箇所を表示">
         <span class="v-target">${escapeHtml(targetName)}${dayStr}</span>
         ${escapeHtml(v.message)}
         <span class="v-action">💡 ${escapeHtml(v.action)}</span>

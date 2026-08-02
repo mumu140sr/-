@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=114', 'optimizer.js?v=114', 'milp-core.js?v=114');
+self.importScripts('data.js?v=115', 'optimizer.js?v=115', 'milp-core.js?v=115');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=114'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=115'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;

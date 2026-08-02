@@ -1193,6 +1193,23 @@ function renderResultTable() {
     return;
   }
 
+  // 違反マップ（すべての違反がシフト表のどこかで見えるように3種類に振り分ける）
+  //  cellVio : スタッフ×日が特定できる違反 → そのコマを赤枠に
+  //  dayVio  : その日全体の違反（人員不足・スキル不足・副店長不在など） → 日付の見出しに
+  //  staffVio: 日付を持たない違反（公休不足 day=0） → 名前セルに
+  const cellVio = {}, dayVio = {}, staffVio = {};
+  (AppState.violations || []).forEach(v => {
+    if (v.staffId && v.day >= 1) {
+      (cellVio[v.staffId] = cellVio[v.staffId] || {});
+      (cellVio[v.staffId][v.day] = cellVio[v.staffId][v.day] || []).push(v);
+    } else if (v.day >= 1) {
+      (dayVio[v.day] = dayVio[v.day] || []).push(v);
+    } else if (v.staffId) {
+      (staffVio[v.staffId] = staffVio[v.staffId] || []).push(v);
+    }
+  });
+  const msgsOf = arr => (arr || []).map(x => x.message || x.type).join('\n');
+
   // ヘッダー
   const STAT_COLS = 7; // 名前列1 + 統計列6（公休/有給他/余/出勤/差/労働時間）
   const thead = document.createElement('thead');
@@ -1200,18 +1217,15 @@ function renderResultTable() {
   for (let d = 1; d <= days; d++) {
     const w   = getWeekday(AppState.settings.targetMonth, d);
     const cls = w === 0 ? 'weekend-sun' : w === 6 ? 'weekend-sat' : '';
-    headRow += `<th class="${cls}">${d}<br><small>${getWeekdayLabel(w)}</small></th>`;
+    const dv  = dayVio[d];
+    const dCls = dv ? ' day-violation' : '';
+    const dTtl = dv ? ` title="${escapeHtml(msgsOf(dv))}"` : '';
+    const mark = dv ? `<span class="vio-badge">!</span>` : '';
+    headRow += `<th class="${cls}${dCls}" data-dayhead="${d}"${dTtl}>${d}${mark}<br><small>${getWeekdayLabel(w)}</small></th>`;
   }
   headRow += '<th>公休</th><th>有給他</th><th>余<br><small>余剰</small></th><th>出勤</th><th>差</th><th>労働<br><small>時間</small></th></tr>';
   thead.innerHTML = headRow;
   table.appendChild(thead);
-
-  // 違反マップ
-  const vioMap = {};
-  AppState.violations.forEach(v => {
-    if (!vioMap[v.staffId]) vioMap[v.staffId] = {};
-    vioMap[v.staffId][v.day] = v;
-  });
 
   const tbody = document.createElement('tbody');
   const resGroups = getDepartmentGroups();
@@ -1228,15 +1242,18 @@ function renderResultTable() {
     g.staff.forEach(s => {
       const tr = document.createElement('tr');
       let workCount = 0, publicOffCount = 0, otherOffCount = 0, surplusCount = 0, totalHours = 0;
-      let cells = `<td>${escapeHtml(s.name)}</td>`;
+      const sv = staffVio[s.id];
+      let cells = `<td data-staffhead="${s.id}"${sv ? ` class="row-violation" title="${escapeHtml(msgsOf(sv))}"` : ''}>` +
+                  `${escapeHtml(s.name)}${sv ? '<span class="vio-badge">!</span>' : ''}</td>`;
       for (let d = 1; d <= days; d++) {
         const w     = getWeekday(AppState.settings.targetMonth, d);
         const wcls  = w === 0 ? 'weekend-sun' : w === 6 ? 'weekend-sat' : '';
         const shift = (AppState.shifts[s.id] || {})[d] || '';
         const cls   = getShiftClass(shift);
         const sty   = getShiftStyle(shift);
-        const vio     = (vioMap[s.id] || {})[d] ? ' violation' : '';
-        const vMsg    = vio ? escapeHtml(((vioMap[s.id] || {})[d] || {}).message || '') : '';
+        const vList   = (cellVio[s.id] || {})[d];
+        const vio     = vList ? ' violation' : '';
+        const vMsg    = vio ? escapeHtml(msgsOf(vList)) : '';
         const isFixed = !!((AppState.fixedShifts[s.id] || {})[d]);
         const fixCls  = isFixed ? ' cell-fixed' : '';
         const titleAttr = isFixed
@@ -1624,3 +1641,123 @@ function refreshAfterManualEdit() {
   }
   if (typeof saveToStorage === 'function') saveToStorage();
 }
+
+/* ===========================================
+   違反 → シフト表のコマへジャンプ
+   レポートの違反項目クリックで、⑥シフト表の該当セル（または該当日の見出し／
+   該当スタッフの名前セル）までスクロールして点滅表示する。
+   =========================================== */
+function jumpToViolation(sid, day) {
+  const tab = document.querySelector('.tab[data-tab="result"]');
+  if (tab && !tab.classList.contains('active')) tab.click();
+  setTimeout(() => {
+    const table = document.getElementById('resultTable');
+    if (!table) return;
+    let el = null;
+    if (sid && day >= 1)      el = table.querySelector(`td[data-sid="${CSS.escape(sid)}"][data-day="${day}"]`);
+    else if (day >= 1)        el = table.querySelector(`th[data-dayhead="${day}"]`);
+    else if (sid)             el = table.querySelector(`td[data-staffhead="${CSS.escape(sid)}"]`);
+    if (!el) return;
+    if (el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    el.classList.remove('vio-flash');
+    void el.offsetWidth;       // アニメーションを再実行させる
+    el.classList.add('vio-flash');
+    setTimeout(() => el.classList.remove('vio-flash'), 2400);
+  }, 60);
+}
+
+document.addEventListener('click', (e) => {
+  const item = e.target.closest && e.target.closest('.violation-item.is-jumpable');
+  if (!item) return;
+  const sid = item.dataset.jumpSid || '';
+  const day = parseInt(item.dataset.jumpDay) || 0;
+  if (!sid && !day) return;
+  jumpToViolation(sid, day);
+});
+
+/* ===========================================
+   列幅のドラッグ調整（②シフト種別 / ③スタッフ管理 / ⑥シフト表）
+   見出しの右端をドラッグすると列幅を変更でき、localStorage に保存される。
+   =========================================== */
+const COLW_KEY = 'shiftapp-colwidths';
+function _loadColW() {
+  try { return JSON.parse(localStorage.getItem(COLW_KEY) || '{}'); } catch (_) { return {}; }
+}
+function _saveColW(map) {
+  try { localStorage.setItem(COLW_KEY, JSON.stringify(map)); } catch (_) {}
+}
+// 保存済みの幅を適用（テーブル種別＋列番号をキーにする）
+function applyColumnWidths(table) {
+  if (!table) return;
+  const key = table.dataset.colwKey;
+  if (!key) return;
+  const saved = _loadColW()[key] || {};
+  const ths = table.querySelectorAll('thead tr:first-child > th');
+  ths.forEach((th, i) => {
+    const w = saved[i];
+    if (w) { th.style.width = w + 'px'; th.style.minWidth = w + 'px'; th.style.maxWidth = w + 'px'; }
+  });
+}
+// 見出しにドラッグ用のつまみを付ける
+function enableColumnResize(table, key) {
+  if (!table) return;
+  table.dataset.colwKey = key;
+  table.classList.add('resizable-cols');
+  // 見出しが再描画されるテーブルもあるため、つまみが無い見出しだけ毎回付け直す
+  const ths = table.querySelectorAll('thead tr:first-child > th');
+  ths.forEach((th, idx) => {
+    if (th.querySelector('.col-resizer')) return;
+    const grip = document.createElement('span');
+    grip.className = 'col-resizer';
+    grip.title = 'ドラッグで列幅を変更（ダブルクリックで既定に戻す）';
+    th.appendChild(grip);
+
+    let startX = 0, startW = 0;
+    const onMove = (ev) => {
+      const w = Math.max(28, startW + (ev.clientX - startX));
+      th.style.width = w + 'px'; th.style.minWidth = w + 'px'; th.style.maxWidth = w + 'px';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('col-resizing');
+      const all = _loadColW();
+      all[key] = all[key] || {};
+      all[key][idx] = parseInt(th.style.width) || th.offsetWidth;
+      _saveColW(all);
+    };
+    grip.addEventListener('mousedown', (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      startX = ev.clientX; startW = th.offsetWidth;
+      document.body.classList.add('col-resizing');
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    // ダブルクリックで既定幅に戻す
+    grip.addEventListener('dblclick', (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      th.style.width = ''; th.style.minWidth = ''; th.style.maxWidth = '';
+      const all = _loadColW();
+      if (all[key]) { delete all[key][idx]; _saveColW(all); }
+    });
+  });
+  applyColumnWidths(table);
+}
+
+// 各表に列幅調整を有効化（描画のたびに呼ばれても安全）
+function setupAllColumnResizers() {
+  enableColumnResize(document.querySelector('.role-table'),  'role');
+  enableColumnResize(document.querySelector('.staff-table'), 'staff');
+  enableColumnResize(document.getElementById('resultTable'), 'result');
+}
+
+// 各テーブルの描画後に列幅調整を有効化する（描画関数をラップして自動適用）
+['renderRoleTable', 'renderStaffTable', 'renderResultTable'].forEach((fn) => {
+  const orig = window[fn];
+  if (typeof orig !== 'function') return;
+  window[fn] = function (...args) {
+    const r = orig.apply(this, args);
+    try { setupAllColumnResizers(); } catch (_) {}
+    return r;
+  };
+});
