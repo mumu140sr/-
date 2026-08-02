@@ -7,30 +7,34 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=108" />
+<link rel="stylesheet" href="css/style.css?v=109" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <header class="app-header">
   <div class="title">
-    <h1>📅 シフト自動生成アプリ</h1>
+    <button id="btnNavToggle" class="nav-toggle" aria-label="メニュー">☰</button>
+    <span class="brand-logo">📅</span>
+    <h1>シフト自動生成アプリ</h1>
     <span class="subtitle"></span>
   </div>
   <div class="header-actions">
+    <button id="btnTheme" class="btn btn-ghost btn-theme" aria-label="テーマ切替" title="明暗を切り替え">🌙</button>
     <button id="btnSave" class="btn btn-ghost">💾 保存</button>
     <button id="btnLoad" class="btn btn-ghost">📂 読込</button>
     <button id="btnReset" class="btn btn-ghost">🗑 リセット</button>
   </div>
 </header>
 
-<nav class="tabs">
-  <button class="tab active" data-tab="settings">① 基本設定</button>
-  <button class="tab" data-tab="roles">② シフト種別</button>
-  <button class="tab" data-tab="staff">③ スタッフ管理</button>
-  <button class="tab" data-tab="calendar">④ 希望休入力</button>
-  <button class="tab" data-tab="generate">⑤ 自動生成</button>
-  <button class="tab" data-tab="result">⑥ シフト表</button>
-</nav>
+<div class="app-shell">
+  <nav class="tabs" id="sideNav">
+    <button class="tab active" data-tab="settings"><span class="tab-ico">⚙️</span><span class="tab-txt">基本設定</span></button>
+    <button class="tab" data-tab="roles"><span class="tab-ico">🗂️</span><span class="tab-txt">シフト種別</span></button>
+    <button class="tab" data-tab="staff"><span class="tab-ico">👥</span><span class="tab-txt">スタッフ管理</span></button>
+    <button class="tab" data-tab="calendar"><span class="tab-ico">📅</span><span class="tab-txt">希望休入力</span></button>
+    <button class="tab" data-tab="generate"><span class="tab-ico">🚀</span><span class="tab-txt">自動生成</span></button>
+    <button class="tab" data-tab="result"><span class="tab-ico">📊</span><span class="tab-txt">シフト表</span></button>
+  </nav>
 
 <main class="content">
 
@@ -288,7 +292,9 @@
   </section>
 
 </main>
+</div>
 
+<div id="navScrim" class="nav-scrim"></div>
 <div id="toast" class="toast"></div>
 
 <!-- 手動シフト編集モーダル -->
@@ -305,12 +311,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=108"></script>
-<script src="js/optimizer.v6.js?v=108"></script>
-<script src="js/worker-client.v6.js?v=108"></script>
-<script src="js/ai-explain.v6.js?v=108"></script>
-<script src="js/ui.v6.js?v=108"></script>
-<script src="js/milp.v6.js?v=108"></script>
-<script src="js/app.v6.js?v=108"></script>
+<script src="js/data.v6.js?v=109"></script>
+<script src="js/optimizer.v6.js?v=109"></script>
+<script src="js/worker-client.v6.js?v=109"></script>
+<script src="js/ai-explain.v6.js?v=109"></script>
+<script src="js/ui.v6.js?v=109"></script>
+<script src="js/milp.v6.js?v=109"></script>
+<script src="js/app.v6.js?v=109"></script>
 </body>
 </html>

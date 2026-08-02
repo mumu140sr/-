@@ -2,7 +2,48 @@
    app.js - アプリのエントリーポイントとイベント結合
    =========================================== */
 
+// テーマ（明暗）とモバイルナビの制御
+function setupUIChrome() {
+  const root = document.documentElement;
+  const btnTheme = document.getElementById('btnTheme');
+  const KEY = 'shiftapp-theme';
+  const apply = (t) => {
+    root.setAttribute('data-theme', t);
+    if (btnTheme) btnTheme.textContent = (t === 'dark') ? '☀️' : '🌙';
+  };
+  let saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (_) {}
+  if (!saved) {
+    saved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+  apply(saved);
+  if (btnTheme) {
+    btnTheme.addEventListener('click', () => {
+      const next = (root.getAttribute('data-theme') === 'dark') ? 'light' : 'dark';
+      apply(next);
+      try { localStorage.setItem(KEY, next); } catch (_) {}
+    });
+  }
+
+  // モバイル: サイドバーの開閉
+  const nav = document.getElementById('sideNav');
+  const scrim = document.getElementById('navScrim');
+  const btnNav = document.getElementById('btnNavToggle');
+  const closeNav = () => { if (nav) nav.classList.remove('open'); if (scrim) scrim.classList.remove('show'); };
+  if (btnNav && nav) {
+    btnNav.addEventListener('click', () => {
+      nav.classList.toggle('open');
+      if (scrim) scrim.classList.toggle('show', nav.classList.contains('open'));
+    });
+  }
+  if (scrim) scrim.addEventListener('click', closeNav);
+  if (nav) nav.addEventListener('click', (e) => { if (e.target.closest('.tab')) closeNav(); });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  // テーマは最初に適用（ちらつき防止）
+  setupUIChrome();
+
   // データ読込
   const loaded = loadFromStorage();
   if (!loaded || AppState.staff.length === 0) {
