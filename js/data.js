@@ -270,9 +270,25 @@ function getDayReq(reqs, dailyReqs, shiftKey, day) {
   return reqs[shiftKey] || 0;
 }
 
-// 研修も早番カテゴリ（A）として扱う
+// 研修は既定で早番カテゴリ（A）扱い。ただし②シフト種別マスターで
+// カテゴリB（遅番）に設定された場合はその設定を優先する。
 function isEarlyCategory(shift) {
+  if (isLate(shift)) return false;
   return isEarly(shift) || isTraining(shift);
+}
+
+/**
+ * 前月末の状態を正規化して返す。
+ *  - lastShift: 前月末シフト（出勤シフトのときのみ有効）
+ *  - cons:      前月末時点の連勤日数
+ * 「前月末シフト」を選んでいれば前月末は出勤で終わっている＝連勤1日以上とみなす。
+ * （連勤日数が未入力/0のままでも前月末シフトの設定が効くようにするため）
+ */
+function getPrevMonthEnd(s) {
+  const last = (s && s.prevLastShift && isWork(s.prevLastShift)) ? s.prevLastShift : '';
+  let cons = Math.max(0, parseInt(s && s.prevConsecutive) || 0);
+  if (last && cons < 1) cons = 1;
+  return { lastShift: last, cons };
 }
 
 // 連勤カテゴリ（'A' / 'B' / null）

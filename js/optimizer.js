@@ -2352,8 +2352,10 @@ function tryFixCategorySwitch(shifts, locked, staff, days, allowedShifts) {
   for (const s of shuffledStaff) {
     // カテゴリ切替違反を収集
     const violations = [];
-    let consWork  = s.prevConsecutive || 0;
-    let prevShift = (consWork > 0 && s.prevLastShift) ? s.prevLastShift : '';
+    const _pme    = getPrevMonthEnd(s);   // 前月末シフト単独でも有効にする
+    let consWork  = _pme.cons;
+    let prevShift = _pme.lastShift;
+    const prevWorked = _pme.cons > 0;     // 前月末が出勤で終わっていたか（バンド不明でも真）
     for (let d = 1; d <= days; d++) {
       const cur = shifts[s.id][d];
       if (isWork(cur)) {
@@ -2709,8 +2711,10 @@ function calculateScore(shifts, allowedShifts, days, P) {
 
   // 横: 各スタッフのルール
   staff.forEach(s => {
-    let consWork  = s.prevConsecutive || 0;
-    let prevShift = (consWork > 0 && s.prevLastShift) ? s.prevLastShift : '';
+    const _pme    = getPrevMonthEnd(s);   // 前月末シフト単独でも有効にする
+    let consWork  = _pme.cons;
+    let prevShift = _pme.lastShift;
+    const prevWorked = _pme.cons > 0;     // 前月末が出勤で終わっていたか（バンド不明でも真）
     let offCount  = 0, earlyCount = 0, lateCount = 0;
     let lockedOff = 0, unlockedOff = 0; // viceManager 用（既存ループ内で同時集計）
     let offRun    = 0, pairRestRuns = 0; // 連休（2連休以上）の検出用
@@ -2907,8 +2911,10 @@ function checkViolations(shifts) {
   for (let d = 1; d <= days; d++) _wdv[d] = getWeekday(settings.targetMonth, d);
 
   staff.forEach(s => {
-    let consWork  = s.prevConsecutive || 0;
-    let prevShift = (consWork > 0 && s.prevLastShift) ? s.prevLastShift : '';
+    const _pme    = getPrevMonthEnd(s);   // 前月末シフト単独でも有効にする
+    let consWork  = _pme.cons;
+    let prevShift = _pme.lastShift;
+    const prevWorked = _pme.cons > 0;     // 前月末が出勤で終わっていたか（バンド不明でも真）
     let offCount  = 0;
     let offRun    = 0;
     // キャスト（パート的な少日数勤務）は、単発出勤・長期連休・切替などの
@@ -3004,9 +3010,11 @@ function checkViolations(shifts) {
         }
 
         // 単発出勤チェック（前後が両方とも非出勤）
-        if (!isCast && settings.penaltySingleOff && d > 1 && d < days) {
+        // 1日目は前月末の状態で判定する（前月末が休みなら1日目の孤立出勤も単発）
+        if (!isCast && settings.penaltySingleOff && d < days) {
           const nx = (shifts[s.id] || {})[d + 1] || '';
-          if (!isWork(prevShift) && !isWork(nx)) {
+          const prevIsWork = (d === 1) ? prevWorked : isWork(prevShift);
+          if (!prevIsWork && !isWork(nx)) {
             violations.push({
               staffId: s.id, day: d, type: 'single-work',
               message: `⚠️ 単発出勤（${cur}）`,

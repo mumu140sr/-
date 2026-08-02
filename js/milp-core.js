@@ -153,7 +153,8 @@
     // 横（各スタッフ）: 連勤・公休・リズム・ヒエラルキー
     const cellTerms = (s, d) => { // {c, w:[], e:[], l:[]}  勤務=役割+研+固定
       const o = { c: 0, w: [], e: [], l: [] };
-      if (isTrainDay(s, d)) { o.c = 1; o.e.push('_'); return o; } // 研=早系（定数扱い）
+      // 研修は既定で早番系。②シフト種別マスターでカテゴリB（遅番）にした場合はそれに従う。
+      if (isTrainDay(s, d)) { o.c = 1; (cat(fx(s, d)) === 'l' ? o.l : o.e).push('_'); return o; }
       if (isFixWork(s, d)) { o.c = 1; const k = fx(s, d); (cat(k) === 'l' ? o.l : o.e).push('_'); return o; }
       if (!free(s, d)) return o;
       allowRoles(s).forEach(k => { const v = V(sidOf[s.id], d, roleIdx[k]); o.w.push(v); (cat(k) === 'l' ? o.l : o.e).push(v); });
@@ -177,7 +178,7 @@
         }
         // 前月末の連勤を反映：前月から pc 連勤で入ってくる場合、月初の窓に pc を定数として加える。
         // j 日ぶんの前月勤務＋月初(1..win-j 日)の勤務合計 ≤ maxCons。
-        const pc = Math.min(maxCons, s.prevConsecutive || 0);
+        const pc = Math.min(maxCons, getPrevMonthEnd(s).cons);
         for (let j = 1; j <= pc; j++) {
           const lastDay = Math.min(win - j, days);
           if (lastDay < 1) continue;
@@ -233,7 +234,8 @@
       // 前月末シフト(prevLastShift)を反映：1日目の 遅→早（インターバル不足）と連勤中の時間帯切替。
       // checkViolations は前月末シフトを見て罰する（consWork/prevShift）のに、生成側が無視すると
       // 1日目に必ず違反が出る。境界を制約に加えて回避する。
-      const pls = (s.prevConsecutive > 0 && s.prevLastShift && isWork(s.prevLastShift)) ? s.prevLastShift : '';
+      const pme = getPrevMonthEnd(s);
+      const pls = pme.lastShift;
       if (pls) {
         const A1 = cellTerms(s, 1);
         const earlyD1 = realT(A1.e), lateD1 = realT(A1.l);
@@ -245,6 +247,16 @@
         } else if (isEarlyCategory(pls)) {
           // 連勤中の時間帯切替 早→遅（🟡）
           if (wCS > 0 && lateD1.length) { const v = `csb_${si}`; addSlack(v, 1, wCS); cons.push(`csb_${si}: ${lateD1.join(' + ')} - ${v} <= 0`); }
+        }
+      }
+      // 前月末が休みで終わっている場合、1日目の孤立出勤（1日目=出勤・2日目=休み）も単発出勤。
+      // checkViolations と揃えて、生成側でも避けるようにする。
+      if (wSW > 0 && pme.cons === 0 && days >= 2) {
+        const A1 = cellTerms(s, 1), B1 = cellTerms(s, 2);
+        if (realT(A1.w).length || A1.c >= 1) {
+          const v = `sw1_${si}`; addSlack(v, 1, wSW);
+          const lhs = [...realT(A1.w), ...realT(B1.w).map(x => `- ${x}`), `- ${v}`];
+          cons.push(`sw1_${si}: ${lhs.join(' + ').replace(/\+ -/g, '-')} <= ${-A1.c + B1.c}`);
         }
       }
     });
