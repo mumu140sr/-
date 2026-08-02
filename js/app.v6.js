@@ -137,6 +137,44 @@ function showFeasibilityModal() {
   modal.addEventListener('click', e => { if (e.target === modal) close(); });
 }
 
+/**
+ * 生成結果が「数学的に最良と証明できた」のか「時間切れで打ち切った」のかを表示する。
+ * 打ち切りだった場合は、時間を延ばして再計算するボタンを出す（＝まだ減る可能性がある）。
+ */
+function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep) {
+  const $report = document.getElementById('reportCard');
+  if (!$report) return;
+  const old = document.getElementById('optimalityNotice');
+  if (old) old.remove();
+  const box = document.createElement('div');
+  box.id = 'optimalityNotice';
+  box.style.cssText = 'padding:12px 14px;border-radius:10px;margin-bottom:12px;font-size:13px;line-height:1.7';
+
+  if (!cutOff) {
+    box.style.background = 'color-mix(in srgb, var(--success) 14%, var(--surface))';
+    box.style.border = '1px solid color-mix(in srgb, var(--success) 35%, transparent)';
+    box.innerHTML = vioCount === 0
+      ? `✅ <b>計算完了（${elapsed}秒）</b>：エラー0件。数学的にこれが最良と確認できました。`
+      : `✅ <b>計算完了（${elapsed}秒）</b>：残った ${vioCount}件は、<b>今の設定では避けられません</b>（これ以上良い組み合わせが存在しないことを確認済み）。<br>
+         減らすには、必要人数・公休数・担当シフト・希望休などの設定を見直してください。`;
+  } else {
+    box.style.background = 'color-mix(in srgb, var(--warning) 16%, var(--surface))';
+    box.style.border = '1px solid color-mix(in srgb, var(--warning) 40%, transparent)';
+    box.innerHTML = `⏱ <b>時間切れで打ち切りました（${elapsed}秒）</b>：残り ${vioCount}件は
+      <b>「避けられない」とは限りません</b>。計算時間が足りず、途中までの best 解を表示しています。<br>
+      ${wasDeep ? '（じっくりモードでも解ききれませんでした。設定の見直しをおすすめします）'
+                : '<button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">⏳ もっと時間をかけて再計算（最大9分）</button>'}`;
+  }
+  $report.insertBefore(box, $report.firstChild);
+  const bd = document.getElementById('btnDeepOptimize');
+  if (bd) bd.addEventListener('click', () => {
+    if (typeof window._runGenerate === 'function') {
+      toast('じっくりモードで再計算します（最大9分）', 'info', 4000);
+      window._runGenerate({ deepMode: true });
+    }
+  });
+}
+
 // ⑤ 自動生成パネル
 function setupGeneratePanel() {
   const btn = document.getElementById('btnGenerate');
@@ -144,7 +182,9 @@ function setupGeneratePanel() {
   const btnFeas = document.getElementById('btnFeasibility');
   if (btnFeas) btnFeas.addEventListener('click', showFeasibilityModal);
 
-  btn.addEventListener('click', async () => {
+  // opts.deepMode = true でじっくり最適化（時間上限を大幅に延長）
+  const runGenerate = async (opts) => {
+    opts = opts || {};
     if (AppState.staff.length === 0) {
       toast('スタッフを登録してください', 'error');
       return;
@@ -174,16 +214,19 @@ function setupGeneratePanel() {
         throw new Error('数理最適化モジュールが未読込です。ページを再読み込み（Ctrl+Shift+R）してください。');
       }
       const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + msg; };
-      const res = await optimizeScheduleMILP(prog);
+      const res = await optimizeScheduleMILP(prog, { deepMode: !!opts.deepMode });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
-      $text.textContent = `完了！ 違反 ${res.violations.length}件（${elapsed}秒）`;
+      const cutOff = (res.allOptimal === false);   // 時間切れで打ち切られた＝最良解とは限らない
+      $text.textContent = `完了！ 違反 ${res.violations.length}件（${elapsed}秒）` +
+                          (cutOff ? '｜⏱ 時間切れで打ち切り（まだ改善余地あり）' : '｜✅ これ以上良い組み合わせは無いと確認済み');
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
       $report.style.display = 'block';
       try {
         renderReport({ success: res.success, score: res.score, violations: res.violations,
           candidateSummary: `数理最適化で生成 — 違反${res.violations.length}件（${elapsed}秒）` });
       } catch (rErr) { console.error('[generate] レポート表示でエラー（表は表示します）:', rErr); }
+      showOptimalityNotice(cutOff, res.violations.length, elapsed, !!opts.deepMode);
       renderResultTable();
       setTimeout(() => {
         const rt = document.querySelector('.tab[data-tab="result"]'); if (rt) rt.click();
@@ -207,7 +250,9 @@ function setupGeneratePanel() {
       btn.textContent = '🚀 シフト自動生成を実行';
       if (btnCancel) btnCancel.style.display = 'none';
     }
-  });
+  };
+  window._runGenerate = runGenerate;   // 「じっくり再計算」から呼ぶ
+  btn.addEventListener('click', () => runGenerate({}));
 
   // キャンセルボタン
   if (btnCancel) {
