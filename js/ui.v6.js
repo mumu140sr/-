@@ -1138,8 +1138,8 @@ function renderCalendar() {
       for (let d = 1; d <= days; d++) {
         const w     = getWeekday(AppState.settings.targetMonth, d);
         const cls   = w === 0 ? 'weekend-sun' : w === 6 ? 'weekend-sat' : '';
-        // 休み系は requests、出勤系（固定シフト）は fixedShifts に入っている
-        const cur   = (AppState.requests[s.id] || {})[d] || (AppState.fixedShifts[s.id] || {})[d] || '';
+        // ④で入力した内容のみを表示する（⑥シフト表の手動固定とは連動させない）
+        const cur   = (AppState.requests[s.id] || {})[d] || '';
         const shCls = getShiftClass(cur);
         const shSty = getShiftStyle(cur);
         html += `<td class="${cls}" data-sid="${s.id}" data-day="${d}">
@@ -1157,19 +1157,14 @@ function renderCalendar() {
     td.addEventListener('click', () => {
       const sid = td.dataset.sid;
       const d   = parseInt(td.dataset.day);
-      // 出勤系シフト（早責/遅責/研 など）は「固定シフト」として fixedShifts に保存する。
-      // requests に入れると生成側が休み系しか見ないため無視されてしまうため。
-      if (!AppState.requests[sid])    AppState.requests[sid]    = {};
-      if (!AppState.fixedShifts[sid]) AppState.fixedShifts[sid] = {};
+      // ④の入力は requests に保存する（⑥の手動固定 fixedShifts とは別管理）。
+      // 出勤系シフト（早責/遅責/研 など）も requests に入れるが、生成側は
+      // getFixedShiftAt() 経由で「固定」として扱うので指定どおりに配置される。
+      if (!AppState.requests[sid]) AppState.requests[sid] = {};
       if (selectedMark === '') {
-        delete AppState.requests[sid][d];
-        delete AppState.fixedShifts[sid][d];
-      } else if (isWork(selectedMark)) {
-        AppState.fixedShifts[sid][d] = selectedMark;
         delete AppState.requests[sid][d];
       } else {
         AppState.requests[sid][d] = selectedMark;
-        delete AppState.fixedShifts[sid][d];
       }
       const span = td.querySelector('.shift-cell');
       span.textContent   = selectedMark;
@@ -1181,8 +1176,7 @@ function renderCalendar() {
     td.addEventListener('dblclick', () => {
       const sid = td.dataset.sid;
       const d   = parseInt(td.dataset.day);
-      if (AppState.requests[sid])    delete AppState.requests[sid][d];
-      if (AppState.fixedShifts[sid]) delete AppState.fixedShifts[sid][d];
+      if (AppState.requests[sid]) delete AppState.requests[sid][d];
       const span = td.querySelector('.shift-cell');
       span.textContent   = '';
       span.className     = 'shift-cell s-empty';
