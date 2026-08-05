@@ -40,7 +40,8 @@
     const V = (si, d, ki) => `x_${si}_${d}_${ki}`;
 
     const req = (s) => (s.requests || (AppState.requests[s.id] || {}));
-    const fx  = (s, d) => (AppState.fixedShifts[s.id] || {})[d];
+    // 固定シフト（手動固定＋④で指定した出勤系シフト）。旧データ互換も含む。
+    const fx  = (s, d) => getFixedShiftAt(s.id, d) || undefined;
     const rq  = (s, d) => (AppState.requests[s.id] || {})[d];
     const allowRoles = s => (s.allowedShifts || []).filter(k => roles.includes(k));
     // その日、役割を割り当て可能か（休/有/固定/研 でない）
@@ -306,7 +307,7 @@
     gStaff.forEach(s => {
       const si = sidOf[s.id]; shifts[s.id] = shifts[s.id] || {};
       for (let d = 1; d <= days; d++) {
-        const f = (AppState.fixedShifts[s.id] || {})[d];
+        const f = getFixedShiftAt(s.id, d);
         const r = (AppState.requests[s.id] || {})[d];
         if (f) { shifts[s.id][d] = f; continue; }
         if (r && isOff(r)) { shifts[s.id][d] = r; continue; }

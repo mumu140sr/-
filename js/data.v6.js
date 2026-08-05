@@ -182,6 +182,39 @@ function isPublicOff(shift) {
   return t ? !!t.countsAsPublic : false;
 }
 
+/**
+ * そのマスに「固定」されているシフトを返す（無ければ ''）。
+ * ④希望休入力で出勤系シフト（早責・遅責・研など）を指定した場合も固定として扱う。
+ * 旧データでは出勤系の指定が requests 側に入っているため、そこも見る（互換）。
+ */
+function getFixedShiftAt(staffId, day) {
+  const f = (AppState.fixedShifts[staffId] || {})[day];
+  if (f) return f;
+  const r = (AppState.requests[staffId] || {})[day];
+  return (r && isWork(r)) ? r : '';
+}
+
+/**
+ * 旧データ移行: ④希望休入力で入れた出勤系シフトが requests に入っている場合、
+ * fixedShifts（固定シフト）へ移す。休み系はそのまま requests に残す。
+ */
+function migrateWorkRequestsToFixed() {
+  let moved = 0;
+  Object.keys(AppState.requests || {}).forEach(sid => {
+    const days = AppState.requests[sid] || {};
+    Object.keys(days).forEach(d => {
+      const v = days[d];
+      if (v && isWork(v)) {
+        if (!AppState.fixedShifts[sid]) AppState.fixedShifts[sid] = {};
+        if (AppState.fixedShifts[sid][d] == null) AppState.fixedShifts[sid][d] = v;
+        delete days[d];
+        moved++;
+      }
+    });
+  });
+  return moved;
+}
+
 // 連休（休みの連続）として許容する最大日数（未設定なら3日）。
 // これを1日でも超えると long-rest 違反（例: 3ならば4連休以上がエラー）。
 function getMaxOffRun() {
@@ -446,6 +479,8 @@ function loadFromStorage() {
     AppState.violations  = data.violations  || [];
     AppState.generated   = data.generated === true;
     _staffIdCounter = data._staffIdCounter || (AppState.staff.length + 1);
+    // 旧データ: ④で入れた出勤系シフトが requests 側にあると生成で無視されるため固定へ移す
+    migrateWorkRequestsToFixed();
     return true;
   } catch (e) {
     console.error('読込エラー', e);
