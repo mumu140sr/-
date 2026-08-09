@@ -652,8 +652,67 @@ function renderDailyReqPanel() {
     });
   });
 
+  // ── スキル要件の日別上書き（目標人数 / 最低ライン）──
+  (AppState.skills || []).forEach(sk => {
+    const bandLabel = (sk.target || 'late') === 'early' ? '早番' : '遅番';
+    [['req', '目標人数'], ['min', '最低ライン']].forEach(([field, fLabel]) => {
+      const baseNeed = (sk.req != null ? sk.req : sk.lateReq) || 0;
+      const baseVal  = field === 'req' ? baseNeed
+                     : ((sk.min != null && sk.min >= 0) ? sk.min : baseNeed);
+      html += `<tr><td style="padding:4px 6px;border:1px solid #ccc;white-space:nowrap;position:sticky;left:0;background:#eef6ff;z-index:1">`
+            + `🎯 ${escapeHtml(sk.name)}（${bandLabel}・${fLabel}・通常: ${baseVal}）</td>`;
+      for (let d = 1; d <= days; d++) {
+        const w  = getWeekday(AppState.settings.targetMonth, d);
+        const ov = ((AppState.dailySkills || {})[sk.name] || {})[d] || {};
+        const override = ov[field];
+        const isOv = override != null;
+        const cellBg = isOv ? '#fff7d6' : (w === 0 ? '#fff5f5' : (w === 6 ? '#f5f9ff' : '#fff'));
+        html += `<td style="padding:1px;border:1px solid #ccc;background:${cellBg}">
+          <input type="number" min="0" max="99"
+            value="${isOv ? override : baseVal}"
+            data-skill="${escapeHtml(sk.name)}" data-sfield="${field}" data-day="${d}" data-default="${baseVal}"
+            class="daily-skill-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${isOv ? '700' : '400'};color:${isOv ? '#000' : '#999'}"/>
+        </td>`;
+      }
+      html += '</tr>';
+    });
+  });
+
   html += '</tbody></table></div>';
+  if ((AppState.skills || []).length) {
+    html += `<p class="hint" style="margin-top:6px">🎯 の行はスキル要件です。忙しい日だけ「目標人数」を増やす、閑散日は下げる、といった調整ができます（最低ラインは目標を超えません）。</p>`;
+  }
   container.innerHTML = html;
+
+  // スキル要件の日別上書き
+  container.querySelectorAll('.daily-skill-input').forEach(el => {
+    el.addEventListener('change', e => {
+      const name  = e.target.dataset.skill;
+      const field = e.target.dataset.sfield;
+      const day   = parseInt(e.target.dataset.day);
+      const def   = parseInt(e.target.dataset.default) || 0;
+      const val   = e.target.value.trim();
+      if (!AppState.dailySkills) AppState.dailySkills = {};
+      if (!AppState.dailySkills[name]) AppState.dailySkills[name] = {};
+      const map = AppState.dailySkills[name];
+      const num = parseInt(val);
+      const hasOverride = !(val === '' || val === '-' || isNaN(num) || num === def);
+      if (!hasOverride) {
+        if (map[day]) { delete map[day][field]; if (!Object.keys(map[day]).length) delete map[day]; }
+        if (val === '' || val === '-') e.target.value = def;
+      } else {
+        if (!map[day]) map[day] = {};
+        map[day][field] = num;
+      }
+      const w = getWeekday(AppState.settings.targetMonth, day);
+      e.target.style.fontWeight = hasOverride ? '700' : '400';
+      e.target.style.color      = hasOverride ? '#000' : '#999';
+      const cell = e.target.closest('td');
+      if (cell) cell.style.background = hasOverride ? '#fff7d6'
+        : (w === 0 ? '#fff5f5' : (w === 6 ? '#f5f9ff' : '#fff'));
+      autoSave();
+    });
+  });
 
   // 全クリアボタン
   const btnClear = container.querySelector('#btnClearDailyReq');
@@ -661,10 +720,12 @@ function renderDailyReqPanel() {
     btnClear.addEventListener('click', () => {
       const emp  = Object.keys(AppState.dailyRequirements || {}).some(k => Object.keys(AppState.dailyRequirements[k] || {}).length > 0);
       const cast = Object.keys(AppState.dailyRequirementsCast || {}).some(k => Object.keys(AppState.dailyRequirementsCast[k] || {}).length > 0);
-      if (!emp && !cast) { toast('上書き設定はありません', 'info'); return; }
-      if (!confirm('日別の上書き設定を全てクリアしますか？\nデフォルト必要人数には影響しません。')) return;
+      const skl  = Object.keys(AppState.dailySkills || {}).some(k => Object.keys(AppState.dailySkills[k] || {}).length > 0);
+      if (!emp && !cast && !skl) { toast('上書き設定はありません', 'info'); return; }
+      if (!confirm('日別の上書き設定を全てクリアしますか？（スキル要件の日別設定も含みます）\nデフォルト必要人数には影響しません。')) return;
       AppState.dailyRequirements     = {};
       AppState.dailyRequirementsCast = {};
+      AppState.dailySkills           = {};
       autoSave();
       renderDailyReqPanel();
       toast('日別上書き設定をクリアしました', 'success');

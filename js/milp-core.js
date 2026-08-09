@@ -34,7 +34,9 @@
     const lateRoles  = roles.filter(k => cat(k) === 'l');
     const SOLO = (typeof SOLO_SHIFT_KEYS !== 'undefined') ? new Set(SOLO_SHIFT_KEYS) : new Set();
     const P = AppState.settings.penalties || {};
-    const skills = (AppState.skills || []).filter(sk => (sk.req != null ? sk.req : sk.lateReq) > 0);
+    // 既定が0でも日別上書きがあれば対象にする
+    const skills = (AppState.skills || []).filter(sk =>
+      ((sk.req != null ? sk.req : sk.lateReq) > 0) || hasDailySkillOverride(sk.name));
 
     const sidOf = {}; gStaff.forEach((s, i) => sidOf[s.id] = i);
     const V = (si, d, ki) => `x_${si}_${d}_${ki}`;
@@ -118,11 +120,11 @@
 
     // スキル（早/遅帯）: 最低 min・目標 req
     skills.forEach((sk, xi) => {
-      const need = (sk.req != null ? sk.req : sk.lateReq) || 0;
-      const min = (sk.min != null && sk.min >= 0 && sk.min <= need) ? sk.min : need;
       const early = (sk.target || 'late') === 'early';
       const bandRoles = early ? earlyRoles : lateRoles;
       for (let d = 1; d <= days; d++) {
+        // 目標人数・最低ラインは日別上書きを反映（日別必要人数パネルで設定）
+        const { need, min } = getDaySkillReq(sk, d);
         const terms = []; let c = 0;
         gStaff.forEach(s => {
           if (!(s.skills || []).includes(sk.name)) return;

@@ -361,15 +361,19 @@ tbody tr:hover { background: var(--surface-2); }
 }
 
 /* ===== 日別必要人数パネル ===== */
-.daily-req-input::placeholder { color: var(--text-muted); opacity: 1; }
-.daily-req-input {
+.daily-req-input::placeholder,
+.daily-skill-input::placeholder { color: var(--text-muted); opacity: 1; }
+.daily-req-input,
+.daily-skill-input {
   width: 42px !important; min-width: 42px;
   padding: 4px 2px !important; border: none !important; border-radius: 0 !important;
   font-size: 13px !important; box-sizing: border-box; background: transparent; color: var(--text);
   -moz-appearance: textfield; appearance: textfield;
 }
 .daily-req-input::-webkit-outer-spin-button,
-.daily-req-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.daily-req-input::-webkit-inner-spin-button,
+.daily-skill-input::-webkit-outer-spin-button,
+.daily-skill-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
 .summary-req-input {
   width: 100% !important; min-width: 0;
@@ -422,7 +426,8 @@ tbody tr:hover { background: var(--surface-2); }
 
 /* 日別必要人数テーブルは明るい配色固定なので、文字も常に濃色にして読めるようにする */
 .dailyreq-table, .dailyreq-table th, .dailyreq-table td { color: #23283a !important; }
-.dailyreq-table .daily-req-input { color: #23283a !important; }
+.dailyreq-table .daily-req-input,
+.dailyreq-table .daily-skill-input { color: #23283a !important; }
 
 .shift-pref { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
 .shift-pref label {

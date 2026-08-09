@@ -3124,13 +3124,16 @@ function checkViolations(shifts) {
   // スキル別: 指定の時間帯（早番/遅番）に必要なスキル保有者が足りているか。
   // 最低ライン min を下回る＝🔴(skill-late)、min〜目標未満＝🟡(skill-short)。
   (AppState.skills || []).forEach(sk => {
-    const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
-    if (!need) return;
-    const min = (sk.min != null && sk.min >= 0 && sk.min <= need) ? sk.min : need;
+    const baseNeed = (sk.req != null ? sk.req : (sk.lateReq || 0));
+    // 既定が0でも日別上書きがあれば判定する
+    if (!baseNeed && !hasDailySkillOverride(sk.name)) return;
     const target = sk.target || 'late';
     const label  = target === 'early' ? '早番' : '遅番';
     const inTarget = (sh) => target === 'early' ? isEarlyCategory(sh) : isLate(sh);
     for (let d = 1; d <= days; d++) {
+      // 目標人数・最低ラインは日別上書きを反映
+      const { need, min } = getDaySkillReq(sk, d);
+      if (!need && !min) continue;
       let have = 0;
       staff.forEach(s => {
         const sh = (shifts[s.id] || {})[d] || '';

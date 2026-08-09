@@ -126,8 +126,11 @@ const AppState = {
   dailyRequirements: {},
   // キャスト部門の日別必要人数
   dailyRequirementsCast: {},
-  // スキル要件 [{ name: '営業', lateReq: 2 }] — 遅番にそのスキル保有者が lateReq 人以上必要
+  // スキル要件 [{ name: '営業', target:'late', req:2, min:1 }]
   skills: [],
+  // スキル要件の日別上書き { スキル名: { day: { req: 目標人数, min: 最低ライン } } }
+  // 指定が無い日は skills の既定値を使う
+  dailySkills: {},
   // スタッフ一覧
   // 各スタッフ: { id, name, department, positionType, allowedShifts[], maxOff, prefs[], balance, prevConsecutive, prevLastShift, note }
   staff: [],
@@ -291,6 +294,28 @@ function getDayReq(reqs, dailyReqs, shiftKey, day) {
   return reqs[shiftKey] || 0;
 }
 
+/**
+ * その日のスキル要件を返す。{ need: 目標人数, min: 最低ライン }
+ * 日別必要人数パネルで上書きされていればそれを優先する。
+ */
+function getDaySkillReq(sk, day) {
+  const baseNeed = (sk.req != null ? sk.req : sk.lateReq) || 0;
+  const baseMin  = (sk.min != null && sk.min >= 0) ? sk.min : baseNeed;
+  const ov = ((AppState.dailySkills || {})[sk.name] || {})[day] || {};
+  let need = (ov.req != null) ? parseInt(ov.req) : baseNeed;
+  let min  = (ov.min != null) ? parseInt(ov.min)  : baseMin;
+  if (!(need >= 0)) need = baseNeed;
+  if (!(min  >= 0)) min  = baseMin;
+  if (min > need) min = need;   // 最低ラインは目標を超えない
+  return { need, min };
+}
+
+// そのスキルに日別上書きが1つでもあるか（既定0でも日別指定があれば対象にする）
+function hasDailySkillOverride(name) {
+  const m = (AppState.dailySkills || {})[name] || {};
+  return Object.keys(m).length > 0;
+}
+
 // 研修は既定で早番カテゴリ（A）扱い。ただし②シフト種別マスターで
 // カテゴリB（遅番）に設定された場合はその設定を優先する。
 function isEarlyCategory(shift) {
@@ -351,6 +376,7 @@ function saveToStorage() {
       dailyRequirements:    AppState.dailyRequirements,
       dailyRequirementsCast: AppState.dailyRequirementsCast,
       skills:               AppState.skills,
+      dailySkills:          AppState.dailySkills,
       staff:                AppState.staff,
       requests:             AppState.requests,
       shifts:               AppState.shifts,
@@ -406,6 +432,7 @@ function loadFromStorage() {
     AppState.dailyRequirements     = data.dailyRequirements     || {};
     AppState.dailyRequirementsCast = data.dailyRequirementsCast || {};
     AppState.skills                = Array.isArray(data.skills) ? data.skills : [];
+    AppState.dailySkills           = data.dailySkills || {};
 
     // events（v4以降）
     AppState.events = Array.isArray(data.events) ? data.events : [];
@@ -482,6 +509,7 @@ function resetAll() {
   AppState.dailyRequirements     = {};
   AppState.dailyRequirementsCast = {};
   AppState.skills                = [];
+  AppState.dailySkills           = {};
   AppState.settings.penalties = { ...DEFAULT_PENALTIES };
   _staffIdCounter = 1;
   localStorage.removeItem('shiftAppData');
