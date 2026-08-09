@@ -3438,41 +3438,84 @@ function runAIDiagnosis() {
     const gStaff = g.staff;
 
     // ── 1. 公休数の数学的実現可能性 ──
-    const dailyRequired   = shiftKeys.reduce((sum, k) => sum + (g.reqs[k] || 0), 0);
-    const totalRequired   = dailyRequired * days;
+    // 必要人日は「日別必要人数の上書き」も含めて日ごとに合計する
+    let totalRequired = 0;
+    for (let d = 1; d <= days; d++) {
+      shiftKeys.forEach(k => { totalRequired += getDayReq(g.reqs, g.dailyReqs || {}, k, d); });
+    }
+    const dailyRequired   = Math.round((totalRequired / days) * 10) / 10; // 1日平均
+    const baseDaily       = shiftKeys.reduce((sum, k) => sum + (g.reqs[k] || 0), 0);
     const totalPersonDays = gStaff.length * days;
     const totalMaxOff     = gStaff.reduce((sum, s) => sum + (s.maxOff || 0), 0);
-    const availWork       = totalPersonDays - totalMaxOff;
-    const gSurplus        = availWork - totalRequired;
+    // 出勤できない日は公休だけではない。有給（設定分は必ず消化）・研修・
+    // 季節休暇などの公休以外の休みも差し引かないと余力を過大評価してしまう。
+    let totalPaid = 0, totalTrain = 0, totalOtherOff = 0;
+    gStaff.forEach(s => {
+      let reqPaid = 0, trainN = 0, otherOff = 0;
+      for (let d = 1; d <= days; d++) {
+        const rq = (AppState.requests[s.id]    || {})[d];
+        const fx = (AppState.fixedShifts[s.id] || {})[d];
+        if (rq === '有' || fx === '有') { reqPaid++; continue; }
+        if ((rq && isTraining(rq)) || (fx && isTraining(fx))) { trainN++; continue; }
+        // 公休以外の休み（季/慶/引/半 など）は maxOff に含まれないので別途差し引く
+        const off = (rq && isOff(rq)) ? rq : ((fx && isOff(fx)) ? fx : '');
+        if (off && !isPublicOff(off)) otherOff++;
+      }
+      totalPaid     += Math.max(reqPaid, parseInt(s.paidLeave) || 0); // 設定分は必ず消化
+      totalTrain    += trainN;
+      totalOtherOff += otherOff;
+    });
+    const availWork = totalPersonDays - totalMaxOff - totalPaid - totalTrain - totalOtherOff;
+    const gSurplus  = availWork - totalRequired;
     surplus = Math.min(surplus, gSurplus);
+    // 内訳の説明文（過大評価を防ぐため必ず明示する）
+    const capLines =
+      `スタッフ数: ${gStaff.length}人 × ${days}日 = ${totalPersonDays}人日\n` +
+      `− 公休目標 ${totalMaxOff}日` +
+      (totalPaid ? ` − 有給 ${totalPaid}日` : '') +
+      (totalTrain ? ` − 研修 ${totalTrain}日` : '') +
+      (totalOtherOff ? ` − その他の休み ${totalOtherOff}日` : '') +
+      `\n＝ 出勤できる合計: ${availWork}人日\n` +
+      `必要出勤: ${totalRequired}人日（1日平均 ${dailyRequired}人` +
+      (dailyRequired !== baseDaily ? `・日別上書きを反映済み` : '') + `）`;
 
     if (gSurplus < 0) {
-      const avgMaxOff      = (totalMaxOff / gStaff.length).toFixed(1);
-      const feasibleMaxOff = Math.max(0, Math.floor((totalPersonDays - totalRequired) / gStaff.length));
-      const neededStaff    = Math.ceil(totalRequired / Math.max(1, days - totalMaxOff / gStaff.length));
-      const feasibleDaily  = Math.floor(availWork / days);
+      const shortage    = -gSurplus;
+      const cutOffDays  = Math.ceil(shortage / gStaff.length);   // 1人あたり公休を何日減らせば足りるか
+      const feasibleDaily = Math.floor(availWork / days);
       results.push({
         level: 'error',
-        title: `${pfx}公休数が数学的に実現不可能`,
+        title: `${pfx}🚨 人手が ${shortage}人日 足りません（このままではエラーが必ず出ます）`,
         detail:
-          `スタッフ数: ${gStaff.length}人 × ${days}日 = ${totalPersonDays}人日\n` +
-          `公休目標合計: ${totalMaxOff}日（平均 ${avgMaxOff}日/人）\n` +
-          `出勤余力: ${totalPersonDays} − ${totalMaxOff} = ${availWork}人日\n` +
-          `必要出勤: ${dailyRequired}人/日 × ${days}日 = ${totalRequired}人日\n` +
-          `不足: ${-gSurplus}人日 → 全員が目標公休を取ることは不可能です`,
+          capLines + `\n` +
+          `不足: ${shortage}人日 → 全員に目標どおり休みを与えつつ必要人数を満たすことは数学的に不可能です。\n` +
+          `※ 公休不足・連勤超過・リズム違反（遅→早など）は、この不足が原因で必ず発生します。`,
         suggestion:
-          `①スタッフを ${neededStaff} 人以上に増やす` +
-          `　②1日の必要出勤人数を ${feasibleDaily} 人以下に下げる` +
-          `　③各スタッフの最大公休を ${feasibleMaxOff} 日以下に設定する` +
-          `　のいずれかが必要です。`,
+          `次のいずれかで解消できます（数字は必要量の目安）：` +
+          `　①有給日数を合計 ${shortage}日ぶん減らす（設定した有給は必ず消化されます）` +
+          `　②「日別必要人数」の上書きを ${shortage}コマぶん減らす（土日の増員を戻す）` +
+          `　③公休数を1人あたり ${cutOffDays}日 減らす` +
+          `　④1日の必要人数を平均 ${feasibleDaily}人以下にする` +
+          `　⑤スタッフを ${Math.ceil(shortage / Math.max(1, days - Math.round(totalMaxOff / gStaff.length)))}人以上増やす`,
+      });
+    } else if (dailyRequired > 0 && gSurplus < gStaff.length) {
+      // 足りてはいるが余裕が薄い（1人日/人 未満）→ エラーが出やすい
+      results.push({
+        level: 'warning',
+        title: `${pfx}⚠️ 人手の余裕がわずかです（余裕 +${gSurplus}人日）`,
+        detail:
+          capLines + `\n` +
+          `余裕: +${gSurplus}人日 → 足りてはいますが、休みの並べ方の自由度がほとんどありません。\n` +
+          `連勤超過・遅→早・単発出勤などのエラーが残りやすい状態です。`,
+        suggestion: `エラーを0に近づけたい場合は、有給日数・日別必要人数の上書き・公休数のいずれかを少し緩めてください。`,
       });
     } else if (dailyRequired > 0) {
       results.push({
         level: 'ok',
         title: `${pfx}公休数は数学的に実現可能`,
         detail:
-          `出勤余力 ${availWork}人日 ≥ 必要 ${totalRequired}人日（余裕 +${gSurplus}人日/月）\n` +
-          `スタッフ ${gStaff.length}人 で目標公休を全員に与えられます。`,
+          capLines + `\n` +
+          `余裕: +${gSurplus}人日/月 → スタッフ ${gStaff.length}人 で目標どおりの休みを全員に与えられます。`,
         suggestion: null,
       });
     } else if (g.key === 'cast') {
