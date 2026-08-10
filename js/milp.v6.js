@@ -26,9 +26,10 @@ function optimizeScheduleMILP(onProgress, opts) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=122'); }
+    try { worker = new Worker('js/milp.worker.js?v=123'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
-    const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（10分）')); }, 600000);
+    // 1部門あたり最大10分。部門数ぶん待てるよう十分な余裕を持たせる（誤タイムアウト防止）
+    const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（30分）')); }, 1800000);
     // 計算中は1回の大きな処理でバーが止まって見えるため、経過秒数を出して「動いている」ことを示す
     const started = Date.now();
     let solving = false;
@@ -47,7 +48,7 @@ function optimizeScheduleMILP(onProgress, opts) {
         AppState.shifts = m.shifts || {}; AppState.violations = m.violations || []; AppState.generated = true;
         resolve({ violations: AppState.violations, score: (m.violations || []).length,
                   success: (m.violations || []).length === 0,
-                  allOptimal: m.allOptimal !== false, deep: !!m.deep });
+                  allOptimal: m.allOptimal !== false, deep: !!m.deep, usedGap: !!m.usedGap });
         return;
       }
       if (m.type === 'error') { cleanup(); worker.terminate(); reject(new Error(m.message || '数理最適化エラー')); return; }

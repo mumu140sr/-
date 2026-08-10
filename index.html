@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=122" />
+<link rel="stylesheet" href="css/style.css?v=123" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -228,7 +228,9 @@
   <section class="tab-panel" id="panel-generate">
     <h2>⑤ 自動生成</h2>
     <div class="card">
-      <p>設定をもとに<b>数理最適化</b>で、数学的に<b>最良（最適解）</b>のシフトを計算します。計算時間は自動で、必要なだけかけて最良の表を返します（初回だけソルバー読込で数秒余分にかかります）。</p>
+      <p>設定をもとに<b>数理最適化</b>で、数学的に<b>最良（最適解）</b>のシフトを計算します。
+         計算時間の上限は<b>1部門あたり10分</b>です（多くの場合は数秒〜数十秒で終わります）。
+         上限に達した場合はその時点の最良の表を返し、画面にお知らせします。</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="btnGenerate" class="btn btn-large btn-primary">🚀 シフト自動生成を実行</button>
         <button id="btnFeasibility" class="btn btn-large" style="background:#38a169;color:#fff">🔍 実現性チェック（生成前）</button>
@@ -311,12 +313,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=122"></script>
-<script src="js/optimizer.v6.js?v=122"></script>
-<script src="js/worker-client.v6.js?v=122"></script>
-<script src="js/ai-explain.v6.js?v=122"></script>
-<script src="js/ui.v6.js?v=122"></script>
-<script src="js/milp.v6.js?v=122"></script>
-<script src="js/app.v6.js?v=122"></script>
+<script src="js/data.v6.js?v=123"></script>
+<script src="js/optimizer.v6.js?v=123"></script>
+<script src="js/worker-client.v6.js?v=123"></script>
+<script src="js/ai-explain.v6.js?v=123"></script>
+<script src="js/ui.v6.js?v=123"></script>
+<script src="js/milp.v6.js?v=123"></script>
+<script src="js/app.v6.js?v=123"></script>
 </body>
 </html>

@@ -141,7 +141,7 @@ function showFeasibilityModal() {
  * 生成結果が「数学的に最良と証明できた」のか「時間切れで打ち切った」のかを表示する。
  * 打ち切りだった場合は、時間を延ばして再計算するボタンを出す（＝まだ減る可能性がある）。
  */
-function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep) {
+function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap) {
   const $report = document.getElementById('reportCard');
   if (!$report) return;
   const old = document.getElementById('optimalityNotice');
@@ -160,16 +160,21 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep) {
   } else {
     box.style.background = 'color-mix(in srgb, var(--warning) 16%, var(--surface))';
     box.style.border = '1px solid color-mix(in srgb, var(--warning) 40%, transparent)';
+    // じっくりモードで改善余地があるのは「早期停止(gap許容)を使った＝21人以上の部門」のときだけ。
+    // 20人以下は既に上限10分・gap=0で解いているため、再計算しても結果は変わらない。
+    const canRetry = !wasDeep && usedGap;
     box.innerHTML = `⏱ <b>時間切れで打ち切りました（${elapsed}秒）</b>：残り ${vioCount}件は
-      <b>「避けられない」とは限りません</b>。計算時間が足りず、途中までの best 解を表示しています。<br>
-      ${wasDeep ? '（じっくりモードでも解ききれませんでした。設定の見直しをおすすめします）'
-                : '<button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">⏳ もっと時間をかけて再計算（最大9分）</button>'}`;
+      <b>「避けられない」とは限りません</b>。計算時間（1部門あたり最大10分）が足りず、
+      途中までの best 解を表示しています。<br>
+      ${canRetry
+        ? '<button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">⏳ 妥協なしで再計算（早期停止を無効・最大10分）</button>'
+        : '上限いっぱいまで計算しても解ききれませんでした。⑤自動生成の「🔍 実現性チェック」で人手の不足を確認し、有給日数・日別必要人数・公休数のいずれかを緩めてください。'}`;
   }
   $report.insertBefore(box, $report.firstChild);
   const bd = document.getElementById('btnDeepOptimize');
   if (bd) bd.addEventListener('click', () => {
     if (typeof window._runGenerate === 'function') {
-      toast('じっくりモードで再計算します（最大9分）', 'info', 4000);
+      toast('妥協なしモードで再計算します（1部門あたり最大10分）', 'info', 4000);
       window._runGenerate({ deepMode: true });
     }
   });
@@ -226,7 +231,7 @@ function setupGeneratePanel() {
         renderReport({ success: res.success, score: res.score, violations: res.violations,
           candidateSummary: `数理最適化で生成 — 違反${res.violations.length}件（${elapsed}秒）` });
       } catch (rErr) { console.error('[generate] レポート表示でエラー（表は表示します）:', rErr); }
-      showOptimalityNotice(cutOff, res.violations.length, elapsed, !!opts.deepMode);
+      showOptimalityNotice(cutOff, res.violations.length, elapsed, !!opts.deepMode, res.usedGap === true);
       renderResultTable();
       setTimeout(() => {
         const rt = document.querySelector('.tab[data-tab="result"]'); if (rt) rt.click();
