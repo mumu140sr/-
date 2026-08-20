@@ -194,14 +194,25 @@
       if (!isCast) {
         const wo = ruleW('off-count', P.offShortage || 4000);
         if (wo > 0) {
-          let paidN = 0, trainN = 0, fixN = 0, roleT = [];
+          let paidN = 0, trainN = 0, fixN = 0, otherOffN = 0, roleT = [];
           for (let d = 1; d <= days; d++) {
-            const r = rq(s, d); if (r === '有') { paidN++; continue; }
+            // カレンダー・固定で休みが確定している日は「働けない日」として日数から差し引く。
+            // 公休系(休/公/☆)は maxOff に含まれるので加算しないが、有給・半休・
+            // 季節休暇・慶弔休・引継は maxOff の外なので個別に差し引く必要がある。
+            // （差し引かないと「1日多く働ける」と誤認し、結果として公休が不足する）
+            const r  = rq(s, d);
+            const fv = (AppState.fixedShifts[s.id] || {})[d];
+            const lockedOff = (r && isOff(r)) ? r : ((fv && isOff(fv)) ? fv : '');
+            if (lockedOff) {
+              if (lockedOff === '有') paidN++;
+              else if (!isPublicOff(lockedOff)) otherOffN++;   // 半 / 季 / 慶 / 引 など
+              continue;
+            }
             if (isTrainDay(s, d)) { trainN++; continue; }
             if (isFixWork(s, d)) { fixN++; continue; }
             if (free(s, d)) allowRoles(s).forEach(k => roleT.push(V(si, d, roleIdx[k])));
           }
-          const workTarget = days - (s.maxOff || 0) - trainN - paidN - (paidTarget[s.id] || 0);
+          const workTarget = days - (s.maxOff || 0) - trainN - paidN - otherOffN - (paidTarget[s.id] || 0);
           if (roleT.length) { const os = `os_${si}`; addSlack(os, null, wo); cons.push(`off_${si}: ${roleT.join(' + ')} - ${os} <= ${workTarget - fixN}`); }
         }
         // 有給(有)を目標日数だけ確保（不足分をソフトで強制。人員不足より弱いので、埋まっている日は無理に取らない）
