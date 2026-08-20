@@ -40,19 +40,9 @@ function setupUIChrome() {
   if (nav) nav.addEventListener('click', (e) => { if (e.target.closest('.tab')) closeNav(); });
 }
 
-// オフライン動作：一度オンラインで開けば以降はネット無しでも使える
-function setupOffline() {
-  if (!('serviceWorker' in navigator)) return;
-  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  });
-}
-
 document.addEventListener('DOMContentLoaded', () => {
   // テーマは最初に適用（ちらつき防止）
   setupUIChrome();
-  setupOffline();
 
   // データ読込
   const loaded = loadFromStorage();
