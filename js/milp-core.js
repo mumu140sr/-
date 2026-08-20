@@ -270,6 +270,30 @@
           // 連勤中の時間帯切替 早→遅（🟡）
           if (wCS > 0 && lateD1.length) { const v = `csb_${si}`; addSlack(v, 1, wCS); cons.push(`csb_${si}: ${lateD1.join(' + ')} - ${v} <= 0`); }
         }
+        // 月をまたぐ「遅→休→早」を避ける: 早番系(2日目) − 勤務(1日目) ≤ v
+        // （1日目が休みで2日目が早番系なら違反。1日目に出勤すれば成立しない）
+        if (days >= 2 && isLate(pls)) {
+          const A1b = cellTerms(s, 1), B1b = cellTerms(s, 2);
+          const w1 = realT(A1b.w), e2 = realT(B1b.e);
+          const wBad = s.needPairRest ? ruleW('pair-rest', (P.lateEarly || 9000) * 2) : wBR;
+          if (wBad > 0 && (e2.length || constOf(B1b.e))) {
+            const v = `brb_${si}`; addSlack(v, 1, wBad);
+            const lhs = [...e2, ...w1.map(x => `- ${x}`), `- ${v}`];
+            cons.push(`brb_${si}: ${lhs.join(' + ').replace(/\+ -/g, '-')} <= ${A1b.c - constOf(B1b.e)}`);
+          }
+        }
+      }
+      // 月をまたぐ「単発休み」を避ける（前月末=勤務 → 1日目=休み → 2日目=勤務）。
+      // 前月末シフトの記号が未設定でも「前日が勤務だった」ことは連勤日数から分かる。
+      if (days >= 2 && pme.cons > 0 && AppState.settings.penaltySingleOff) {
+        const wSO = P.singleOff || 50;
+        const A1c = cellTerms(s, 1), B1c = cellTerms(s, 2);
+        const w1 = realT(A1c.w), w2 = realT(B1c.w);
+        if (wSO > 0 && (w2.length || B1c.c)) {
+          const v = `sob_${si}`; addSlack(v, 1, wSO);
+          const lhs = [...w2, ...w1.map(x => `- ${x}`), `- ${v}`];
+          cons.push(`sob_${si}: ${lhs.join(' + ').replace(/\+ -/g, '-')} <= ${A1c.c - B1c.c}`);
+        }
       }
       // 前月末が休みで終わっている場合、1日目の孤立出勤（1日目=出勤・2日目=休み）も単発出勤。
       // checkViolations と揃えて、生成側でも避けるようにする。

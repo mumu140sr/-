@@ -3061,24 +3061,26 @@ function checkViolations(shifts) {
           }
         }
 
+        // 1日目は前月末シフトを「前日」として judge する（月をまたぐ孤立休みを検出するため）
+        const prevOf = (dd) => (dd > 1) ? ((shifts[s.id] || {})[dd - 1] || '') : prevShift;
         // 個人ルール: 遅→早の切替時は2連休以上必須
-        if (s.needPairRest && d > 1 && d < days) {
-          const pv = (shifts[s.id] || {})[d - 1] || '';
+        if (s.needPairRest && d >= 1 && d < days) {
+          const pv = prevOf(d);
           const nx = (shifts[s.id] || {})[d + 1] || '';
           if (isWork(pv) && isWork(nx) && isLate(pv) && isEarlyCategory(nx)) {
             violations.push({
               staffId: s.id, day: d, type: 'pair-rest',
-              message: `🚨 遅→休1日→早（個人ルール: 切替時は2連休以上）`,
+              message: `🚨 遅→休1日→早（個人ルール: 切替時は2連休以上）${d === 1 ? '・前月末から継続' : ''}`,
               action:  '休みを2連休以上にするか、時間帯を揃えてください',
             });
           }
-        } else if (!isCast && settings.penaltySingleOff && d > 1 && d < days) {
-          const pv = (shifts[s.id] || {})[d - 1] || '';
+        } else if (!isCast && settings.penaltySingleOff && d >= 1 && d < days) {
+          const pv = prevOf(d);
           const nx = (shifts[s.id] || {})[d + 1] || '';
           if (isLate(pv) && isEarlyCategory(nx)) {
             violations.push({
               staffId: s.id, day: d, type: 'bad-rest',
-              message: `⚠️ ${isTraining(nx) ? '遅→休→研' : '遅→休→早'}（リズムが悪い）`,
+              message: `⚠️ ${isTraining(nx) ? '遅→休→研' : '遅→休→早'}（リズムが悪い）${d === 1 ? '・前月末から継続' : ''}`,
               action:  '時間帯を揃えてください',
             });
           }
