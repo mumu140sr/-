@@ -1034,7 +1034,8 @@ function renderStaffTable() {
                data-field="prevConsecutive" data-id="${s.id}" style="width:50px"/>
       </td>
       <td>
-        <select data-field="prevLastShift" data-id="${s.id}">
+        <select data-field="prevLastShift" data-id="${s.id}"
+                ${(s.prevConsecutive || 0) < 1 ? 'disabled title="前月末連勤日数が0（＝前月末は休み）のため選択できません"' : ''}>
           <option value=""  ${(s.prevLastShift || '') === ''  ? 'selected' : ''}>―</option>
           <option value="早" ${(s.prevLastShift || '') === '早' ? 'selected' : ''}>早</option>
           <option value="遅" ${(s.prevLastShift || '') === '遅' ? 'selected' : ''}>遅</option>
@@ -1061,6 +1062,12 @@ function renderStaffTable() {
       let val = e.target.value;
       if (['maxOff', 'prevConsecutive', 'paidLeave', 'personalMaxCons', 'pairRestTarget'].includes(field)) val = parseInt(val) || 0;
       staff[field] = val;
+      // 「前月末連勤日数」と「前月末シフト」は必ず整合させる。
+      // 矛盾していると月初の判定を誤り、単発出勤などを見逃す原因になる。
+      if (field === 'prevConsecutive') {
+        if (val < 1) staff.prevLastShift = '';   // 0＝前月末は休み → シフト指定は無効
+        renderStaffTable();                       // 選択欄の有効／無効を反映
+      }
       autoSave();
     });
   });

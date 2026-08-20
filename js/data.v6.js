@@ -331,9 +331,12 @@ function isEarlyCategory(shift) {
  * （連勤日数が未入力/0のままでも前月末シフトの設定が効くようにするため）
  */
 function getPrevMonthEnd(s) {
+  const cons = Math.max(0, parseInt(s && s.prevConsecutive) || 0);
+  // 「前月末連勤日数」が 0 ＝ 前月末は休みで終わっている。
+  // このとき前月末シフトに古い値が残っていても無視する（残っていると
+  // 「前日は勤務」と誤認し、1日目の単発出勤を見逃してしまうため）。
+  if (cons < 1) return { lastShift: '', cons: 0 };
   const last = (s && s.prevLastShift && isWork(s.prevLastShift)) ? s.prevLastShift : '';
-  let cons = Math.max(0, parseInt(s && s.prevConsecutive) || 0);
-  if (last && cons < 1) cons = 1;
   return { lastShift: last, cons };
 }
 
@@ -466,7 +469,8 @@ function loadFromStorage() {
         prefs:           Array.isArray(s.prefs) ? s.prefs : ['早可', '遅可'],
         balance:         s.balance || 'balanced',
         prevConsecutive: s.prevConsecutive || 0,
-        prevLastShift:   s.prevLastShift || '',
+        // 連勤0（＝前月末は休み）なのに前月末シフトが残っていると月初判定を誤るため整合させる
+        prevLastShift:   (s.prevConsecutive || 0) >= 1 ? (s.prevLastShift || '') : '',
         note:            s.note || '',
         skills:          Array.isArray(s.skills) ? s.skills : [],
         personalMaxCons: parseInt(s.personalMaxCons) || 0, // 個人の連勤上限（0=全体設定）
