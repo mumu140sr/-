@@ -123,7 +123,22 @@ function setupSettingsPanel() {
     .filter(d => AppState.specialDays[d] === 'renewal').join(',');
 
   $month.addEventListener('change', () => {
+    const prevMonth = AppState.settings.targetMonth;
     AppState.settings.targetMonth = $month.value;
+    // 月を変えたとき、前の月のシフト表から「前月末連勤日数・前月末シフト」を引き継ぐ。
+    // 手入力し忘れ／古い値の残りによる「前月末が反映されない」を防ぐ。
+    if (prevMonth && prevMonth !== $month.value && AppState.generated) {
+      const info = calcPrevMonthEndFromShifts(AppState.shifts, getDaysInMonth(prevMonth));
+      const names = Object.keys(info).filter(id => info[id].cons > 0).length;
+      const msg = `${prevMonth} のシフト表から、各スタッフの「前月末連勤日数」「前月末シフト」を`
+                + `自動で引き継ぎますか？\n（${names}人が月末に連勤中です）\n\n`
+                + `※「キャンセル」を選ぶと現在の設定値がそのまま残ります。`;
+      if (confirm(msg)) {
+        applyPrevMonthEnd(info);
+        renderStaffTable();
+        toast('前月末の連勤日数・シフトを引き継ぎました', 'success', 4000);
+      }
+    }
     renderCalendar();
     renderResultTable();
     autoSave();
@@ -765,6 +780,22 @@ function renderDailyReqPanel() {
 
 // ===== ③ スタッフ管理 =====
 function setupStaffPanel() {
+  // 前月末情報の取り込み（表示中のシフト表の末尾から算出）
+  const $carry = document.getElementById('btnCarryOver');
+  if ($carry) $carry.addEventListener('click', () => {
+    if (!AppState.generated || !Object.keys(AppState.shifts || {}).length) {
+      toast('先にシフト表を作成（または読込）してください', 'error');
+      return;
+    }
+    const days = getDaysInMonth(AppState.settings.targetMonth);
+    const info = calcPrevMonthEndFromShifts(AppState.shifts, days);
+    const n = Object.keys(info).filter(id => info[id].cons > 0).length;
+    if (!confirm(`表示中のシフト表の末尾から「前月末連勤日数／前月末シフト」を取り込みます。\n（${n}人が月末に連勤中）\n\n現在の入力値は上書きされます。よろしいですか？`)) return;
+    applyPrevMonthEnd(info);
+    renderStaffTable();
+    toast(`前月末情報を取り込みました（${n}人が連勤中）`, 'success', 4000);
+  });
+
   document.getElementById('btnAddStaff').addEventListener('click', () => {
     AppState.staff.push({
       id:              newStaffId(),
@@ -1857,3 +1888,34 @@ function setupAllColumnResizers() {
     return r;
   };
 });
+
+/* ===========================================
+   前月末情報（連勤日数・シフト）の引き継ぎ
+   月が替わったとき、前の月のシフト表の末尾から各スタッフの
+   「月末時点で何連勤していたか」「最後は早番系か遅番系か」を求める。
+   =========================================== */
+function calcPrevMonthEndFromShifts(shifts, days) {
+  const out = {};
+  (AppState.staff || []).forEach(s => {
+    const row = (shifts || {})[s.id] || {};
+    let cons = 0, lastBand = '';
+    for (let d = days; d >= 1; d--) {
+      const v = row[d] || '';
+      if (!isWork(v)) break;                 // 休みが出たら連勤は途切れる
+      if (!lastBand) lastBand = isLate(v) ? '遅' : '早';  // 月末に一番近い勤務の時間帯
+      cons++;
+    }
+    out[s.id] = { cons, lastShift: cons > 0 ? lastBand : '' };
+  });
+  return out;
+}
+
+function applyPrevMonthEnd(info) {
+  (AppState.staff || []).forEach(s => {
+    const v = info[s.id];
+    if (!v) return;
+    s.prevConsecutive = v.cons;
+    s.prevLastShift   = v.lastShift;
+  });
+  autoSave();
+}
