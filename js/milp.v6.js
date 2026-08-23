@@ -13,6 +13,7 @@ function _milpPayload() {
     dailyRequirementsCast: AppState.dailyRequirementsCast,
     skills:                AppState.skills,
     dailySkills:           AppState.dailySkills,
+    shifts:                AppState.shifts,   // 微調整のとき、いまの表を出発点にする
     staff:                 AppState.staff,
     requests:              AppState.requests,
     fixedShifts:           AppState.fixedShifts,
@@ -24,10 +25,13 @@ function _milpPayload() {
 function optimizeScheduleMILP(onProgress, opts) {
   const deepMode = !!(opts && opts.deepMode);
   const fastMode = !!(opts && opts.fastMode);
+  // 微調整モード: いまの表から最小限だけ変えて、つじつまを合わせる
+  const adjustMode = !!(opts && opts.adjustMode);
+  const adjustK = (opts && opts.adjustK) || 24;
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=151'); }
+    try { worker = new Worker('js/milp.worker.js?v=152'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     // 1部門あたり最大10分。部門数ぶん待てるよう十分な余裕を持たせる（誤タイムアウト防止）
     const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（30分）')); }, 1800000);
@@ -56,6 +60,6 @@ function optimizeScheduleMILP(onProgress, opts) {
       if (m.type === 'error') { cleanup(); worker.terminate(); reject(new Error(m.message || '数理最適化エラー')); return; }
     };
     worker.onerror = (err) => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化Workerエラー: ' + (err.message || 'ソルバーの読込みに失敗しました'))); };
-    worker.postMessage({ type: 'milp', appState: _milpPayload(), deepMode, fastMode });
+    worker.postMessage({ type: 'milp', appState: _milpPayload(), deepMode, fastMode, adjustMode, adjustK });
   });
 }

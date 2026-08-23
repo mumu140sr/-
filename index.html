@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=151" />
+<link rel="stylesheet" href="css/style.css?v=152" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -282,6 +282,7 @@
         <button class="btn" id="btnExportCSV">📥 CSVエクスポート</button>
         <button class="btn" id="btnRecheck">🔍 ルールチェック</button>
         <button class="btn btn-primary" id="btnRepair">🛠 エラーを自動修正</button>
+        <button class="btn" id="btnResolveSurplus" title="余（人員余り）のコマを、有給にするか、その日の必要人数を増やして出勤にするかを選べます">⚖️ 余の解消</button>
         <button class="btn" id="btnQuickAdjust" title="🔒で固定したセルは保持し、残りを短時間の数理最適化で再調整します（悪化しません）">🧩 かんたん調整</button>
         <button class="btn" id="btnFixGuide" title="エラーごとに「こうすれば直る」具体的な手を提示し、ボタン1つで適用できます">🧭 修正ガイド</button>
         <button class="btn" id="btnUndo" disabled>↩ 元に戻す</button>
@@ -328,12 +329,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=151"></script>
-<script src="js/optimizer.v6.js?v=151"></script>
-<script src="js/worker-client.v6.js?v=151"></script>
-<script src="js/ai-explain.v6.js?v=151"></script>
-<script src="js/ui.v6.js?v=151"></script>
-<script src="js/milp.v6.js?v=151"></script>
-<script src="js/app.v6.js?v=151"></script>
+<script src="js/data.v6.js?v=152"></script>
+<script src="js/optimizer.v6.js?v=152"></script>
+<script src="js/worker-client.v6.js?v=152"></script>
+<script src="js/ai-explain.v6.js?v=152"></script>
+<script src="js/ui.v6.js?v=152"></script>
+<script src="js/milp.v6.js?v=152"></script>
+<script src="js/app.v6.js?v=152"></script>
 </body>
 </html>

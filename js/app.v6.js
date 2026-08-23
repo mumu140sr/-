@@ -417,6 +417,7 @@ function showSurplusPopup() {
   const understaffVios = (AppState.violations || []).filter(v =>
     ['understaff', 'skill-late', 'vicemanager-absent', 'off-count'].includes(v.type));
 
+  window._surplusTotal = surplusTotal;   // ポップアップから解消画面へ渡す
   const allVios     = AppState.violations || [];
   const hasShortage = shortageComa > 0 || understaffVios.length > 0;
   const hasSurplus  = surplusTotal > 0;
@@ -542,13 +543,12 @@ function showSurplusPopup() {
     body = `${causeHtml}
       <p>必要人数（定数）を守った結果、下記の人が「<span style="color:#bf5b00;font-weight:700">余</span>（人員余り）」になっています。</p>
       <ul style="margin:8px 0 12px;padding-left:20px;line-height:1.8">${list}</ul>
-      <div style="background:#fff8e1;border-left:4px solid #f6ad55;padding:10px 12px;border-radius:6px">
-        <b>この余りの使い方：</b>
-        <ol style="margin:6px 0 0;padding-left:20px;line-height:1.8">
-          <li><b>忙しい日の必要人数を増やす</b>（②シフト種別 →「日別必要人数」）</li>
-          <li>または <b>有給を増やす</b>（③スタッフ管理 → 有給数）</li>
-          <li>入力したら <b>「🛠 エラーを自動修正」</b>を押す → 余が減ります</li>
-        </ol>
+      <div style="background:#fff8e1;border-left:4px solid #f6ad55;padding:10px 12px;border-radius:6px;color:#744210">
+        <b>コマ数をぴったりにするには：</b>
+        <p style="margin:6px 0 0;line-height:1.8">下のボタンから、余のコマを1つずつ
+        <b>「有給にする」</b>か<b>「その日の必要人数を1人増やして出勤にする」</b>かを選べます。
+        どちらを使うかはご判断ください。<b>エラーが増える操作は自動で取り消します。</b></p>
+        <button id="surplusResolveBtn" class="btn btn-primary" style="margin-top:10px">⚖️ 余の解消を開く</button>
       </div>${bottleneckHtml}`;
   } else {
     // 不足も余りもないが、エラー（時間帯切替・リズムなど）がある場合
@@ -581,6 +581,11 @@ function showSurplusPopup() {
   const close = () => modal.remove();
   modal.querySelector('#surplusClose').addEventListener('click', close);
   modal.querySelector('#surplusOk').addEventListener('click', close);
+  const rb = modal.querySelector('#surplusResolveBtn');
+  if (rb) rb.addEventListener('click', () => {
+    close();
+    if (typeof showSurplusResolveModal === 'function') showSurplusResolveModal();
+  });
   modal.addEventListener('click', e => { if (e.target === modal) close(); });
 }
 
@@ -877,6 +882,12 @@ function setupResultPanel() {
   }
 
   // 🧩 かんたん調整: 手動修正(🔒)は保ったまま、玉突きの崩れだけを高速で吸収
+  const btnResolve = document.getElementById('btnResolveSurplus');
+  if (btnResolve) btnResolve.addEventListener('click', () => {
+    if (!AppState.generated) { toast('シフトを生成してから実行してください', 'error'); return; }
+    showSurplusResolveModal();
+  });
+
   const btnQuick = document.getElementById('btnQuickAdjust');
   if (btnQuick) {
     btnQuick.addEventListener('click', () => {

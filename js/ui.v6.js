@@ -2190,3 +2190,179 @@ function showRelaxModal() {
     toast('元に戻しました', 'info');
   });
 }
+
+/* ===========================================
+   余の解消（余剰コマを 有給 or 出勤 に振り替える）
+   最終的にコマ数をぴったりにするための画面。
+   「有給にするか定数を増やすか」は人が判断し、
+   アプリは “エラーを増やさない” ことだけを保証する。
+   =========================================== */
+
+// いま表に出ている「余」を一覧にする
+function listSurplusCells() {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const out = [];
+  (AppState.staff || []).forEach(s => {
+    for (let d = 1; d <= days; d++) {
+      if (((AppState.shifts[s.id] || {})[d] || '') === '余') out.push({ id: s.id, name: s.name, day: d });
+    }
+  });
+  return out;
+}
+
+// その人がその日に入れるシフト（担当シフト・早可/遅可の範囲）
+function candidateShiftsFor(staff, day) {
+  const roles = getWorkShiftKeys().filter(k => {
+    const t = AppState.shiftTypes.find(x => x.key === k);
+    return t && !t.isTraining;
+  });
+  return (staff.allowedShifts || []).filter(k => {
+    if (!roles.includes(k)) return false;
+    const p = staff.prefs || [];
+    if (p.length) {
+      if (isEarlyCategory(k) && !p.includes('早可')) return false;
+      if (isLate(k) && !p.includes('遅可')) return false;
+    }
+    return true;
+  });
+}
+
+// 変更を試して、エラーが増えたら元に戻す。増えなければ確定。
+// @returns {ok:boolean, before:number, after:number, message:string}
+async function trySurplusChange(apply, opts) {
+  const backup = {
+    shifts:  JSON.parse(JSON.stringify(AppState.shifts)),
+    req:     JSON.parse(JSON.stringify(AppState.requests)),
+    fixed:   JSON.parse(JSON.stringify(AppState.fixedShifts)),
+    daily:   JSON.parse(JSON.stringify(AppState.dailyRequirements || {})),
+    dailyC:  JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
+    staff:   JSON.parse(JSON.stringify(AppState.staff)),
+  };
+  const before = checkViolations(AppState.shifts).length;
+  apply();
+  // 周りのつじつまを、最小限の変更で合わせる
+  if (opts && opts.adjust && typeof optimizeScheduleMILP === 'function') {
+    try { await optimizeScheduleMILP(() => {}, { adjustMode: true, adjustK: (opts.k || 24), fastMode: true }); }
+    catch (_) { /* 調整できなくてもそのまま検証する */ }
+  }
+  AppState.violations = checkViolations(AppState.shifts);
+  const after = AppState.violations.length;
+  if (after > before) {
+    AppState.shifts = backup.shifts;
+    AppState.requests = backup.req;
+    AppState.fixedShifts = backup.fixed;
+    AppState.dailyRequirements = backup.daily;
+    AppState.dailyRequirementsCast = backup.dailyC;
+    AppState.staff = backup.staff;
+    AppState.violations = checkViolations(AppState.shifts);
+    return { ok: false, before, after, message: `エラーが ${before}件 → ${after}件 に増えるため取り消しました` };
+  }
+  autoSave();
+  return { ok: true, before, after, message: `エラー ${before}件 → ${after}件` };
+}
+
+function showSurplusResolveModal() {
+  const cells = listSurplusCells();
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10000;padding:16px';
+
+  const render = () => {
+    const list = listSurplusCells();
+    const byStaff = {};
+    list.forEach(c => { (byStaff[c.id] || (byStaff[c.id] = { name: c.name, days: [] })).days.push(c.day); });
+    const body = Object.keys(byStaff).length ? Object.keys(byStaff).map(id => {
+      const s = AppState.staff.find(x => x.id === id) || {};
+      const g = byStaff[id];
+      const rows = g.days.map(d => {
+        const cands = candidateShiftsFor(s, d);
+        const sel = cands.length
+          ? `<select data-shift-for="${id}" data-day="${d}" style="min-width:88px">${cands.map(k => `<option value="${k}">${k}</option>`).join('')}</select>`
+          : '<span class="hint">担当シフトなし</span>';
+        return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px dashed var(--border)">
+          <b style="min-width:56px">${d}日</b>
+          <button class="btn" data-paid="${id}" data-day="${d}">有給にする</button>
+          ${sel}
+          <button class="btn" data-work="${id}" data-day="${d}" ${cands.length ? '' : 'disabled'}>出勤にする（定数+1）</button>
+        </div>`;
+      }).join('');
+      return `<div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0;background:var(--surface-2)">
+        <div style="font-weight:700;margin-bottom:2px">${escapeHtml(g.name)}　<span class="hint">余 ${g.days.length}コマ・有給 現在${s.paidLeave || 0}日</span></div>
+        ${rows}
+      </div>`;
+    }).join('') : '<div class="hint" style="padding:12px 0">余はありません 🎉 コマ数はぴったりです。</div>';
+
+    modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:760px;width:100%;max-height:85vh;overflow:auto;padding:20px">
+      <h3 style="margin:0 0 4px">⚖️ 余の解消</h3>
+      <p class="hint" style="margin:0 0 10px">
+        余（人員余り）のコマを、<b>有給</b>にするか、<b>その日の必要人数を1人増やして出勤</b>にするかを選べます。
+        どちらにするかはご判断ください。<b>どちらの操作でも、エラーが増える場合は自動で取り消します。</b>
+      </p>
+      <div id="resolveMsg" style="display:none;margin:10px 0;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.7"></div>
+      ${body}
+      <div style="text-align:right;margin-top:12px"><button id="resolveClose" class="btn btn-primary">閉じる</button></div>
+    </div>`;
+    bind();
+  };
+
+  const say = (text, ok) => {
+    const $m = modal.querySelector('#resolveMsg');
+    if (!$m) return;
+    $m.style.display = 'block';
+    $m.style.background = ok ? 'color-mix(in srgb, var(--success) 14%, var(--surface))' : 'color-mix(in srgb, var(--danger) 12%, var(--surface))';
+    $m.style.border = '1px solid ' + (ok ? 'color-mix(in srgb, var(--success) 35%, transparent)' : 'color-mix(in srgb, var(--danger) 35%, transparent)');
+    $m.innerHTML = text;
+  };
+
+  const busy = (on) => modal.querySelectorAll('button').forEach(b => { b.disabled = on && !b.id; });
+
+  const bind = () => {
+    modal.querySelector('#resolveClose').addEventListener('click', () => { modal.remove(); refreshAllUI(); });
+
+    modal.querySelectorAll('[data-paid]').forEach(b => b.addEventListener('click', async () => {
+      const id = b.dataset.paid, d = parseInt(b.dataset.day);
+      const s = AppState.staff.find(x => x.id === id); if (!s) return;
+      busy(true);
+      const r = await trySurplusChange(() => {
+        AppState.requests[id] = AppState.requests[id] || {};
+        AppState.requests[id][d] = '有';
+        AppState.shifts[id][d]   = '有';
+        s.paidLeave = (parseInt(s.paidLeave) || 0) + 1;   // 有給の消化日数を1日増やす
+      }, { adjust: false });
+      busy(false);
+      say(r.ok ? `✅ ${escapeHtml(s.name)} ${d}日 を有給にしました（${r.message}）。有給日数は ${s.paidLeave}日 になりました。`
+               : `⚠️ ${escapeHtml(s.name)} ${d}日 を有給にできませんでした。${r.message}`, r.ok);
+      renderResultTable(); render();
+    }));
+
+    modal.querySelectorAll('[data-work]').forEach(b => b.addEventListener('click', async () => {
+      const id = b.dataset.work, d = parseInt(b.dataset.day);
+      const s = AppState.staff.find(x => x.id === id); if (!s) return;
+      const selEl = modal.querySelector(`select[data-shift-for="${id}"][data-day="${d}"]`);
+      const key = selEl ? selEl.value : '';
+      if (!key) return;
+      busy(true);
+      say('⏳ 周りのつじつまを合わせています…', true);
+      const cast = getStaffDepartment(s) === 'cast';
+      const r = await trySurplusChange(() => {
+        const store = cast ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
+                           : (AppState.dailyRequirements     || (AppState.dailyRequirements     = {}));
+        const base = (cast ? (AppState.roleRequirementsCast || {}) : AppState.roleRequirements)[key] || 0;
+        store[key] = store[key] || {};
+        store[key][d] = (store[key][d] != null ? store[key][d] : base) + 1;   // その日だけ定数を+1
+        AppState.fixedShifts[id] = AppState.fixedShifts[id] || {};
+        AppState.fixedShifts[id][d] = key;                                     // その人をその日に固定
+        AppState.shifts[id][d] = key;
+      }, { adjust: true, k: 24 });
+      busy(false);
+      say(r.ok ? `✅ ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。`
+               : `⚠️ ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」にできませんでした。${r.message}<br>
+                  <span class="hint">別のシフト種別、または別の日でお試しください。</span>`, r.ok);
+      renderResultTable(); render();
+    }));
+  };
+
+  document.body.appendChild(modal);
+  render();
+  modal.addEventListener('click', e => { if (e.target === modal) { modal.remove(); refreshAllUI(); } });
+  void cells;
+}

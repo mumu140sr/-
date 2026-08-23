@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=151', 'optimizer.js?v=151', 'milp-core.js?v=151');
+self.importScripts('data.js?v=152', 'optimizer.js?v=152', 'milp-core.js?v=152');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=151'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=152'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -31,6 +31,7 @@ self.addEventListener('message', async (e) => {
     AppState.skills                = incoming.skills                || [];
     AppState.dailySkills           = incoming.dailySkills           || {};
     AppState.staff       = incoming.staff       || [];
+    const seedShifts     = incoming.shifts      || {};
     AppState.requests    = incoming.requests    || {};
     AppState.fixedShifts = incoming.fixedShifts || {};
     AppState.specialDays = incoming.specialDays || {};
@@ -48,6 +49,8 @@ self.addEventListener('message', async (e) => {
     const deep = !!msg.deepMode;
     // 証明なし（速い）モード: 1部門あたり60秒で打ち切り、最良の証明はしない
     const fast = !!msg.fastMode;
+    const adjust = !!msg.adjustMode;      // 微調整モード
+    const adjustK = parseInt(msg.adjustK) || 24;
     const TIME_LIMIT = 600;   // 秒 = 10分（証明ありモードの上限）
     const FAST_LIMIT = 60;    // 秒 = 1分（証明なしモードの上限）
     let allOptimal = true;   // 全グループで最適が証明できたか（false=時間切れで打ち切り）
@@ -76,6 +79,36 @@ self.addEventListener('message', async (e) => {
         opts = { time_limit: TIME_LIMIT, mip_rel_gap: 0.02, mip_abs_gap: 2000, presolve: 'on' };
         usedGap = true;   // 早期停止あり＝じっくりモードで更に良くなる可能性がある
       }
+      // ── 微調整モード ────────────────────────────────────
+      // いまの表を出発点に、決まった数のコマまでしか変えずにつじつまを合わせる。
+      // 表全体が作り直されないので、確認済みの並びが崩れない。
+      if (adjust) {
+        const ones = {};
+        g.staff.forEach(s => {
+          const si = m.sidOf[s.id];
+          for (let d = 1; d <= m.days; d++) {
+            const v = (seedShifts[s.id] || {})[d];
+            if (!v) continue;
+            if (v === '有') ones[`y_${si}_${d}`] = 1;
+            else if (m.roleIdx[v] != null) ones[`x_${si}_${d}_${m.roleIdx[v]}`] = 1;
+          }
+        });
+        post(20 + Math.floor((gi / groups.length) * 60),
+             `【${g.label || g.key}】いまの表を最小限だけ直しています…`);
+        const s2 = solver.solve(MILP.composeLP(m.parts, { neighbor: { ones, k: adjustK } }),
+                                Object.assign({}, opts, { time_limit: Math.min(60, opts.time_limit) }));
+        if (MILP.solutionIsValid(s2, m.parts, [])) {
+          if (String(s2.Status) !== 'Optimal') allOptimal = false;
+          MILP.applyGroupSolution(m, s2, shifts);
+          gi++;
+          continue;
+        }
+        // 直せなければ、いまの表をそのまま使う
+        g.staff.forEach(s => { shifts[s.id] = Object.assign({}, seedShifts[s.id] || {}); });
+        gi++;
+        continue;
+      }
+
       // ── 段階最適化（tiered）──────────────────────────────
       // 全ルールを一度に解くのをやめ、大事な順に「そのルールだけ」を0に近づける。
       // 達成した件数は次の段で上限として固定するので、重要なルールが後から崩れない。
