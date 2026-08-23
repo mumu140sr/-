@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=143', 'optimizer.js?v=143', 'milp-core.js?v=143');
+self.importScripts('data.js?v=144', 'optimizer.js?v=144', 'milp-core.js?v=144');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=143'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=144'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -90,7 +90,8 @@ self.addEventListener('message', async (e) => {
         for (let ti = 0; ti < tiers.length; ti++) {
           const t = tiers[ti];
           const left = tiers.length - ti - 1;     // この段より後に残っている段数
-          const cap = Math.max(MIN_PER, remain - MIN_PER * left);
+          // 残り時間を「この段＋後続の段」で等分する。1つの段が使い切れない。
+          const cap = Math.max(MIN_PER, Math.floor(remain / (left + 1)));
           post(20 + Math.floor(((gi + (ti + 1) / (tiers.length + 1)) / groups.length) * 60),
                `【${g.label || g.key}】第${ti + 1}段「${t.label}」を0に近づけています…`);
           const lp = MILP.composeLP(m.parts, { types: t.types, budgets });

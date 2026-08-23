@@ -23,9 +23,9 @@
     { label: '公休・有給',     types: ['off-count', 'paid'] },
     { label: '連勤・遅→早',    types: ['consecutive', 'late-early'] },
     { label: '単発出勤・定数',  types: ['single-work', 'overstaff'] },
-    { label: 'リズム',        types: ['category-switch', 'bad-rest', 'long-rest', 'pair-rest', 'single-off'] },
+    { label: 'リズム',        types: ['category-switch', 'bad-rest', 'long-rest', 'pair-rest'] },
     // 個人の希望は、いちばん重い「上下関係」より先に片づける（後回しだと時間切れになる）
-    { label: '個人の希望',     types: ['weekend-pref', 'rest-style', 'pair-rest-count', 'pref-mismatch', 'balance-diff', 'skill-short', 'surplus-unwanted'] },
+    { label: '個人の希望',     types: ['weekend-pref', 'rest-style', 'pair-rest-count', 'pref-mismatch', 'balance-diff', 'skill-short', 'surplus-unwanted', 'single-off'] },
     { label: '上下関係',       types: ['hierarchy'] },
   ];
 
