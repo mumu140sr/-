@@ -4210,7 +4210,8 @@ function analyzeLowerBound() {
 
   groups.forEach(g => {
     const pfx = multi ? `【${g.label}】` : '';
-    let dayShort = 0;   // 日別に確定する不足の合計（＝避けられない人員不足の下限）
+    let dayShort = 0;    // 日別に確定する不足の合計（＝避けられない人員不足の下限）
+    let consShort = 0;   // 連勤上限と休み日数の矛盾（連勤超過か公休不足が必ず起きる）
 
     for (let d = 1; d <= days; d++) {
       // その日、各役割に入れる人を数える
@@ -4292,7 +4293,35 @@ function analyzeLowerBound() {
       }
     }
 
-    // ⑤ 月全体の人日収支（従来のチェック。日別で見つからない不足を拾う）
+    // ⑤ 連勤上限との矛盾（休みが少なすぎて、連勤上限を守れない人）
+    //    連勤上限 c のとき、1人が働ける最大日数は days - floor(days / (c+1))。
+    //    これを超える出勤日数が必要な人は、連勤超過か公休不足が必ず起きる。
+    g.staff.forEach(s => {
+      if (getStaffDepartment(s) === 'cast') return;
+      const c = getMaxConsFor(s);
+      if (!(c >= 1)) return;
+      const maxWork = days - Math.floor(days / (c + 1));
+      let paidN = 0, otherOffN = 0;
+      for (let d = 1; d <= days; d++) {
+        const st = staffDayState(s, d);
+        if (st !== 'off') continue;
+        const rq = (AppState.requests[s.id] || {})[d];
+        const fx = (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(s.id, d) : null;
+        const off = (rq && isOff(rq)) ? rq : (fx || '');
+        if (off === '有') paidN++; else if (off && !isPublicOff(off)) otherOffN++;
+      }
+      const needPaid  = Math.max(paidN, parseInt(s.paidLeave) || 0);
+      const workNeed  = days - (s.maxOff || 0) - needPaid - otherOffN;
+      if (workNeed > maxWork) {
+        res.reasons.push({
+          kind: 'cons', staffId: s.id, need: workNeed, have: maxWork,
+          text: `${pfx}${s.name}: 出勤 ${workNeed}日 が必要ですが、連勤上限${c}日を守ると最大 ${maxWork}日 までしか働けません（${workNeed - maxWork}日ぶん矛盾）`,
+        });
+        consShort += (workNeed - maxWork);
+      }
+    });
+
+    // ⑥ 月全体の人日収支（従来のチェック。日別で見つからない不足を拾う）
     const cap = calcCapacity(g, days);
     res.capacity.push({ label: g.label, required: cap.required, avail: cap.avail, surplus: cap.surplus });
     let monthShort = 0;
@@ -4304,7 +4333,7 @@ function analyzeLowerBound() {
       });
     }
     // 日別の不足と月全体の不足は重なりうるので、大きいほうを下限として採用する
-    res.minErrors += Math.max(dayShort, monthShort);
+    res.minErrors += Math.max(dayShort, monthShort) + consShort;
   });
 
   res.possible = res.reasons.length === 0;

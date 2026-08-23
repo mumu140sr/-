@@ -129,9 +129,13 @@ function showFeasibilityModal() {
       verdict = `<div style="padding:14px 16px;border-radius:10px;margin:0 0 14px;
           background:color-mix(in srgb, var(--success) 14%, var(--surface));
           border:1px solid color-mix(in srgb, var(--success) 38%, transparent);line-height:1.8">
-        <b style="font-size:15px">✅ エラー0件が可能な条件です</b><br>
-        <span style="font-size:13px">日ごとの人数・役割・スキル・副店長・月全体の人日、いずれにも「配置では消せない不足」はありません。
-        エラーが残る場合は<b>計算時間が足りていない</b>可能性が高いので、🎯じっくり生成をお試しください。</span>
+        <b style="font-size:15px">✅ 人員の面では足りています</b><br>
+        <span style="font-size:13px">日ごとの人数・役割・スキル・副店長・連勤上限・月全体の人日、いずれにも
+        「配置では消せない不足」はありません。<br>
+        <b>ただし、これは人員の話だけです。</b>並び方のルール（単発出勤・遅→早・時間帯の切替・連休の長さ・
+        早遅バランスなど）はここでは判定していないため、<b>これらのエラーは出ることがあります</b>。<br>
+        並び方のエラーは配置で消せるものが多いので、<b>🎯じっくり生成</b>で時間をかけると減ります。
+        それでも残る場合は <b>🩹 エラー解消プラン</b> で該当ルールを緩めてください。</span>
       </div>`;
     } else {
       const lines = lb.reasons.slice(0, 12).map(r => `・${escapeHtml(r.text)}`).join('<br>');
@@ -139,8 +143,9 @@ function showFeasibilityModal() {
       verdict = `<div style="padding:14px 16px;border-radius:10px;margin:0 0 14px;
           background:color-mix(in srgb, var(--danger) 12%, var(--surface));
           border:1px solid color-mix(in srgb, var(--danger) 38%, transparent);line-height:1.8">
-        <b style="font-size:15px">🚨 このデータでは エラー0件は不可能です</b><br>
-        <span style="font-size:13px">配置をどう変えても、最低 <b>${lb.minErrors}件</b> のエラーが残ります。原因は次のとおりです。</span>
+        <b style="font-size:15px">🚨 人員が足りていません（配置では消せません）</b><br>
+        <span style="font-size:13px">配置をどう変えても、最低 <b>${lb.minErrors}件</b> のエラーが残ります。原因は次のとおりです。
+        （これに加えて、並び方のルールによるエラーが出ることもあります）</span>
         <div style="font-size:13px;margin-top:8px">${lines}${more}</div>
         <div style="font-size:13px;margin-top:8px">💡 <b>🩹 エラー解消プラン</b>で、どの設定をいくつ動かせば解消するか確認できます。</div>
       </div>`;
@@ -152,8 +157,9 @@ function showFeasibilityModal() {
   modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:720px;width:100%;max-height:85vh;overflow:auto;padding:20px">
     <h3 style="margin:0 0 4px">🔍 実現性チェック（生成する前の判定）</h3>
     <p class="hint" style="margin:0 0 12px">
-      まず「<b>エラー0件が数学的に可能か</b>」を判定します。不可能な場合は、どの日の何が原因かまで特定します。<br>
-      その下は参考情報です（🔴🟡＝人員構成の限界／それ以外＝配置で消せるもの）。
+      まず「<b>人員が足りているか</b>」を判定します。足りない場合は、どの日の何が原因かまで特定します。<br>
+      <b>並び方のルール（単発出勤・遅→早・連休など）はここでは判定していません。</b>人員が足りていても、
+      これらのエラーは出ることがあります。その下は参考情報です。
     </p>
     ${verdict}
     ${body}
