@@ -2267,6 +2267,7 @@ function showSurplusResolveModal() {
   // 生成直後のポップアップ(.modal-overlay, z-index 10001)より前面に出す
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10050;padding:16px';
 
+  let lastMsg = null;      // 直近の結果メッセージ（再描画で消えないように覚えておく）
   const render = () => {
     const list = listSurplusCells();
     const byStaff = {};
@@ -2303,9 +2304,11 @@ function showSurplusResolveModal() {
       <div style="text-align:right;margin-top:12px"><button id="resolveClose" class="btn btn-primary">閉じる</button></div>
     </div>`;
     bind();
+    if (lastMsg) say(lastMsg.text, lastMsg.ok, true);   // 再描画後もメッセージを残す
   };
 
-  const say = (text, ok) => {
+  const say = (text, ok, keep) => {
+    if (!keep) lastMsg = { text, ok };
     const $m = modal.querySelector('#resolveMsg');
     if (!$m) return;
     $m.style.display = 'block';
@@ -2342,7 +2345,7 @@ function showSurplusResolveModal() {
       const key = selEl ? selEl.value : '';
       if (!key) return;
       busy(true);
-      say('⏳ 周りのつじつまを合わせています…', true);
+      say('⏳ 周りのつじつまを合わせています…', true, true);
       const cast = getStaffDepartment(s) === 'cast';
       const r = await trySurplusChange(() => {
         const store = cast ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
