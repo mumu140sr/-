@@ -141,7 +141,7 @@ function showFeasibilityModal() {
  * 生成結果が「数学的に最良と証明できた」のか「時間切れで打ち切った」のかを表示する。
  * 打ち切りだった場合は、時間を延ばして再計算するボタンを出す（＝まだ減る可能性がある）。
  */
-function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap) {
+function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFast) {
   const $report = document.getElementById('reportCard');
   if (!$report) return;
   const old = document.getElementById('optimalityNotice');
@@ -150,7 +150,19 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap) {
   box.id = 'optimalityNotice';
   box.style.cssText = 'padding:12px 14px;border-radius:10px;margin-bottom:12px;font-size:13px;line-height:1.7';
 
-  if (!cutOff) {
+  if (wasFast) {
+    // 速い生成: 証明していないので「最良とは限らない」と正直に出し、証明ありへの導線を置く
+    box.style.background = 'color-mix(in srgb, var(--accent) 12%, var(--surface))';
+    box.style.border = '1px solid color-mix(in srgb, var(--accent) 32%, transparent)';
+    box.innerHTML = `⚡ <b>速い生成（証明なし）で完了しました（${elapsed}秒）</b>：` +
+      (vioCount === 0
+        ? 'エラー0件です。<b>0件なのでこれ以上良くなりようがありません</b>。このまま使えます。'
+        : `エラー ${vioCount}件。<b>これが最良とは限りません</b>（証明していないため、あと1〜2件減らせる可能性があります）。<br>
+           きっちり詰めたいときは下のボタンで解き直してください。`) +
+      (vioCount > 0
+        ? '<br><button id="btnProofOptimize" class="btn btn-primary" style="margin-top:8px">🎯 じっくり生成で解き直す（証明あり・最大10分）</button>'
+        : '');
+  } else if (!cutOff) {
     box.style.background = 'color-mix(in srgb, var(--success) 14%, var(--surface))';
     box.style.border = '1px solid color-mix(in srgb, var(--success) 35%, transparent)';
     box.innerHTML = vioCount === 0
@@ -181,6 +193,13 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap) {
     box.appendChild(go);
   }
   $report.insertBefore(box, $report.firstChild);
+  const bp = document.getElementById('btnProofOptimize');
+  if (bp) bp.addEventListener('click', () => {
+    if (typeof window._runGenerate === 'function') {
+      toast('じっくり生成で解き直します（1部門あたり最大10分）', 'info', 4000);
+      window._runGenerate({});
+    }
+  });
   const bd = document.getElementById('btnDeepOptimize');
   if (bd) bd.addEventListener('click', () => {
     if (typeof window._runGenerate === 'function') {
@@ -192,7 +211,14 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap) {
 
 // ⑤ 自動生成パネル
 function setupGeneratePanel() {
-  const btn = document.getElementById('btnGenerate');
+  const btn = document.getElementById('btnGenerate');          // 🎯 じっくり生成（証明あり）
+  const btnFast = document.getElementById('btnGenerateFast');  // ⚡ 速い生成（証明なし）
+  const BTN_LABEL = { proof: '🎯 じっくり生成（証明あり・最大10分）', fast: '⚡ 速い生成（証明なし・最大60秒）' };
+  const setBusy = (busy) => {
+    [btn, btnFast].forEach(b => { if (b) b.disabled = busy; });
+    if (busy) { if (btn) btn.textContent = '⏳ 計算中...'; if (btnFast) btnFast.textContent = '⏳ 計算中...'; }
+    else { if (btn) btn.textContent = BTN_LABEL.proof; if (btnFast) btnFast.textContent = BTN_LABEL.fast; }
+  };
   const btnCancel = document.getElementById('btnCancelGenerate');
   const btnFeas = document.getElementById('btnFeasibility');
   if (btnFeas) btnFeas.addEventListener('click', showFeasibilityModal);
@@ -216,8 +242,7 @@ function setupGeneratePanel() {
     const $text = document.getElementById('progressText');
     const $report = document.getElementById('reportCard');
 
-    btn.disabled = true;
-    btn.textContent = '⏳ 最適化中...';
+    setBusy(true);
     if (btnCancel) btnCancel.style.display = 'inline-block';
     $area.style.display = 'block';
     $report.style.display = 'none';
@@ -231,19 +256,21 @@ function setupGeneratePanel() {
         throw new Error('数理最適化モジュールが未読込です。ページを再読み込み（Ctrl+Shift+R）してください。');
       }
       const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + msg; };
-      const res = await optimizeScheduleMILP(prog, { deepMode: !!opts.deepMode });
+      const res = await optimizeScheduleMILP(prog, { deepMode: !!opts.deepMode, fastMode: !!opts.fastMode });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
       const cutOff = (res.allOptimal === false);   // 時間切れで打ち切られた＝最良解とは限らない
       $text.textContent = `完了！ 違反 ${res.violations.length}件（${elapsed}秒）` +
-                          (cutOff ? '｜⏱ 時間切れで打ち切り（まだ改善余地あり）' : '｜✅ これ以上良い組み合わせは無いと確認済み');
+                          (opts.fastMode ? '｜⚡ 速い生成（証明なし）'
+                                         : cutOff ? '｜⏱ 時間切れで打ち切り（まだ改善余地あり）'
+                                                  : '｜✅ これ以上良い組み合わせは無いと確認済み');
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
       $report.style.display = 'block';
       try {
         renderReport({ success: res.success, score: res.score, violations: res.violations,
           candidateSummary: `数理最適化で生成 — 違反${res.violations.length}件（${elapsed}秒）` });
       } catch (rErr) { console.error('[generate] レポート表示でエラー（表は表示します）:', rErr); }
-      showOptimalityNotice(cutOff, res.violations.length, elapsed, !!opts.deepMode, res.usedGap === true);
+      showOptimalityNotice(cutOff, res.violations.length, elapsed, !!opts.deepMode, res.usedGap === true, !!opts.fastMode);
       renderResultTable();
       setTimeout(() => {
         const rt = document.querySelector('.tab[data-tab="result"]'); if (rt) rt.click();
@@ -263,13 +290,13 @@ function setupGeneratePanel() {
       }
       return;
     } finally {
-      btn.disabled = false;
-      btn.textContent = '🚀 シフト自動生成を実行';
+      setBusy(false);
       if (btnCancel) btnCancel.style.display = 'none';
     }
   };
-  window._runGenerate = runGenerate;   // 「じっくり再計算」から呼ぶ
+  window._runGenerate = runGenerate;   // 「証明ありで解き直す」等から呼ぶ
   btn.addEventListener('click', () => runGenerate({}));
+  if (btnFast) btnFast.addEventListener('click', () => runGenerate({ fastMode: true }));
 
   // キャンセルボタン
   if (btnCancel) {
@@ -277,8 +304,7 @@ function setupGeneratePanel() {
       if (typeof cancelActiveOptimization === 'function' && cancelActiveOptimization()) {
         toast('中止リクエストを送りました', 'info');
         btnCancel.style.display = 'none';
-        btn.disabled = false;
-        btn.textContent = '🚀 シフト自動生成を実行';
+        setBusy(false);
         const $text = document.getElementById('progressText');
         if ($text) $text.textContent = '中止しました';
       }

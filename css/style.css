@@ -703,3 +703,13 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 body.col-resizing * { cursor: col-resize !important; }
 /* 幅を指定した列で中身がはみ出さないように */
 .resizable-cols th, .resizable-cols td { overflow: hidden; }
+
+/* ⑤自動生成: 2つの生成モードの説明 */
+.genmode { display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; }
+.genmode-row {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline;
+  padding: 9px 13px; border-radius: 9px;
+  background: var(--surface-3); border: 1px solid var(--border);
+}
+.genmode-row b { white-space: nowrap; }
+.genmode-row span { color: var(--text-soft); font-size: 13px; line-height: 1.7; flex: 1; min-width: 220px; }
