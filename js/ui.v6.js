@@ -2211,13 +2211,16 @@ function listSurplusCells() {
 }
 
 // その人がその日に入れるシフト（担当シフト・早可/遅可の範囲）
+// 責任者・総務（1日1人だけの役割）は除く。定数を増やすと必ず「重複」エラーになるため。
 function candidateShiftsFor(staff, day) {
+  const solo = (typeof SOLO_SHIFT_KEYS !== 'undefined') ? SOLO_SHIFT_KEYS : [];
   const roles = getWorkShiftKeys().filter(k => {
     const t = AppState.shiftTypes.find(x => x.key === k);
     return t && !t.isTraining;
   });
   return (staff.allowedShifts || []).filter(k => {
     if (!roles.includes(k)) return false;
+    if (solo.indexOf(k) >= 0) return false;   // 早責/遅責/早総務/遅総務 は増やせない
     const p = staff.prefs || [];
     if (p.length) {
       if (isEarlyCategory(k) && !p.includes('早可')) return false;
@@ -2279,7 +2282,7 @@ function showSurplusResolveModal() {
         const cands = candidateShiftsFor(s, d);
         const sel = cands.length
           ? `<select data-shift-for="${id}" data-day="${d}" style="min-width:88px">${cands.map(k => `<option value="${k}">${k}</option>`).join('')}</select>`
-          : '<span class="hint">担当シフトなし</span>';
+          : '<span class="hint">出勤に回せるシフトなし（責任者・総務は1日1人のため増やせません）</span>';
         return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px dashed var(--border)">
           <b style="min-width:56px">${d}日</b>
           <button class="btn" data-paid="${id}" data-day="${d}">有給にする</button>
@@ -2317,7 +2320,11 @@ function showSurplusResolveModal() {
     $m.innerHTML = text;
   };
 
-  const busy = (on) => modal.querySelectorAll('button').forEach(b => { b.disabled = on && !b.id; });
+  const busy = (on) => modal.querySelectorAll('button, select').forEach(el => {
+    if (el.id === 'resolveClose') return;             // 閉じるボタンは常に押せる
+    el.disabled = on ? true : (el.dataset.work != null ? !candidateShiftsFor(
+      AppState.staff.find(x => x.id === el.dataset.work) || {}, parseInt(el.dataset.day)).length : false);
+  });
 
   const bind = () => {
     modal.querySelector('#resolveClose').addEventListener('click', () => { modal.remove(); refreshAllUI(); });
