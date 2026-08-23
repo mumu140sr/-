@@ -928,6 +928,12 @@ function renderSkillsPanel() {
   });
 }
 
+// 早遅バランスの選択肢ラベル。「早番多め（7：3）」のように割合を添えて分かりやすくする。
+function balanceOptionLabel(v) {
+  const e = Math.round(v.earlyRatio * 10), l = Math.round(v.lateRatio * 10);
+  return `${v.label}（${e}：${l}）`;
+}
+
 function renderStaffTable() {
   const tbody = document.getElementById('staffTableBody');
   if (!tbody) return;
@@ -996,9 +1002,10 @@ function renderStaffTable() {
         </div>
       </td>
       <td>
-        <select data-field="balance" data-id="${s.id}" style="min-width:90px">
+        <select data-field="balance" data-id="${s.id}" style="min-width:168px"
+                title="出勤日のうち 早番:遅番 をどの割合にするか">
           ${Object.entries(SHIFT_BALANCE).map(([k, v]) =>
-            `<option value="${k}" ${(s.balance || 'balanced') === k ? 'selected' : ''}>${v.label}</option>`
+            `<option value="${k}" ${(s.balance || 'balanced') === k ? 'selected' : ''}>${balanceOptionLabel(v)}</option>`
           ).join('')}
         </select>
       </td>
