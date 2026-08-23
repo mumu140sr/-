@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=149', 'optimizer.js?v=149', 'milp-core.js?v=149');
+self.importScripts('data.js?v=150', 'optimizer.js?v=150', 'milp-core.js?v=150');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=149'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=150'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -101,14 +101,14 @@ self.addEventListener('message', async (e) => {
           let s2 = solver.solve(MILP.composeLP(m.parts, { types: t.types, budgets }),
                                 Object.assign({}, opts, { time_limit: Math.max(3, Math.floor(cap * 0.6)) }));
           let okStrict = MILP.solutionIsValid(s2, m.parts, budgets);
-          if (!okStrict) {
-            // ② 見つからなければ、上限をやめて「重みで守る」方式に切り替える。
-            //    こちらは必ず解が返る（このアプリ本来の全ソフト制約の形）。
-            const s3 = solver.solve(MILP.composeLP(m.parts, { types: t.types, protect }),
-                                    Object.assign({}, opts, { time_limit: Math.max(3, cap - Math.round((Date.now() - t0) / 1000)) }));
-            // 重み方式でも「前の段を悪化させていないか」は必ず確認する。
-            // 時間切れで質の悪い解が返ることがあり、それを採用すると
-            // 人員不足0・公休0などの確定済みの成果が崩れてしまう。
+          if (!okStrict && sol) {
+            // ② 見つからなければ「近傍探索」に切り替える。いまの答えから
+            //    決まった数のマスまでしか変えない、という条件を足して解く。
+            //    いまの答え自体が条件を満たすので、必ず解が見つかる。
+            const s3 = solver.solve(
+              MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(sol), k: 60 } }),
+              Object.assign({}, opts, { time_limit: Math.max(3, cap - Math.round((Date.now() - t0) / 1000)) }));
+            // 近傍探索でも「前の段を悪化させていないか」は必ず確認する
             if (MILP.solutionIsValid(s3, m.parts, budgets)) { s2 = s3; okStrict = true; }
           }
           remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));

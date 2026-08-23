@@ -590,6 +590,17 @@
       if (!b.names || !b.names.length) return;
       extra.push(`bud_${i}: ${b.names.join(' + ')} <= ${b.max}`);
     });
+    // 近傍探索: 「いまの答えから ◯マス までしか変えない」という条件を足す。
+    // いまの答え自体が必ず条件を満たすので、解が見つからないことが無くなる。
+    // 探す範囲も狭いので速い。
+    if (o.neighbor && o.neighbor.ones) {
+      const ones = o.neighbor.ones, k = o.neighbor.k || 60;
+      const plus = [], minus = [];
+      parts.bin.forEach(nm => { (ones[nm] ? minus : plus).push(nm); });
+      let n1 = 0; for (const nm in ones) if (ones[nm]) n1++;
+      const lhs = plus.join(' + ') + (minus.length ? ' - ' + minus.join(' - ') : '');
+      if (lhs) extra.push(`nbh: ${lhs} <= ${k - n1}`);
+    }
     const gen = parts.gen.indexOf('z_dummy') >= 0 ? parts.gen : parts.gen.concat(['z_dummy']);
     const bnd = parts.bnd.concat(parts.bnd.some(x => /z_dummy/.test(x)) ? [] : ['0 <= z_dummy <= 0']);
     return `Minimize\n obj: ${objStr}\nSubject To\n ${parts.cons.concat(extra).join('\n ')}` +
@@ -618,6 +629,14 @@
       if (Math.round(n) > b.max + 1e-6) return false;
     }
     return true;
+  }
+
+  // いまの答えで 1 になっている決定変数の一覧（近傍探索の基準に使う）
+  function onesOf(sol) {
+    const out = {};
+    if (!sol || !sol.Columns) return out;
+    for (const nm in sol.Columns) if (sol.Columns[nm].Primal > 0.5) out[nm] = 1;
+    return out;
   }
 
   // 解から、指定ルールのスラック合計（＝そのルールの違反件数）を取り出す
@@ -654,5 +673,5 @@
     });
   }
 
-  global.MILP = { buildGroupModel, applyGroupSolution, composeLP, slackTotal, slackNames, solutionIsValid, TIERS };
+  global.MILP = { buildGroupModel, applyGroupSolution, composeLP, slackTotal, slackNames, solutionIsValid, onesOf, TIERS };
 })(typeof self !== 'undefined' ? self : this);
