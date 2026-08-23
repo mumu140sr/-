@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=156', 'optimizer.js?v=156', 'milp-core.js?v=156');
+self.importScripts('data.js?v=157', 'optimizer.js?v=157', 'milp-core.js?v=157');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=156'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=157'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -96,7 +96,7 @@ self.addEventListener('message', async (e) => {
         post(20 + Math.floor((gi / groups.length) * 60),
              `【${g.label || g.key}】いまの表を最小限だけ直しています…`);
         const s2 = solver.solve(MILP.composeLP(m.parts, { neighbor: { ones, k: adjustK } }),
-                                Object.assign({}, opts, { time_limit: Math.min(60, opts.time_limit) }));
+                                Object.assign({}, opts, { time_limit: Math.min(20, opts.time_limit) }));   // 微調整は20秒上限
         if (MILP.solutionIsValid(s2, m.parts, [])) {
           if (String(s2.Status) !== 'Optimal') allOptimal = false;
           MILP.applyGroupSolution(m, s2, shifts);
