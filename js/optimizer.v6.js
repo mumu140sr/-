@@ -3923,3 +3923,235 @@ function runAIDiagnosis() {
 
   return results;
 }
+
+/* ===========================================
+   エラー解消プラン（緩和の提案）
+   「どの設定をいくつ動かせば、どのエラーが消えるか」を人日で計算して
+   実行可能な案を並べる。UI側は id と params を見て設定を書き換える。
+   =========================================== */
+
+// 痛み（現場への影響）の小さい順。同じ痛みなら効果の大きい順に並べる。
+const RELAX_PAIN_ORDER = { small: 0, mid: 1, large: 2 };
+
+/**
+ * 1部門ぶんの人日収支を計算する。
+ * @returns {{required:number, avail:number, surplus:number, days:number,
+ *            totalMaxOff:number, totalPaid:number, excessDaily:number}}
+ */
+function calcCapacity(g, days) {
+  const shiftKeys = getWorkShiftKeys();
+  let required = 0, excessDaily = 0;
+  for (let d = 1; d <= days; d++) {
+    shiftKeys.forEach(k => {
+      const need = getDayReq(g.reqs, g.dailyReqs || {}, k, d);
+      required += need;
+      // 日別上書きが既定値より多い分＝「上乗せ」。戻せば取り返せる人日。
+      const base = (g.reqs || {})[k] || 0;
+      if (need > base) excessDaily += (need - base);
+    });
+  }
+  let totalPaid = 0, totalTrain = 0, totalOtherOff = 0;
+  g.staff.forEach(s => {
+    for (let d = 1; d <= days; d++) {
+      const rq = (AppState.requests[s.id]    || {})[d];
+      const fx = (AppState.fixedShifts[s.id] || {})[d];
+      if (rq === '有' || fx === '有') { totalPaid++; continue; }
+      if ((rq && isTraining(rq)) || (fx && isTraining(fx))) { totalTrain++; continue; }
+      const off = (rq && isOff(rq)) ? rq : ((fx && isOff(fx)) ? fx : '');
+      if (off && !isPublicOff(off)) totalOtherOff++;
+    }
+    totalPaid += Math.max(0, (parseInt(s.paidLeave) || 0) - countPaidRequests(s, days));
+  });
+  const totalMaxOff = g.staff.reduce((sum, s) => sum + (s.maxOff || 0), 0);
+  const avail = g.staff.length * days - totalMaxOff - totalPaid - totalTrain - totalOtherOff;
+  return { required, avail, surplus: avail - required, days,
+           totalMaxOff, totalPaid, excessDaily };
+}
+
+// その人がカレンダーで既に指定している'有'の日数（設定値との二重計上を防ぐ）
+function countPaidRequests(s, days) {
+  let n = 0;
+  for (let d = 1; d <= days; d++) if ((AppState.requests[s.id] || {})[d] === '有') n++;
+  return n;
+}
+
+/**
+ * エラー解消プランを組み立てる。
+ * @param {Array} violations 直近の生成結果の違反（無ければ人日の話だけになる）
+ * @returns {Array} プラン配列（痛みの小さい順）
+ */
+function buildRelaxPlans(violations) {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const vios = violations || AppState.violations || [];
+  const plans = [];
+  if (!AppState.staff.length || !days) return plans;
+
+  const cnt = {};
+  vios.forEach(v => { cnt[v.type] = (cnt[v.type] || 0) + 1; });
+
+  // ── A. 人日が足りない場合の案（人員不足・公休不足の根本原因） ──
+  getDepartmentGroups(AppState.staff).forEach(g => {
+    const cap = calcCapacity(g, days);
+    if (cap.surplus >= 0) return;
+    const shortage = -cap.surplus;
+    const pfx = (getDepartmentGroups(AppState.staff).length > 1) ? `【${g.label}】` : '';
+
+    // A-1 日別必要人数の上乗せを戻す（いちばん効きやすく、痛みも中程度）
+    if (cap.excessDaily > 0) {
+      const gain = Math.min(cap.excessDaily, shortage);
+      plans.push({
+        id: 'daily-req-reset', group: 'capacity', pain: 'mid', gain, shortage, dept: g.key,
+        title: `${pfx}「日別必要人数」の上乗せを戻す`,
+        effect: `＋${cap.excessDaily}人日`,
+        detail: `土日などで既定より増やしている分が合計 ${cap.excessDaily}人日 あります。これを既定値に戻すと、不足 ${shortage}人日 のうち ${gain}人日 が解消します。`,
+        after: cap.excessDaily >= shortage ? 'これだけで不足は解消します。' : `まだ ${shortage - cap.excessDaily}人日 足りません。他の案と組み合わせてください。`,
+        params: { dept: g.key },
+      });
+    }
+
+    // A-2 有給の当月消化を減らす（翌月に回すだけなので痛みは小さい）
+    const paidTotal = g.staff.reduce((n, s) => n + (parseInt(s.paidLeave) || 0), 0);
+    if (paidTotal > 0) {
+      const cut = Math.min(paidTotal, shortage);
+      plans.push({
+        id: 'paid-reduce', group: 'capacity', pain: 'small', gain: cut, shortage, dept: g.key,
+        title: `${pfx}有給の当月消化を ${cut}日 減らす（翌月へ回す）`,
+        effect: `＋${cut}人日`,
+        detail: `設定した有給は必ず消化されるため、その分だけ出勤できる人が減ります。当月の消化目標を合計 ${cut}日 減らすと ${cut}人日 取り返せます（有給日数の多い人から減らします）。`,
+        after: cut >= shortage ? 'これだけで不足は解消します。' : `まだ ${shortage - cut}人日 足りません。`,
+        params: { dept: g.key, reduce: cut },
+      });
+    }
+
+    // A-3 公休目標を減らす（痛みが大きいので下に置く）
+    const cutDays = Math.ceil(shortage / Math.max(1, g.staff.length));
+    plans.push({
+      id: 'maxoff-reduce', group: 'capacity', pain: 'large', gain: cutDays * g.staff.length, shortage, dept: g.key,
+      title: `${pfx}公休目標を全員 ${cutDays}日 減らす`,
+      effect: `＋${cutDays * g.staff.length}人日`,
+      detail: `${g.staff.length}人 × ${cutDays}日 ＝ ${cutDays * g.staff.length}人日 ぶん出勤できるようになります。休みが減るため、実施前に必ず現場と確認してください。`,
+      after: '不足は解消しますが、スタッフの休みが減ります。',
+      params: { dept: g.key, days: cutDays },
+    });
+
+    // A-4 必要人数（定数）そのものを1人減らす（影響が最大なので最後）
+    const keys = getWorkShiftKeys().filter(k => ((g.reqs || {})[k] || 0) > 0);
+    const solo = (typeof SOLO_SHIFT_KEYS !== 'undefined') ? new Set(SOLO_SHIFT_KEYS) : new Set();
+    const target = keys.filter(k => !solo.has(k)).sort((a, b) => (g.reqs[b] || 0) - (g.reqs[a] || 0))[0];
+    if (target) {
+      plans.push({
+        id: 'req-reduce', group: 'capacity', pain: 'large', gain: days, shortage, dept: g.key,
+        title: `${pfx}「${target}」の必要人数を1人減らす（${g.reqs[target]}人 → ${g.reqs[target] - 1}人）`,
+        effect: `＋${days}人日`,
+        detail: `毎日1人ずつ減るので ${days}人日 ぶん余裕ができます。営業に直結するため、他の案で足りないときの最後の手段です。`,
+        after: '不足は解消しますが、日々の配置人数が減ります。',
+        params: { dept: g.key, key: target },
+      });
+    }
+  });
+
+  // ── B. 人日は足りているのに残るエラーへの案 ──
+  // リズム系・希望系は「ルールの強弱」を下げれば消える（人手は増減しない）。
+  const softenable = [
+    { type: 'category-switch', label: '連勤中の時間帯切替' },
+    { type: 'bad-rest',        label: '遅→休→早' },
+    { type: 'long-rest',       label: '連休が長すぎる' },
+    { type: 'single-work',     label: '単発出勤' },
+    { type: 'weekend-pref',    label: '土日休み希望' },
+    { type: 'rest-style',      label: '休み方（連休/分散）' },
+    { type: 'pair-rest',       label: '遅→早は2連休（個人）' },
+    { type: 'skill-short',     label: 'スキル目標人数に不足' },
+  ];
+  softenable.forEach(r => {
+    const n = cnt[r.type] || 0;
+    if (!n) return;
+    const lv = getRuleLevel(r.type);
+    if (lv === 'off') return;
+    plans.push({
+      id: 'rule-soften', group: 'rule', pain: 'small', gain: n, count: n,
+      title: `「${r.label}」のルールを ${lv === 'must' ? '🟡できれば に下げる' : 'OFF にする'}`,
+      effect: `${n}件が対象`,
+      detail: lv === 'must'
+        ? `${n}件出ています。🔴絶対 → 🟡できれば に下げると、他の重要なルールを優先できるようになり、件数が減るか警告扱いになります。人手は増減しません。`
+        : `${n}件出ています。OFF にすると、このルールは一切チェックしなくなります。人手は増減しません。`,
+      after: '生成し直すと結果に反映されます。',
+      params: { type: r.type, to: lv === 'must' ? 'should' : 'off' },
+    });
+  });
+
+  // 早遅バランス: 許容幅を広げれば消える
+  if (cnt['balance-diff']) {
+    const tol = parseInt(AppState.settings.balanceTolerance) || 0;
+    plans.push({
+      id: 'balance-tol', group: 'rule', pain: 'small', gain: cnt['balance-diff'], count: cnt['balance-diff'],
+      title: `早遅バランスの許容幅を ${tol}日 → ${tol + 1}日 に広げる`,
+      effect: `${cnt['balance-diff']}件が対象`,
+      detail: `目標比率からのずれを ${tol + 1}日 まで許すようにします。出勤日数によっては比率がぴったりにならないため、1日広げるだけで消えることがよくあります。`,
+      after: '生成し直すと結果に反映されます。',
+      params: { to: tol + 1 },
+    });
+  }
+
+  // 連休が長すぎる: 上限日数を1日延ばす
+  if (cnt['long-rest']) {
+    const cur = getMaxOffRun();
+    plans.push({
+      id: 'maxoffrun', group: 'rule', pain: 'small', gain: cnt['long-rest'], count: cnt['long-rest'],
+      title: `連休の上限を ${cur}日 → ${cur + 1}日 に延ばす`,
+      effect: `${cnt['long-rest']}件が対象`,
+      detail: `${cur + 1}連休までは許すようにします。人手が足りない月は連休が伸びやすいため、1日延ばすと消えることがあります。`,
+      after: '生成し直すと結果に反映されます。',
+      params: { to: cur + 1 },
+    });
+  }
+
+  // スキル最低人数割れ: 最低ラインを1人下げる
+  if (cnt['skill-late']) {
+    (AppState.skills || []).forEach((sk, i) => {
+      const base = (sk.req != null ? sk.req : sk.lateReq) || 0;
+      const min  = (sk.min != null && sk.min >= 0) ? sk.min : base;
+      if (min <= 0) return;
+      plans.push({
+        id: 'skill-min', group: 'rule', pain: 'mid', gain: cnt['skill-late'], count: cnt['skill-late'],
+        title: `スキル「${sk.name}」の最低人数を ${min}人 → ${min - 1}人 に下げる`,
+        effect: `${cnt['skill-late']}件が対象`,
+        detail: `そのスキルを持つ人が足りない日があります。最低ラインを1人下げるか、③スタッフ管理でこのスキルを持つ人を増やしてください。`,
+        after: '生成し直すと結果に反映されます。',
+        params: { index: i, to: min - 1 },
+      });
+    });
+  }
+
+  // 希望休が公休目標より多い人 → その分だけ人日が減っている
+  const over = [];
+  AppState.staff.forEach(s => {
+    let lockedPub = 0;
+    for (let d = 1; d <= days; d++) {
+      const rq = (AppState.requests[s.id]    || {})[d];
+      const fx = (AppState.fixedShifts[s.id] || {})[d];
+      if (isPublicOff(rq) || isPublicOff(fx)) lockedPub++;
+    }
+    if (lockedPub > (s.maxOff || 0)) over.push({ name: s.name, over: lockedPub - (s.maxOff || 0) });
+  });
+  if (over.length) {
+    const total = over.reduce((n, o) => n + o.over, 0);
+    plans.push({
+      id: 'info-overreq', group: 'capacity', pain: 'mid', gain: total, manual: true,
+      title: `希望休を入れすぎている人が ${over.length}人（合計 ${total}日ぶん）`,
+      effect: `＋${total}人日`,
+      detail: over.map(o => `${o.name}: 目標より +${o.over}日`).join(' / ') +
+              `\n希望休は必ず尊重されるため、目標より多い分だけ出勤できる人が減ります。`,
+      after: '④希望休入力で、該当スタッフの「休」を減らしてください（自動では変更しません）。',
+      params: {},
+    });
+  }
+
+  // 人日（人手）の案を先に出す。効果の単位が「人日」と「件」で違うため、
+  // グループをまたいで効果の数字を比べない。
+  const gOrder = { capacity: 0, rule: 1 };
+  plans.sort((a, b) =>
+    (gOrder[a.group] - gOrder[b.group]) ||
+    (RELAX_PAIN_ORDER[a.pain] - RELAX_PAIN_ORDER[b.pain]) ||
+    (b.gain - a.gain));
+  return plans;
+}

@@ -170,6 +170,16 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap) {
         ? '<button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">⏳ 妥協なしで再計算（早期停止を無効・最大10分）</button>'
         : '上限いっぱいまで計算しても解ききれませんでした。⑤自動生成の「🔍 実現性チェック」で人手の不足を確認し、有給日数・日別必要人数・公休数のいずれかを緩めてください。'}`;
   }
+  // エラーが残ったときは、その場から「どう緩めれば消えるか」へ行けるようにする
+  if (vioCount > 0) {
+    const go = document.createElement('button');
+    go.className = 'btn';
+    go.style.cssText = 'margin-top:8px;margin-left:8px;background:#dd6b20;color:#fff';
+    go.textContent = '🩹 エラー解消プランを見る';
+    go.addEventListener('click', () => { if (typeof showRelaxModal === 'function') showRelaxModal(); });
+    box.appendChild(document.createElement('br'));
+    box.appendChild(go);
+  }
   $report.insertBefore(box, $report.firstChild);
   const bd = document.getElementById('btnDeepOptimize');
   if (bd) bd.addEventListener('click', () => {
@@ -186,6 +196,8 @@ function setupGeneratePanel() {
   const btnCancel = document.getElementById('btnCancelGenerate');
   const btnFeas = document.getElementById('btnFeasibility');
   if (btnFeas) btnFeas.addEventListener('click', showFeasibilityModal);
+  const btnRelax = document.getElementById('btnRelax');
+  if (btnRelax) btnRelax.addEventListener('click', showRelaxModal);
 
   // opts.deepMode = true でじっくり最適化（時間上限を大幅に延長）
   const runGenerate = async (opts) => {

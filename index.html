@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=131" />
+<link rel="stylesheet" href="css/style.css?v=132" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -238,11 +238,13 @@
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="btnGenerate" class="btn btn-large btn-primary">🚀 シフト自動生成を実行</button>
         <button id="btnFeasibility" class="btn btn-large" style="background:#38a169;color:#fff">🔍 実現性チェック（生成前）</button>
+        <button id="btnRelax" class="btn btn-large" style="background:#dd6b20;color:#fff">🩹 エラー解消プラン</button>
         <button id="btnCancelGenerate" class="btn btn-large" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button>
       </div>
       <p class="hint" style="margin-top:8px">
         バックグラウンドで処理されるため、実行中もアプリは操作可能です。<br>
-        「🔍 実現性チェック」を押すと、<b>生成する前に</b>「どのエラーが人員的に避けられないか／配置で避けられるか」を判定します。
+        「🔍 実現性チェック」を押すと、<b>生成する前に</b>「どのエラーが人員的に避けられないか／配置で避けられるか」を判定します。<br>
+        「🩹 エラー解消プラン」は、<b>どの設定をいくつ動かせばエラーが消えるか</b>を影響の小さい順に並べ、ボタン1つで設定を変更できます。
       </p>
       <div id="progressArea" style="display:none">
         <div class="progress-info">
@@ -317,12 +319,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=131"></script>
-<script src="js/optimizer.v6.js?v=131"></script>
-<script src="js/worker-client.v6.js?v=131"></script>
-<script src="js/ai-explain.v6.js?v=131"></script>
-<script src="js/ui.v6.js?v=131"></script>
-<script src="js/milp.v6.js?v=131"></script>
-<script src="js/app.v6.js?v=131"></script>
+<script src="js/data.v6.js?v=132"></script>
+<script src="js/optimizer.v6.js?v=132"></script>
+<script src="js/worker-client.v6.js?v=132"></script>
+<script src="js/ai-explain.v6.js?v=132"></script>
+<script src="js/ui.v6.js?v=132"></script>
+<script src="js/milp.v6.js?v=132"></script>
+<script src="js/app.v6.js?v=132"></script>
 </body>
 </html>

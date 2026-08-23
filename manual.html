@@ -280,8 +280,9 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
             <li><span class="n">3</span><span class="t"><b>④希望休入力</b>に、集めた希望休をすべて入力する<small>ここが唯一の手入力作業です。ここを丁寧にやれば後が楽になります。</small></span></li>
             <li><span class="n">4</span><span class="t"><b>⑤自動生成</b>の <span class="btnref">🔍 実現性チェック</span> を先に押す<small>「そもそも人手が足りているか」を生成前に判定します。<b>🚨が出たら、生成しても必ずエラーが残ります。</b>先に公休数や必要人数を見直してください。</small></span></li>
             <li><span class="n">5</span><span class="t"><span class="btnref">🚀 シフト自動生成を実行</span> を押して待つ<small>ふつうは数秒〜数十秒。計算中も他の画面は触れます。1部門あたり最大10分で打ち切ります。</small></span></li>
-            <li><span class="n">6</span><span class="t"><b>⑥シフト表</b>で結果を確認し、必要なら手で微調整する<small>エラーが残っていたら「エラー対処表」を見てください。</small></span></li>
-            <li><span class="n">7</span><span class="t"><span class="btnref">📥 Excelエクスポート</span> で出力して保存・配布する<small>これで完了です。ファイルは必ず保管してください。</small></span></li>
+            <li><span class="n">6</span><span class="t">エラーが残ったら <span class="btnref">🩹 エラー解消プラン</span> を押す<small>「どの設定をいくつ動かせばエラーが消えるか」を影響の小さい順に並べてくれます。上の案から1つずつ試し、そのつど生成し直してください。</small></span></li>
+            <li><span class="n">7</span><span class="t"><b>⑥シフト表</b>で結果を確認し、必要なら手で微調整する<small>細かい入れ替えは手作業のほうが早いこともあります。</small></span></li>
+            <li><span class="n">8</span><span class="t"><span class="btnref">📥 Excelエクスポート</span> で出力して保存・配布する<small>これで完了です。ファイルは必ず保管してください。</small></span></li>
           </ol>
         </div>
 
@@ -455,6 +456,20 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <h3>生成する</h3>
         <p><span class="btnref">🚀 シフト自動生成を実行</span> を押します。多くの場合は数秒〜数十秒、条件が複雑だと数分かかります。<b>1部門あたり最大10分</b>で打ち切ります。計算中も他のタブは操作できます。</p>
 
+        <h3>エラー解消プラン（エラーが残ったとき）</h3>
+        <p><span class="btnref">🩹 エラー解消プラン</span> を押すと、<b>いまの設定をどう変えればエラーが消えるか</b>を具体的な数字で並べます。生成後のレポートからも開けます。</p>
+        <ul>
+          <li>まず<b>人日の収支</b>（必要◯人日 / 出せる◯人日 / 不足◯人日）が表示されます</li>
+          <li><b>① 人手を増やす</b> … 有給・日別必要人数・公休目標・定数。人員不足と公休不足の根本原因はここです</li>
+          <li><b>② ルールを緩める</b> … リズム系や早遅バランス。人手は増減しません</li>
+          <li>各案には <b>影響 小 / 中 / 大</b> が付いており、<b>上にあるものほど現場への影響が小さい</b>順です</li>
+          <li><span class="btnref">この設定にする</span> を押すと設定を自動で変更します。何をどう変えたかは画面に一覧表示され、<span class="btnref">↩ 変更を元に戻す</span> で取り消せます</li>
+        </ul>
+        <div class="note ok">
+          <b>使い方のコツ</b>
+          <p><b>一度に1つだけ</b>適用して、そのつど生成し直してください。同時にいくつも緩めると、何が効いたのか分からなくなり、必要以上に緩めてしまいます。</p>
+        </div>
+
         <h3>終わったときのメッセージ</h3>
         <div class="tw"><table>
           <thead><tr><th class="nw">表示</th><th>意味</th><th>やること</th></tr></thead>
@@ -533,6 +548,10 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
       <section id="errors">
         <div class="sec-head"><span class="step">▪</span><h2>エラー対処表</h2></div>
         <p class="sec-sub">出たエラーの名前で探してください</p>
+        <div class="note">
+          <b>まず ⑤自動生成 の <span class="btnref">🩹 エラー解消プラン</span> を試してください</b>
+          <p>「どの設定をいくつ動かせば消えるか」を自動で計算し、ボタン1つで変更できます。この表は、そのうえで自分で判断したいときの早見表です。</p>
+        </div>
 
         <h3>人員・役職に関するもの</h3>
         <div class="tw"><table>

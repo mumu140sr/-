@@ -1938,3 +1938,230 @@ function applyPrevMonthEnd(info) {
   });
   autoSave();
 }
+
+/* ===========================================
+   エラー解消プランの画面（提案の表示とワンクリック適用）
+   =========================================== */
+let _relaxUndo = null;   // 直前の適用を取り消すためのスナップショット
+
+// 設定まわりだけを丸ごと控えておく（適用を1手だけ元に戻せるように）
+function snapshotForRelax() {
+  return JSON.stringify({
+    settings:              AppState.settings,
+    roleRequirements:      AppState.roleRequirements,
+    roleRequirementsCast:  AppState.roleRequirementsCast,
+    dailyRequirements:     AppState.dailyRequirements,
+    dailyRequirementsCast: AppState.dailyRequirementsCast,
+    skills:                AppState.skills,
+    staff:                 AppState.staff,
+  });
+}
+function restoreFromRelax(snap) {
+  const d = JSON.parse(snap);
+  AppState.settings              = d.settings;
+  AppState.roleRequirements      = d.roleRequirements;
+  AppState.roleRequirementsCast  = d.roleRequirementsCast;
+  AppState.dailyRequirements     = d.dailyRequirements;
+  AppState.dailyRequirementsCast = d.dailyRequirementsCast;
+  AppState.skills                = d.skills;
+  AppState.staff                 = d.staff;
+}
+
+// 部門キーから、書き換える対象の設定を選ぶ
+function _reqStoreFor(dept) {
+  return (dept === 'cast')
+    ? { req: AppState.roleRequirementsCast || (AppState.roleRequirementsCast = {}),
+        daily: AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}) }
+    : { req: AppState.roleRequirements,
+        daily: AppState.dailyRequirements || (AppState.dailyRequirements = {}) };
+}
+function _staffOf(dept) {
+  if (dept === 'cast')     return AppState.staff.filter(s => getStaffDepartment(s) === 'cast');
+  if (dept === 'employee') return AppState.staff.filter(s => getStaffDepartment(s) !== 'cast');
+  return AppState.staff;   // 合算モード
+}
+
+/**
+ * プランを実際の設定に反映する。戻り値は画面に出す変更内容の説明。
+ */
+function applyRelaxPlan(plan) {
+  const p = plan.params || {};
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const changes = [];
+
+  if (plan.id === 'daily-req-reset') {
+    const st = _reqStoreFor(p.dept);
+    // 合算モードでは社員・キャスト両方の上乗せを戻す
+    const stores = (p.dept === 'all')
+      ? [{ req: AppState.roleRequirements, daily: AppState.dailyRequirements || {} },
+         { req: AppState.roleRequirementsCast || {}, daily: AppState.dailyRequirementsCast || {} }]
+      : [st];
+    stores.forEach(({ req, daily }) => {
+      Object.keys(daily).forEach(k => {
+        const base = req[k] || 0;
+        Object.keys(daily[k]).forEach(d => {
+          if (daily[k][d] > base) { changes.push(`${k} ${d}日: ${daily[k][d]}人 → ${base}人`); delete daily[k][d]; }
+        });
+      });
+    });
+  } else if (plan.id === 'paid-reduce') {
+    // 有給日数の多い人から1日ずつ削る（偏らないように順番に回す）
+    let rest = p.reduce || 0;
+    const list = _staffOf(p.dept).filter(s => (parseInt(s.paidLeave) || 0) > 0);
+    while (rest > 0 && list.some(s => (parseInt(s.paidLeave) || 0) > 0)) {
+      list.sort((a, b) => (parseInt(b.paidLeave) || 0) - (parseInt(a.paidLeave) || 0));
+      const s = list[0];
+      const before = parseInt(s.paidLeave) || 0;
+      if (before <= 0) break;
+      s.paidLeave = before - 1; rest--;
+      changes.push(`${s.name}: 有給 ${before}日 → ${s.paidLeave}日`);
+    }
+  } else if (plan.id === 'maxoff-reduce') {
+    _staffOf(p.dept).forEach(s => {
+      const before = s.maxOff || 0;
+      s.maxOff = Math.max(0, before - (p.days || 1));
+      if (s.maxOff !== before) changes.push(`${s.name}: 公休 ${before}日 → ${s.maxOff}日`);
+    });
+  } else if (plan.id === 'req-reduce') {
+    const st = _reqStoreFor(p.dept);
+    const before = st.req[p.key] || 0;
+    st.req[p.key] = Math.max(0, before - 1);
+    changes.push(`${p.key}: ${before}人 → ${st.req[p.key]}人`);
+  } else if (plan.id === 'rule-soften') {
+    if (!AppState.settings.ruleLevels) AppState.settings.ruleLevels = {};
+    const before = getRuleLevel(p.type);
+    AppState.settings.ruleLevels[p.type] = p.to;
+    changes.push(`ルール「${p.type}」: ${before} → ${p.to}`);
+  } else if (plan.id === 'balance-tol') {
+    const before = parseInt(AppState.settings.balanceTolerance) || 0;
+    AppState.settings.balanceTolerance = p.to;
+    changes.push(`早遅バランスの許容幅: ${before}日 → ${p.to}日`);
+  } else if (plan.id === 'maxoffrun') {
+    const before = getMaxOffRun();
+    AppState.settings.maxConsecutiveOff = p.to;
+    changes.push(`連休の上限: ${before}日 → ${p.to}日`);
+  } else if (plan.id === 'skill-min') {
+    const sk = (AppState.skills || [])[p.index];
+    if (sk) {
+      const base = (sk.req != null ? sk.req : sk.lateReq) || 0;
+      const before = (sk.min != null && sk.min >= 0) ? sk.min : base;
+      sk.min = p.to;
+      changes.push(`スキル「${sk.name}」の最低人数: ${before}人 → ${p.to}人`);
+    }
+  }
+  void days;
+  return changes;
+}
+
+// 痛みの表示
+const _RELAX_PAIN = {
+  small: { label: '影響 小', color: '#2f855a', bg: 'rgba(56,161,105,.14)' },
+  mid:   { label: '影響 中', color: '#b7791f', bg: 'rgba(214,158,46,.16)' },
+  large: { label: '影響 大', color: '#c53030', bg: 'rgba(229,62,62,.14)' },
+};
+
+function showRelaxModal() {
+  if (!AppState.staff.length || !AppState.settings.targetMonth) {
+    toast('スタッフと対象年月を設定してください', 'error');
+    return;
+  }
+  const plans = buildRelaxPlans(AppState.violations);
+  // 人日の収支を最初に見せる（何人日足りないのかが分かれば、あとは引き算）
+  const _days = getDaysInMonth(AppState.settings.targetMonth);
+  const capLines = getDepartmentGroups(AppState.staff).map(g => {
+    const c = calcCapacity(g, _days);
+    const label = (getDepartmentGroups(AppState.staff).length > 1) ? `【${g.label}】` : '';
+    return c.surplus < 0
+      ? `${label}必要 ${c.required}人日 ／ 出せる ${c.avail}人日 → <b style="color:var(--danger)">${-c.surplus}人日 足りません</b>`
+      : `${label}必要 ${c.required}人日 ／ 出せる ${c.avail}人日 → <b style="color:var(--success)">余裕 ${c.surplus}人日</b>`;
+  }).join('<br>');
+  const vioN = (AppState.violations || []).length;
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+
+  let lastGroup = null;
+  const body = plans.length ? plans.map((pl, i) => {
+    const pain = _RELAX_PAIN[pl.pain] || _RELAX_PAIN.mid;
+    let head = '';
+    if (pl.group !== lastGroup) {
+      lastGroup = pl.group;
+      head = (pl.group === 'capacity')
+        ? `<h4 style="margin:18px 0 2px">① 人手を増やす<span class="hint" style="font-weight:400"> — 人員不足・公休不足の根本原因はここです</span></h4>`
+        : `<h4 style="margin:18px 0 2px">② ルールを緩める<span class="hint" style="font-weight:400"> — 人手は増減しません。並び方のエラーに効きます</span></h4>`;
+    }
+    return head + `<div class="relax-item" style="border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:10px 0;background:var(--surface-2)">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px">
+        <span style="font-weight:700;color:var(--accent)">案${i + 1}</span>
+        <span style="font-weight:700;flex:1;min-width:200px">${escapeHtml(pl.title)}</span>
+        <span style="font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:${pain.color};background:${pain.bg}">${pain.label}</span>
+        <span style="font-size:13px;font-weight:700;color:var(--text)">${escapeHtml(pl.effect)}</span>
+      </div>
+      <div style="font-size:13px;line-height:1.75;color:var(--text-soft);white-space:pre-wrap">${escapeHtml(pl.detail)}</div>
+      <div style="font-size:13px;line-height:1.7;color:var(--text-soft);margin-top:4px">→ ${escapeHtml(pl.after || '')}</div>
+      ${pl.manual
+        ? `<div class="hint" style="margin-top:8px">※ この案は自動では変更しません（希望休は必ず尊重するため）</div>`
+        : `<button class="btn btn-primary" data-relax="${i}" style="margin-top:10px">この設定にする</button>`}
+    </div>`;
+  }).join('') : `<div class="hint" style="padding:12px 0">いま提案できる緩和はありません。まず <b>🚀 シフト自動生成</b> を実行するか、<b>🔍 実現性チェック</b> で人手の過不足を確認してください。</div>`;
+
+  modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:780px;width:100%;max-height:85vh;overflow:auto;padding:20px">
+    <h3 style="margin:0 0 4px">🩹 エラー解消プラン</h3>
+    <p class="hint" style="margin:0 0 8px">
+      いまのエラーを消すために「どの設定をいくつ動かせばよいか」を並べています。
+      <b>上にあるものほど現場への影響が小さい案</b>です。上から順に1つずつ試し、そのつど生成し直すのがおすすめです。
+    </p>
+    <div style="margin:10px 0;padding:12px 14px;border-radius:10px;background:var(--surface-2);
+         border:1px solid var(--border);font-size:13px;line-height:1.8">
+      ${capLines}${vioN ? `<br>直近の生成で残っているエラー: <b>${vioN}件</b>` : '<br><span class="hint">まだ生成していないため、エラー件数は反映されていません</span>'}
+    </div>
+    <div id="relaxDone" style="display:none;margin:10px 0;padding:12px 14px;border-radius:10px;
+         background:color-mix(in srgb, var(--success) 14%, var(--surface));
+         border:1px solid color-mix(in srgb, var(--success) 35%, transparent);font-size:13px;line-height:1.7"></div>
+    ${body}
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button id="relaxUndo" class="btn" style="display:none">↩ 変更を元に戻す</button>
+      <button id="relaxClose" class="btn btn-primary">閉じる</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+
+  const close = () => modal.remove();
+  modal.querySelector('#relaxClose').addEventListener('click', close);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+
+  const $done = modal.querySelector('#relaxDone');
+  const $undo = modal.querySelector('#relaxUndo');
+
+  modal.querySelectorAll('[data-relax]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pl = plans[parseInt(btn.dataset.relax)];
+      if (!pl) return;
+      _relaxUndo = snapshotForRelax();
+      const changes = applyRelaxPlan(pl);
+      autoSave();
+      refreshAllUI();
+      $done.style.display = 'block';
+      $done.innerHTML = `✅ <b>設定を変更しました：${escapeHtml(pl.title)}</b><br>` +
+        (changes.length
+          ? changes.slice(0, 12).map(escapeHtml).join('<br>') + (changes.length > 12 ? `<br>…ほか ${changes.length - 12}件` : '')
+          : '（変更対象はありませんでした）') +
+        `<br><br>このあと <b>🚀 シフト自動生成</b> を実行してください。`;
+      $undo.style.display = 'inline-flex';
+      modal.querySelectorAll('[data-relax]').forEach(b => { b.disabled = true; b.textContent = '（他の案を試すには一度閉じてください）'; });
+      toast('設定を変更しました。生成し直してください', 'success', 4000);
+      $done.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  });
+
+  $undo.addEventListener('click', () => {
+    if (!_relaxUndo) return;
+    restoreFromRelax(_relaxUndo);
+    _relaxUndo = null;
+    autoSave();
+    refreshAllUI();
+    $done.innerHTML = '↩ <b>変更を元に戻しました。</b>';
+    $undo.style.display = 'none';
+    toast('元に戻しました', 'info');
+  });
+}
