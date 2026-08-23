@@ -2917,6 +2917,7 @@ function checkViolations(shifts) {
     const prevWorked = _pme.cons > 0;     // 前月末が出勤で終わっていたか（バンド不明でも真）
     let offCount  = 0;
     let offRun    = 0;
+    let earlyBand = 0, lateBand = 0;   // 早遅バランス判定用（研修は早番帯として数える）
     // キャスト（パート的な少日数勤務）は、単発出勤・長期連休・切替などの
     // リズム系ルールを適用しない（部分勤務では自然に起きるためノイズになる）。
     // 人員不足・スキル・担当外などの構造ルールは通常どおり適用される。
@@ -2932,6 +2933,7 @@ function checkViolations(shifts) {
 
       if (isWork(cur)) {
         consWork++;
+        if (isLate(cur)) lateBand++; else if (isEarlyCategory(cur)) earlyBand++;
         const myMaxCons = getMaxConsFor(s); // 連勤上限（4 or 個人設定。超えたら🔴絶対NG）
         if (consWork > myMaxCons && !reportedDays.has('cons')) {
           violations.push({
@@ -3098,6 +3100,30 @@ function checkViolations(shifts) {
         message: `🚨 公休数 ${offCount}日（目標${s.maxOff}日, 差${diff}）`,
         action:  '公休数を増やしてください',
       });
+    }
+
+    // 早遅バランス（早番多め/遅番多め など）のずれ。
+    // 早番帯・遅番帯の両方に入れる人だけが対象（片方しか入れない人は判定しない）。
+    if (ruleOn('balance-diff')) {
+      const ratio = SHIFT_BALANCE[s.balance || 'balanced'];
+      // 研は全員が入れるので判定から除く（担当シフトで早遅どちらも選べる人だけが対象）
+      const myShifts = (s.allowedShifts || []);
+      const canE  = myShifts.some(sh => isEarlyCategory(sh));
+      const canL  = myShifts.some(sh => isLate(sh));
+      const total = earlyBand + lateBand;
+      if (ratio && canE && canL && total > 0) {
+        const tol  = Math.max(0, parseInt(settings.balanceTolerance) || 0);
+        const want = total * ratio.earlyRatio;
+        const gap  = earlyBand - want;                 // ＋なら早番が多すぎ
+        if (Math.abs(gap) > tol + 1e-9) {
+          const over = gap > 0 ? '早番' : '遅番';
+          violations.push({
+            staffId: s.id, day: 0, type: 'balance-diff',
+            message: `⚠️ 早遅バランスのずれ（${SHIFT_BALANCE[s.balance || 'balanced'].label}: 早${earlyBand}/遅${lateBand}、目標 早${want.toFixed(1)}）`,
+            action:  `${over}を${Math.abs(gap).toFixed(1)}日ぶん減らすと目標比率に近づきます`,
+          });
+        }
+      }
     }
   });
 
@@ -3710,6 +3736,7 @@ function runAIDiagnosis() {
       'hierarchy':       '責任者ヒエラルキー違反',
       'event-absent':    '行事日の休み',
       'vicemanager-absent': '副店長不在の日',
+      'balance-diff':    '早遅バランスのずれ',
     };
 
     // 遅→休→早

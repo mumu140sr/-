@@ -112,6 +112,8 @@ const AppState = {
     ruleLevels: {},
     // 連休（休みの連続）として許容する最大日数。これを超えると「連休◯日以上」エラー。
     maxConsecutiveOff: 3,
+    // 早遅バランスの許容幅（日）。目標比率からこの日数までのずれは誤差として許す。
+    balanceTolerance: 2,
     penalties: { ...DEFAULT_PENALTIES },
   },
   // ユーザーが自由に定義・編集できるシフト種別
@@ -424,6 +426,8 @@ function loadFromStorage() {
     Object.assign(AppState.settings, data.settings || {}, { penalties });
     if (!AppState.settings.combinedShifts) AppState.settings.combinedShifts = {}; // 旧データ補完
     if (!AppState.settings.ruleLevels || typeof AppState.settings.ruleLevels !== 'object') AppState.settings.ruleLevels = {}; // 旧データ補完
+    if (AppState.settings.balanceTolerance == null) AppState.settings.balanceTolerance = 2;      // 旧データ補完
+    if (!(AppState.settings.maxConsecutiveOff >= 1)) AppState.settings.maxConsecutiveOff = 3;    // 旧データ補完
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
     AppState.shiftTypes = (data.shiftTypes || getDefaultShiftTypes()).map(t =>

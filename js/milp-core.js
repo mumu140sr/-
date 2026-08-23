@@ -228,6 +228,61 @@
           }
         }
       }
+      // 早遅バランス（早番多め/遅番多め など）と 早可/遅可 の希望
+      // ─ どちらも「早番の帯 / 遅番の帯」の割り振りを整えるルール。
+      {
+        // その人が早番帯・遅番帯の両方に入れる場合だけ意味を持つ
+        const myE = allowRoles(s).filter(k => cat(k) === 'e');
+        const myL = allowRoles(s).filter(k => cat(k) === 'l');
+
+        // ① 早可 / 遅可（希望に反する帯への割当を罰する。ソフトなので人員不足よりは弱い）
+        const wPF = ruleW('pref-mismatch', P.prefMismatch || 7000);
+        if (wPF > 0 && (s.prefs || []).length > 0) {
+          const okE = s.prefs.includes('早可'), okL = s.prefs.includes('遅可');
+          if (!okE || !okL) {
+            const bad = [];
+            for (let d = 1; d <= days; d++) {
+              if (!free(s, d)) continue;
+              allowRoles(s).forEach(k => {
+                const c = cat(k);
+                if ((c === 'e' && !okE) || (c === 'l' && !okL)) bad.push(V(si, d, roleIdx[k]));
+              });
+            }
+            if (bad.length) {
+              const pv = `pf_${si}`; addSlack(pv, null, wPF);
+              cons.push(`pfm_${si}: ${bad.join(' + ')} - ${pv} <= 0`);
+            }
+          }
+        }
+
+        // ② 早遅バランス比率
+        const wBAL = ruleW('balance-diff', P.balanceDiff || 80);
+        const ratio = SHIFT_BALANCE[s.balance || 'balanced'];
+        if (wBAL > 0 && ratio && myE.length && myL.length) {
+          // 目標: 早番数 : 遅番数 = earlyRatio : lateRatio
+          // ずれ D = lateRatio*早番数 - earlyRatio*遅番数（0 に近いほど目標どおり）
+          // 係数は 10 倍して整数化する（1日ぶんのずれ ＝ 10 単位）。
+          const ce = Math.round(ratio.lateRatio * 10);
+          const cl = Math.round(ratio.earlyRatio * 10);
+          const terms = []; let konst = 0;
+          for (let d = 1; d <= days; d++) {
+            const o = cellTerms(s, d);
+            realT(o.e).forEach(v => terms.push(`+ ${ce} ${v}`));
+            realT(o.l).forEach(v => terms.push(`- ${cl} ${v}`));
+            konst += constOf(o.e) * ce - constOf(o.l) * cl;   // 固定・研修ぶんは定数
+          }
+          if (terms.length) {
+            const tol = 10 * Math.max(0, parseInt(AppState.settings.balanceTolerance) || 0);
+            const wu = Math.max(0.1, wBAL / 10);   // 1日ぶんのずれ = wBAL 点
+            const bp = `bp_${si}`, bm = `bm_${si}`;
+            addSlack(bp, null, wu); addSlack(bm, null, wu);
+            const lhs = terms.join(' ').replace(/^\+ /, '');
+            cons.push(`balh_${si}: ${lhs} - ${bp} <= ${tol - konst}`);
+            cons.push(`ball_${si}: ${lhs} + ${bm} >= ${-tol - konst}`);
+          }
+        }
+      }
+
       if (isCast) return; // キャストはリズム系ルール免除
       // リズム: late-early / single / category-switch / bad-rest / long-rest / hierarchy
       const wLE = ruleW('late-early', P.lateEarly || 9000);
