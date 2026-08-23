@@ -310,6 +310,8 @@ const RULE_LEVEL_META = [
   { g: '個人希望',   t: 'weekend-pref',      l: '土日休み希望',          def: 'should' },
   { g: '個人希望',   t: 'rest-style',        l: '休み方（連休/分散）',   def: 'should' },
   { g: '個人希望',   t: 'pair-rest',         l: '遅→早は2連休（個人）',  def: 'should' },
+  { g: '個人希望',   t: 'pair-rest-count',   l: '連休回数が目安に不足',  def: 'should' },
+  { g: '行事',       t: 'special-day',       l: '特別日の副店長（入れ替え日/新装日）', def: 'must' },
   { g: '行事',       t: 'event-absent',      l: '行事日に対象者が休み',  def: 'must' },
 ];
 
@@ -1046,6 +1048,7 @@ function renderStaffTable() {
                 title="土日をなるべく休みにする">
           <option value=""     ${!s.weekendPref            ? 'selected' : ''}>なし</option>
           <option value="soft" ${s.weekendPref === 'soft'  ? 'selected' : ''}>なるべく</option>
+          <option value="hard" ${s.weekendPref === 'hard'  ? 'selected' : ''}>絶対</option>
         </select>
       </td>
       <td>
@@ -1053,7 +1056,9 @@ function renderStaffTable() {
                 title="連休派=休みをまとめる／分散派=3連勤前後でこまめに休む">
           <option value=""            ${!s.restStyle                    ? 'selected' : ''}>おまかせ</option>
           <option value="pair-soft"   ${s.restStyle === 'pair-soft'    ? 'selected' : ''}>なるべく連休</option>
+          <option value="pair-hard"   ${s.restStyle === 'pair-hard'    ? 'selected' : ''}>必ず連休</option>
           <option value="spread-soft" ${s.restStyle === 'spread-soft'  ? 'selected' : ''}>なるべく分散</option>
+          <option value="spread-hard" ${s.restStyle === 'spread-hard'  ? 'selected' : ''}>必ず分散(3連勤まで)</option>
         </select>
       </td>
       <td>

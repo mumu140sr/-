@@ -2926,8 +2926,12 @@ function checkViolations(shifts) {
     const effectiveAllowed = (s.allowedShifts || []).concat(['研']); // 研は全員許容
     const reportedDays = new Set();
     const wkHard     = s.weekendPref === 'hard';
+    const wkSoft     = s.weekendPref === 'soft';
     const pairHard   = s.restStyle === 'pair-hard';
+    const pairSoft   = s.restStyle === 'pair-soft';
     const spreadHard = s.restStyle === 'spread-hard';
+    const spreadSoft = s.restStyle === 'spread-soft';
+    let pairRestBlocks = 0;   // 2連休以上のかたまりの数（連休の目安回数の判定用）
 
     for (let d = 1; d <= days; d++) {
       const cur = (shifts[s.id] || {})[d] || '';
@@ -2946,19 +2950,19 @@ function checkViolations(shifts) {
         }
         if (!isWork((shifts[s.id] || {})[d + 1] || '')) reportedDays.delete('cons'); // 連勤が切れたらリセット
 
-        // 個人希望（絶対）: 土日休み
-        if (wkHard && (_wdv[d] === 0 || _wdv[d] === 6)) {
+        // 個人希望: 土日休み（絶対＝🚨 / なるべく＝⚠️）
+        if ((wkHard || wkSoft) && (_wdv[d] === 0 || _wdv[d] === 6) && ruleOn('weekend-pref')) {
           violations.push({
             staffId: s.id, day: d, type: 'weekend-pref',
-            message: `🚨 ${_wdv[d] === 0 ? '日曜' : '土曜'}に出勤（個人希望: 土日休み・絶対）`,
+            message: `${wkHard ? '🚨' : '⚠️'} ${_wdv[d] === 0 ? '日曜' : '土曜'}に出勤（個人希望: 土日休み・${wkHard ? '絶対' : 'なるべく'}）`,
             action:  'この日を休みにして平日の休みと入れ替えてください',
           });
         }
-        // 個人希望（絶対）: 分散派（勤務は3連勤まで）
-        if (spreadHard && consWork === 4 && !reportedDays.has('sp' + d)) {
+        // 個人希望: 分散派（勤務は3連勤まで）
+        if ((spreadHard || spreadSoft) && consWork === 4 && !reportedDays.has('sp' + d) && ruleOn('rest-style')) {
           violations.push({
             staffId: s.id, day: d, type: 'rest-style',
-            message: `🚨 4連勤以上（個人希望: こまめに分散・絶対）`,
+            message: `${spreadHard ? '🚨' : '⚠️'} 4連勤以上（個人希望: こまめに分散・${spreadHard ? '絶対' : 'なるべく'}）`,
             action:  '3連勤以内になるよう休みを挟んでください',
           });
           reportedDays.add('sp' + d);
@@ -3031,6 +3035,12 @@ function checkViolations(shifts) {
       } else {
         if (cur === '余') surplusN++;
         if (isPublicOff(cur)) offCount++; // 公休のみカウント（有給・季節休暇は別枠）
+        // 2連休以上のかたまりの数（前日が出勤で、当日と翌日が休みなら1回）
+        if (cur !== '余' && !isWork((shifts[s.id] || {})[d + 1] || '') && d < days) {
+          const _pv = (d > 1) ? ((shifts[s.id] || {})[d - 1] || '') : prevShift;
+          const _nx = (shifts[s.id] || {})[d + 1] || '';
+          if (_nx && _nx !== '余' && (d === 1 ? !prevWorked : isWork(_pv))) pairRestBlocks++;
+        }
         consWork = 0;
 
         // 連休は設定した上限日数まで（有給も連休に数える。「余」は除外）
@@ -3052,14 +3062,14 @@ function checkViolations(shifts) {
           offRun = 0;
         }
 
-        // 個人希望（絶対）: 連休派（ポツンと1日だけの休みはNG）
-        if (pairHard && cur !== '余' && d > 1 && d < days) {
+        // 個人希望: 連休派（ポツンと1日だけの休みはNG）
+        if ((pairHard || pairSoft) && ruleOn('rest-style') && cur !== '余' && d > 1 && d < days) {
           const pvP = (shifts[s.id] || {})[d - 1] || '';
           const nxP = (shifts[s.id] || {})[d + 1] || '';
           if (isWork(pvP) && isWork(nxP)) {
             violations.push({
               staffId: s.id, day: d, type: 'rest-style',
-              message: `🚨 単独の1日休み（個人希望: 連休・絶対）`,
+              message: `${pairHard ? '🚨' : '⚠️'} 単独の1日休み（個人希望: 連休・${pairHard ? '絶対' : 'なるべく'}）`,
               action:  '前後どちらかの日も休みにして連休にしてください',
             });
           }
@@ -3104,6 +3114,20 @@ function checkViolations(shifts) {
       });
     }
 
+    // 連休（2連休以上）の回数が目安に届いているか
+    if (!isCast && ruleOn('pair-rest-count')) {
+      const prTarget = (parseInt(s.pairRestTarget) > 0)
+        ? parseInt(s.pairRestTarget)
+        : (parseInt(settings.pairRestTarget) || 0);
+      if (prTarget > 0 && pairRestBlocks < prTarget) {
+        violations.push({
+          staffId: s.id, day: 0, type: 'pair-rest-count',
+          message: `⚠️ 連休（2連休以上）が ${pairRestBlocks}回（目安 ${prTarget}回）`,
+          action:  '休みをまとめて2連休にすると回数が増えます',
+        });
+      }
+    }
+
     // 余剰休み（余）の希望どおりか。「付けない」設定の人に余が付いていたら知らせる。
     if (surplusN > 0 && (s.surplusPref || '') === 'avoid' && ruleOn('surplus-unwanted')) {
       violations.push({
@@ -3137,6 +3161,25 @@ function checkViolations(shifts) {
       }
     }
   });
+
+  // 特別日（入れ替え日＝副店長が遅責 / 新装日＝副店長が早責）に入っているか
+  if (ruleOn('special-day')) {
+    const vmsAll = staff.filter(s => s.positionType === 'viceManager');
+    Object.keys(AppState.specialDays || {}).forEach(k => {
+      const d = parseInt(k); if (!(d >= 1 && d <= days)) return;
+      const kind = AppState.specialDays[k];
+      if (kind !== 'replacement' && kind !== 'renewal') return;
+      const role = (kind === 'replacement') ? '遅責' : '早責';
+      const ok = vmsAll.some(vm => ((shifts[vm.id] || {})[d] || '') === role);
+      if (!ok && vmsAll.length) {
+        violations.push({
+          staffId: (vmsAll[0] || {}).id || '', day: d, type: 'special-day',
+          message: `⚠️ ${kind === 'replacement' ? '入れ替え日' : '新装日'}に副店長が「${role}」に入っていません`,
+          action:  `副店長のいずれかをこの日の${role}にしてください`,
+        });
+      }
+    });
+  }
 
   // 毎日、次の①②のどちらかを満たすこと（副店長2人以上のときのみ有効）
   //  ① 副店長が早番か遅番に出勤している
@@ -3749,6 +3792,10 @@ function runAIDiagnosis() {
       'vicemanager-absent': '副店長不在の日',
       'balance-diff':    '早遅バランスのずれ',
       'surplus-unwanted': '余剰休みの希望と不一致',
+      'pair-rest-count': '連休回数が目安に不足',
+      'special-day':     '特別日に副店長が責任者不在',
+      'weekend-pref':    '土日休み希望',
+      'rest-style':      '休み方の希望',
     };
 
     // 遅→休→早

@@ -19,12 +19,12 @@
   // 段階最適化の順番。大事なものから順に0を目指し、達成できたら以後は動かさない。
   // 上の段ほど「店舗が回らなくなる」影響が大きいルール。
   const TIERS = [
-    { label: '人員・役職',     types: ['understaff', 'resp-duplicate', 'skill-late', 'vicemanager-absent'] },
+    { label: '人員・役職',     types: ['understaff', 'resp-duplicate', 'skill-late', 'vicemanager-absent', 'special-day'] },
     { label: '公休・有給',     types: ['off-count', 'paid'] },
     { label: '連勤・遅→早',    types: ['consecutive', 'late-early'] },
     { label: '単発出勤・定数',  types: ['single-work', 'overstaff'] },
-    { label: 'リズム',        types: ['category-switch', 'bad-rest', 'long-rest', 'pair-rest'] },
-    { label: '希望・その他',   types: ['hierarchy', 'pref-mismatch', 'balance-diff', 'skill-short', 'surplus-unwanted', 'single-off'] },
+    { label: 'リズム',        types: ['category-switch', 'bad-rest', 'long-rest', 'pair-rest', 'single-off'] },
+    { label: '希望・その他',   types: ['hierarchy', 'pref-mismatch', 'balance-diff', 'skill-short', 'surplus-unwanted', 'weekend-pref', 'rest-style', 'pair-rest-count'] },
   ];
 
   // 1部門グループ分の LP を作る。戻り値 { lp, vars, roles, gStaff, days }
@@ -63,6 +63,9 @@
       const f = fx(s, d); if (f) return false;
       return true;
     };
+    const _ym = String(AppState.settings.targetMonth || '').split('-');
+    const _y = parseInt(_ym[0]) || 2000, _mo = parseInt(_ym[1]) || 1;
+    const weekday = (d) => new Date(_y, _mo - 1, d).getDay();   // 0=日 6=土
     const isTrainDay = (s, d) => { const f = fx(s, d); return f && isTraining(f); };
     const isFixWork  = (s, d) => { const f = fx(s, d); return f && isWork(f) && !isTraining(f); };
 
@@ -177,6 +180,28 @@
         const terms = []; let c = 0;
         vms.forEach(s => { allowRoles(s).forEach(k => { if (fx(s, d) === k) c++; else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k])); }); });
         if (c === 0) { const va = `va_${d}`; addSlack(va, 1, w, 'vicemanager-absent'); cons.push(`vice_${d}: ${(terms.length ? terms.join(' + ') + ' + ' : '')}${va} >= 1`); }
+      }
+    }
+
+    // 特別日（入れ替え日＝副店長が遅責 / 新装日＝副店長が早責）
+    {
+      const wSP = ruleW('special-day', P.specialDayMiss || 9000);
+      const sp = AppState.specialDays || {};
+      if (wSP > 0 && vms.length) for (let d = 1; d <= days; d++) {
+        const kind = sp[d];
+        if (kind !== 'replacement' && kind !== 'renewal') continue;
+        const role = (kind === 'replacement') ? '遅責' : '早責';
+        if (!roles.includes(role)) continue;
+        const terms = []; let c = 0;
+        vms.forEach(s => {
+          if (!(s.allowedShifts || []).includes(role)) return;
+          if (fx(s, d) === role) c++;
+          else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[role]));
+        });
+        if (c === 0 && terms.length) {
+          const v = `sp_${d}`; addSlack(v, 1, wSP, 'special-day');
+          cons.push(`spd_${d}: ${terms.join(' + ')} + ${v} >= 1`);
+        }
       }
     }
 
@@ -324,12 +349,86 @@
         }
       }
 
+      // ── 個人の休みの希望（土日休み／休み方／連休回数）─────────────
+      {
+        // 土日休み希望: その日に出勤したら罰点。「絶対」は重く、「なるべく」は軽く。
+        const wkBase = (s.weekendPref === 'hard') ? (P.weekendHard || 3500)
+                     : (s.weekendPref === 'soft') ? (P.weekendSoft || 600) : 0;
+        const wWK = wkBase ? ruleW('weekend-pref', wkBase) : 0;
+        if (wWK > 0) {
+          for (let d = 1; d <= days; d++) {
+            const wd = weekday(d);
+            if (wd !== 0 && wd !== 6) continue;
+            if (!free(s, d)) continue;              // 固定・希望休の日は動かせないので対象外
+            const t = allowRoles(s).map(k => V(si, d, roleIdx[k]));
+            if (!t.length) continue;
+            const v = `wk_${si}_${d}`; addSlack(v, 1, wWK, 'weekend-pref');
+            cons.push(`wkc_${si}_${d}: ${t.join(' + ')} - ${v} <= 0`);
+          }
+        }
+
+        // 休み方: 連休派＝ポツンと1日だけの休みを避ける／分散派＝4連勤以上を避ける
+        const rs = s.restStyle || '';
+        const rsBase = /-hard$/.test(rs) ? (P.restStyleHard || 3500)
+                     : /-soft$/.test(rs) ? (P.restStyleSoft || 600) : 0;
+        const wRS = rsBase ? ruleW('rest-style', rsBase) : 0;
+        if (wRS > 0 && rs.indexOf('pair') === 0) {
+          // 前日出勤・当日休み・翌日出勤 → 罰点
+          for (let d = 2; d < days; d++) {
+            const A = cellTerms(s, d), Pd = cellTerms(s, d - 1), B = cellTerms(s, d + 1);
+            const pw = realT(Pd.w), bw = realT(B.w), aw = realT(A.w);
+            if (!pw.length && !bw.length) continue;
+            const v = `rsp_${si}_${d}`; addSlack(v, 1, wRS, 'rest-style');
+            const lhs = [...pw, ...bw, ...aw.map(x => `- ${x}`), `- ${v}`];
+            cons.push(`rsp_${si}_${d}: ${lhs.join(' + ').replace(/\+ -/g, '-')} <= ${1 - Pd.c - B.c + A.c}`);
+          }
+        }
+        if (wRS > 0 && rs.indexOf('spread') === 0) {
+          // 4連勤以上を避ける（3連勤までにおさめる）
+          for (let d = 1; d + 3 <= days; d++) {
+            let cc = 0, t = [];
+            for (let dd = d; dd <= d + 3; dd++) { const o = cellTerms(s, dd); cc += o.c; t = t.concat(realT(o.w)); }
+            if (!t.length) continue;
+            const v = `rss_${si}_${d}`; addSlack(v, 1, wRS, 'rest-style');
+            cons.push(`rss_${si}_${d}: ${t.join(' + ')} - ${v} <= ${3 - cc}`);
+          }
+        }
+
+        // 連休の目安回数: 2連休以上のかたまりを月◯回つくる（個人設定が全体設定に優先）
+        const prTarget = (parseInt(s.pairRestTarget) > 0)
+          ? parseInt(s.pairRestTarget)
+          : (parseInt(AppState.settings.pairRestTarget) || 0);
+        const wPRC = prTarget > 0 ? ruleW('pair-rest-count', P.pairRestShort || 800) : 0;
+        if (wPRC > 0) {
+          const blocks = [];
+          for (let d = 1; d < days; d++) {
+            const A = cellTerms(s, d), B = cellTerms(s, d + 1);
+            if (A.c || B.c) continue;                     // 固定出勤の日は連休になりえない
+            const bv = `prb_${si}_${d}`; bin.add(bv); blocks.push(bv);
+            const aw = realT(A.w), bw = realT(B.w);
+            // かたまりの開始条件: d と d+1 が休み、かつ 前日は出勤（d=1 は前日なし）
+            if (aw.length) cons.push(`prb1_${si}_${d}: ${bv} + ${aw.join(' + ')} <= 1`);
+            if (bw.length) cons.push(`prb2_${si}_${d}: ${bv} + ${bw.join(' + ')} <= 1`);
+            if (d > 1) {
+              const Pd = cellTerms(s, d - 1), pw = realT(Pd.w);
+              if (pw.length || Pd.c) cons.push(`prb3_${si}_${d}: ${bv}${pw.length ? ' - ' + pw.join(' - ') : ''} <= ${Pd.c}`);
+              else cons.push(`prb3_${si}_${d}: ${bv} <= 0`);
+            }
+          }
+          if (blocks.length) {
+            const sv = `prs_${si}`; addSlack(sv, null, wPRC, 'pair-rest-count');
+            cons.push(`prc_${si}: ${blocks.join(' + ')} + ${sv} >= ${prTarget}`);
+          }
+        }
+      }
+
       if (isCast) return; // キャストはリズム系ルール免除
       // リズム: late-early / single / category-switch / bad-rest / long-rest / hierarchy
-      const wLE = ruleW('late-early', P.lateEarly || 9000);
+      // ①基本設定の「遅→早の禁止」がOFFなら、生成でも避けない（検査側と揃える）
+      const wLE = (AppState.settings.forbidLateEarly === false) ? 0 : ruleW('late-early', P.lateEarly || 9000);
       const wSW = ruleW('single-work', P.singleWork || 5000);
       const wCS = ruleW('category-switch', P.categorySwitch || 3000);
-      const wBR = ruleW('bad-rest', P.badRest || 2500);
+      const wBR = (AppState.settings.penaltySingleOff === false) ? 0 : ruleW('bad-rest', P.badRest || 2500);
       const wLR = ruleW('long-rest', P.longRest || 2000);
       for (let d = 1; d <= days; d++) {
         const A = cellTerms(s, d), B = d < days ? cellTerms(s, d + 1) : null, C = d + 2 <= days ? cellTerms(s, d + 2) : null, Pd = d > 1 ? cellTerms(s, d - 1) : null;
@@ -393,6 +492,19 @@
           cons.push(`sob_${si}: ${lhs.join(' + ').replace(/\+ -/g, '-')} <= ${A1c.c - B1c.c}`);
         }
       }
+      // 月中の「単発休み」: 前日出勤 → 当日休み → 翌日出勤 を避ける
+      if (AppState.settings.penaltySingleOff) {
+        const wSOm = ruleW('single-off', P.singleOff || 50);
+        if (wSOm > 0) for (let d = 2; d < days; d++) {
+          const A = cellTerms(s, d), Pd = cellTerms(s, d - 1), B = cellTerms(s, d + 1);
+          const pw = realT(Pd.w), bw = realT(B.w), aw = realT(A.w);
+          if (!pw.length && !bw.length) continue;
+          const v = `so_${si}_${d}`; addSlack(v, 1, wSOm, 'single-off');
+          const lhs = [...pw, ...bw, ...aw.map(x => `- ${x}`), `- ${v}`];
+          cons.push(`so_${si}_${d}: ${lhs.join(' + ').replace(/\+ -/g, '-')} <= ${1 - Pd.c - B.c + A.c}`);
+        }
+      }
+
       // 前月末が休みで終わっている場合、1日目の孤立出勤（1日目=出勤・2日目=休み）も単発出勤。
       // checkViolations と揃えて、生成側でも避けるようにする。
       if (wSW > 0 && pme.cons === 0 && days >= 2) {
