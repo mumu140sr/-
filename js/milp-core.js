@@ -24,7 +24,9 @@
     { label: '連勤・遅→早',    types: ['consecutive', 'late-early'] },
     { label: '単発出勤・定数',  types: ['single-work', 'overstaff'] },
     { label: 'リズム',        types: ['category-switch', 'bad-rest', 'long-rest', 'pair-rest', 'single-off'] },
-    { label: '希望・その他',   types: ['hierarchy', 'pref-mismatch', 'balance-diff', 'skill-short', 'surplus-unwanted', 'weekend-pref', 'rest-style', 'pair-rest-count'] },
+    // 個人の希望は、いちばん重い「上下関係」より先に片づける（後回しだと時間切れになる）
+    { label: '個人の希望',     types: ['weekend-pref', 'rest-style', 'pair-rest-count', 'pref-mismatch', 'balance-diff', 'skill-short', 'surplus-unwanted'] },
+    { label: '上下関係',       types: ['hierarchy'] },
   ];
 
   // 1部門グループ分の LP を作る。戻り値 { lp, vars, roles, gStaff, days }
