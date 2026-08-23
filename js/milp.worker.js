@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=147', 'optimizer.js?v=147', 'milp-core.js?v=147');
+self.importScripts('data.js?v=148', 'optimizer.js?v=148', 'milp-core.js?v=148');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=147'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=148'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -106,12 +106,16 @@ self.addEventListener('message', async (e) => {
             //    こちらは必ず解が返る（このアプリ本来の全ソフト制約の形）。
             const s3 = solver.solve(MILP.composeLP(m.parts, { types: t.types, protect }),
                                     Object.assign({}, opts, { time_limit: Math.max(3, cap - Math.round((Date.now() - t0) / 1000)) }));
-            if (MILP.solutionIsValid(s3, m.parts, [])) s2 = s3;
+            // 重み方式でも「前の段を悪化させていないか」は必ず確認する。
+            // 時間切れで質の悪い解が返ることがあり、それを採用すると
+            // 人員不足0・公休0などの確定済みの成果が崩れてしまう。
+            if (MILP.solutionIsValid(s3, m.parts, budgets)) { s2 = s3; okStrict = true; }
           }
           remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
           if (String(s2 && s2.Status) !== 'Optimal') allOptimal = false;
-          // それでも使えない解なら、直前の段の解を使って段階最適化を打ち切る
-          if (!MILP.solutionIsValid(s2, m.parts, [])) break;
+          // どちらの方式でも前の段を守れなかった場合は採用せず、
+          // 直前の段の解（大事なルールが0件のもの）を使って打ち切る
+          if (!okStrict) break;
           sol = s2;
           // この段で達成した件数を上限として固定（以後の段で悪化させない）
           const got = MILP.slackTotal(sol, m.parts, t.types);
