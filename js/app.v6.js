@@ -157,8 +157,9 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
     box.innerHTML = `⚡ <b>速い生成（証明なし）で完了しました（${elapsed}秒）</b>：` +
       (vioCount === 0
         ? 'エラー0件です。<b>0件なのでこれ以上良くなりようがありません</b>。このまま使えます。'
-        : `エラー ${vioCount}件。<b>これが最良とは限りません</b>（証明していないため、あと1〜2件減らせる可能性があります）。<br>
-           きっちり詰めたいときは下のボタンで解き直してください。`) +
+        : `エラー ${vioCount}件。<b>これが最良とは限りません</b>（60秒で打ち切ったため、証明していません）。<br>
+           じっくり生成にすると<b>さらに減ることがあります</b>。人手がぎりぎりの月ほど差が大きくなる傾向があります。
+           最終確定の前に、一度は下のボタンで解き直すことをおすすめします。`) +
       (vioCount > 0
         ? '<br><button id="btnProofOptimize" class="btn btn-primary" style="margin-top:8px">🎯 じっくり生成で解き直す（証明あり・最大10分）</button>'
         : '');

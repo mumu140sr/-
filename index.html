@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=134" />
+<link rel="stylesheet" href="css/style.css?v=135" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -235,8 +235,8 @@
     <div class="card">
       <p>設定をもとに<b>数理最適化</b>でシフトを計算します。生成のしかたは2種類から選べます。</p>
       <div class="genmode">
-        <div class="genmode-row"><b>⚡ 速い生成（証明なし）</b><span>1部門あたり最大60秒で打ち切り、その時点の最良の表を返します。ふだんはこちらで十分です。</span></div>
-        <div class="genmode-row"><b>🎯 じっくり生成（証明あり）</b><span>「これ以上良い組み合わせは存在しない」と数学的に確かめるまで解きます。1部門あたり最大10分。</span></div>
+        <div class="genmode-row"><b>⚡ 速い生成（証明なし）</b><span>1部門あたり最大60秒で打ち切り、その時点の最良の表を返します。設定を直しながら何度も試す段階はこちらが快適です。</span></div>
+        <div class="genmode-row"><b>🎯 じっくり生成（証明あり）</b><span>「これ以上良い組み合わせは存在しない」と数学的に確かめるまで解きます。1部門あたり最大10分。<b>最終確定はこちら</b>で。条件が厳しい月ほど、速い生成との差が大きくなります。</span></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="btnGenerateFast" class="btn btn-large btn-primary">⚡ 速い生成（証明なし・最大60秒）</button>
@@ -323,12 +323,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=134"></script>
-<script src="js/optimizer.v6.js?v=134"></script>
-<script src="js/worker-client.v6.js?v=134"></script>
-<script src="js/ai-explain.v6.js?v=134"></script>
-<script src="js/ui.v6.js?v=134"></script>
-<script src="js/milp.v6.js?v=134"></script>
-<script src="js/app.v6.js?v=134"></script>
+<script src="js/data.v6.js?v=135"></script>
+<script src="js/optimizer.v6.js?v=135"></script>
+<script src="js/worker-client.v6.js?v=135"></script>
+<script src="js/ai-explain.v6.js?v=135"></script>
+<script src="js/ui.v6.js?v=135"></script>
+<script src="js/milp.v6.js?v=135"></script>
+<script src="js/app.v6.js?v=135"></script>
 </body>
 </html>
