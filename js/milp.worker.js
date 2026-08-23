@@ -83,16 +83,20 @@ self.addEventListener('message', async (e) => {
       if (tiered) {
         const tiers = MILP.TIERS.filter(t => (t.types || []).some(ty => (m.parts.slackByType[ty] || []).length));
         const budgets = [];
-        const per = Math.max(5, Math.floor(opts.time_limit / Math.max(1, tiers.length)));
-        let spare = 0;
+        // 時間配分: 早い段は数秒で終わるので、余った時間を後の段に回す。
+        // ただし1つの段が全部使い切って後の段を飢えさせないよう、必ず後続分を残す。
+        const MIN_PER = 5;                       // 1段あたりの最低秒数
+        let remain = opts.time_limit;
         for (let ti = 0; ti < tiers.length; ti++) {
           const t = tiers[ti];
+          const left = tiers.length - ti - 1;     // この段より後に残っている段数
+          const cap = Math.max(MIN_PER, remain - MIN_PER * left);
           post(20 + Math.floor(((gi + (ti + 1) / (tiers.length + 1)) / groups.length) * 60),
                `【${g.label || g.key}】第${ti + 1}段「${t.label}」を0に近づけています…`);
           const lp = MILP.composeLP(m.parts, { types: t.types, budgets });
           const t0 = Date.now();
-          const s2 = solver.solve(lp, Object.assign({}, opts, { time_limit: per + spare }));
-          spare = Math.max(0, (per + spare) - Math.round((Date.now() - t0) / 1000));
+          const s2 = solver.solve(lp, Object.assign({}, opts, { time_limit: cap }));
+          remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
           if (String(s2 && s2.Status) !== 'Optimal') allOptimal = false;
           if (!s2 || !s2.Columns) break;         // 解が返らなければ直前の解を使う
           sol = s2;

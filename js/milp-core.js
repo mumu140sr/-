@@ -19,12 +19,12 @@
   // 段階最適化の順番。大事なものから順に0を目指し、達成できたら以後は動かさない。
   // 上の段ほど「店舗が回らなくなる」影響が大きいルール。
   const TIERS = [
-    { label: '人員・役職',       types: ['understaff', 'resp-duplicate', 'skill-late', 'vicemanager-absent'] },
-    { label: '公休・有給',       types: ['off-count', 'paid'] },
-    { label: '連勤・遅→早',      types: ['consecutive', 'late-early'] },
-    { label: '単発出勤',         types: ['single-work'] },
-    { label: '定数超過・上下関係', types: ['overstaff', 'hierarchy', 'pref-mismatch', 'surplus-unwanted'] },
-    { label: 'リズム・希望',     types: ['category-switch', 'bad-rest', 'long-rest', 'skill-short', 'balance-diff', 'single-off'] },
+    { label: '人員・役職',     types: ['understaff', 'resp-duplicate', 'skill-late', 'vicemanager-absent'] },
+    { label: '公休・有給',     types: ['off-count', 'paid'] },
+    { label: '連勤・遅→早',    types: ['consecutive', 'late-early'] },
+    { label: '単発出勤・定数',  types: ['single-work', 'overstaff'] },
+    { label: 'リズム',        types: ['category-switch', 'bad-rest', 'long-rest'] },
+    { label: '希望・その他',   types: ['hierarchy', 'pref-mismatch', 'balance-diff', 'skill-short', 'surplus-unwanted', 'single-off'] },
   ];
 
   // 1部門グループ分の LP を作る。戻り値 { lp, vars, roles, gStaff, days }
