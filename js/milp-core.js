@@ -576,6 +576,29 @@
            `\nGeneral\n ${gen.join('\n ')}\nEnd\n`;
   }
 
+  /**
+   * 段階最適化で受け取った解が、前の段で確定させた約束（budgets）を
+   * 本当に守れているかを確かめる。ソルバーが時間内に実行可能な解を
+   * 見つけられなかった場合、中身が全部0の「空の解」が返ることがあり、
+   * そのまま採用すると全員が1日も出勤しないシフトになってしまう。
+   */
+  function solutionIsValid(sol, parts, budgets) {
+    if (!sol || !sol.Columns) return false;
+    // 出勤が1つも無い解は、解けなかった印とみなす
+    let anyWork = false;
+    for (const name in sol.Columns) {
+      if (name.charAt(0) === 'x' && sol.Columns[name].Primal > 0.5) { anyWork = true; break; }
+    }
+    if (!anyWork) return false;
+    // 前の段の約束を超えていないか
+    for (const b of (budgets || [])) {
+      let n = 0;
+      (b.names || []).forEach(nm => { const c = sol.Columns[nm]; if (c && c.Primal > 0) n += c.Primal; });
+      if (Math.round(n) > b.max + 1e-6) return false;
+    }
+    return true;
+  }
+
   // 解から、指定ルールのスラック合計（＝そのルールの違反件数）を取り出す
   function slackTotal(sol, parts, types) {
     let n = 0;
@@ -610,5 +633,5 @@
     });
   }
 
-  global.MILP = { buildGroupModel, applyGroupSolution, composeLP, slackTotal, slackNames, TIERS };
+  global.MILP = { buildGroupModel, applyGroupSolution, composeLP, slackTotal, slackNames, solutionIsValid, TIERS };
 })(typeof self !== 'undefined' ? self : this);

@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=144', 'optimizer.js?v=144', 'milp-core.js?v=144');
+self.importScripts('data.js?v=145', 'optimizer.js?v=145', 'milp-core.js?v=145');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=144'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=145'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -99,7 +99,9 @@ self.addEventListener('message', async (e) => {
           const s2 = solver.solve(lp, Object.assign({}, opts, { time_limit: cap }));
           remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
           if (String(s2 && s2.Status) !== 'Optimal') allOptimal = false;
-          if (!s2 || !s2.Columns) break;         // 解が返らなければ直前の解を使う
+          // 前の段の約束を守れていない解（＝時間内に解けなかった印）は採用しない。
+          // 直前の段の解をそのまま使い、段階最適化はここで打ち切る。
+          if (!MILP.solutionIsValid(s2, m.parts, budgets)) break;
           sol = s2;
           // この段で達成した件数を上限として固定（以後の段で悪化させない）
           const got = MILP.slackTotal(sol, m.parts, t.types);
