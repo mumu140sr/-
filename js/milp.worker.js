@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=146', 'optimizer.js?v=146', 'milp-core.js?v=146');
+self.importScripts('data.js?v=147', 'optimizer.js?v=147', 'milp-core.js?v=147');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=146'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=147'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -95,17 +95,23 @@ self.addEventListener('message', async (e) => {
           const cap = Math.max(MIN_PER, Math.floor(remain / (left + 1)));
           post(20 + Math.floor(((gi + (ti + 1) / (tiers.length + 1)) / groups.length) * 60),
                `【${g.label || g.key}】第${ti + 1}段「${t.label}」を0に近づけています…`);
-          // 前の段までのルールは「重み」で守る（上限で縛らない）。
-          // 上限で縛ると、その条件を満たす組合せを一から探し直すことになり、
-          // 時間内に見つからず解けないことがあるため。
-          const lp = MILP.composeLP(m.parts, { types: t.types, protect });
           const t0 = Date.now();
-          const s2 = solver.solve(lp, Object.assign({}, opts, { time_limit: cap }));
+          // ① まず「前の段は上限を超えない」という条件付きで解く。速くて確実だが、
+          //    条件が積み上がると、成立する組合せを一から見つけられないことがある。
+          let s2 = solver.solve(MILP.composeLP(m.parts, { types: t.types, budgets }),
+                                Object.assign({}, opts, { time_limit: Math.max(3, Math.floor(cap * 0.6)) }));
+          let okStrict = MILP.solutionIsValid(s2, m.parts, budgets);
+          if (!okStrict) {
+            // ② 見つからなければ、上限をやめて「重みで守る」方式に切り替える。
+            //    こちらは必ず解が返る（このアプリ本来の全ソフト制約の形）。
+            const s3 = solver.solve(MILP.composeLP(m.parts, { types: t.types, protect }),
+                                    Object.assign({}, opts, { time_limit: Math.max(3, cap - Math.round((Date.now() - t0) / 1000)) }));
+            if (MILP.solutionIsValid(s3, m.parts, [])) s2 = s3;
+          }
           remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
           if (String(s2 && s2.Status) !== 'Optimal') allOptimal = false;
-          // 前の段の約束を守れていない解（＝時間内に解けなかった印）は採用しない。
-          // 直前の段の解をそのまま使い、段階最適化はここで打ち切る。
-          if (!MILP.solutionIsValid(s2, m.parts, budgets)) break;
+          // それでも使えない解なら、直前の段の解を使って段階最適化を打ち切る
+          if (!MILP.solutionIsValid(s2, m.parts, [])) break;
           sol = s2;
           // この段で達成した件数を上限として固定（以後の段で悪化させない）
           const got = MILP.slackTotal(sol, m.parts, t.types);
