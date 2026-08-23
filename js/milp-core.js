@@ -24,8 +24,14 @@
     { label: '連勤・遅→早',    types: ['consecutive', 'late-early'] },
     { label: '単発出勤・定数',  types: ['single-work', 'overstaff'] },
     { label: 'リズム',        types: ['category-switch', 'bad-rest', 'long-rest', 'pair-rest'] },
-    // 個人の希望は、いちばん重い「上下関係」より先に片づける（後回しだと時間切れになる）
-    { label: '個人の希望',     types: ['weekend-pref', 'rest-style', 'pair-rest-count', 'pref-mismatch', 'balance-diff', 'skill-short', 'surplus-unwanted', 'single-off'] },
+    // 個人の希望は、まとめて1段にすると重すぎて解けないため小分けにする。
+    // 1段が小さいほど「大事なルールを守ったままの組合せ」を見つけやすい。
+    { label: '早遅の希望',     types: ['pref-mismatch', 'skill-short', 'surplus-unwanted'] },
+    { label: '土日休み',       types: ['weekend-pref'] },
+    { label: '休み方',        types: ['rest-style'] },
+    { label: '連休の回数',     types: ['pair-rest-count'] },
+    { label: '早遅バランス',   types: ['balance-diff'] },
+    { label: '単発休み',       types: ['single-off'] },
     { label: '上下関係',       types: ['hierarchy'] },
   ];
 

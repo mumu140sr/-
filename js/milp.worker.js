@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=148', 'optimizer.js?v=148', 'milp-core.js?v=148');
+self.importScripts('data.js?v=149', 'optimizer.js?v=149', 'milp-core.js?v=149');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=148'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=149'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -113,9 +113,16 @@ self.addEventListener('message', async (e) => {
           }
           remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
           if (String(s2 && s2.Status) !== 'Optimal') allOptimal = false;
-          // どちらの方式でも前の段を守れなかった場合は採用せず、
-          // 直前の段の解（大事なルールが0件のもの）を使って打ち切る
-          if (!okStrict) break;
+          // どちらの方式でも前の段を守れなかった場合は、この段の結果は採用しない。
+          // ただし後ろの段は打ち切らない（別の段なら解けることがあるため）。
+          if (!okStrict) {
+            if (sol) {
+              // 今の解での件数を上限として引き継ぎ、後の段で悪化させないようにする
+              budgets.push({ names: MILP.slackNames(m.parts, t.types), max: MILP.slackTotal(sol, m.parts, t.types) });
+              (t.types || []).forEach(ty => protect.push(ty));
+            }
+            continue;
+          }
           sol = s2;
           // この段で達成した件数を上限として固定（以後の段で悪化させない）
           const got = MILP.slackTotal(sol, m.parts, t.types);
