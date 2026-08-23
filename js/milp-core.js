@@ -597,7 +597,9 @@
       const ones = o.neighbor.ones, k = o.neighbor.k || 60;
       const plus = [], minus = [];
       parts.bin.forEach(nm => { (ones[nm] ? minus : plus).push(nm); });
-      let n1 = 0; for (const nm in ones) if (ones[nm]) n1++;
+      // 1 の個数は「決定変数の中で」数える。罰点変数まで数えると右辺が
+      // 小さくなりすぎ、いまの答えすら条件を満たせなくなる。
+      const n1 = minus.length;
       const lhs = plus.join(' + ') + (minus.length ? ' - ' + minus.join(' - ') : '');
       if (lhs) extra.push(`nbh: ${lhs} <= ${k - n1}`);
     }
