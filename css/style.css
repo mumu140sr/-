@@ -411,10 +411,11 @@ tbody tr:hover { background: var(--surface-2); }
 .staff-table th:nth-child(2)  { min-width: 84px; }   /* 部門: キャスト */
 .staff-table th:nth-child(3)  { min-width: 90px; }   /* 役職: スタッフ/リーダー */
 .staff-table th:nth-child(4)  { min-width: 130px; }  /* 担当シフト */
-.staff-table th:nth-child(9)  { min-width: 180px; }  /* 早遅バランス: 早番やや多め（6：4） */
-.staff-table th:nth-child(12) { min-width: 92px; }   /* 土日休み */
-.staff-table th:nth-child(13) { min-width: 104px; }  /* 休み方: なるべく連休 */
-.staff-table th:nth-child(16) { min-width: 76px; }   /* 前月末シフト */
+.staff-table th:nth-child(8)  { min-width: 160px; }  /* 余剰休み: 付けない（優先して出勤） */
+.staff-table th:nth-child(10)  { min-width: 180px; }  /* 早遅バランス: 早番やや多め（6：4） */
+.staff-table th:nth-child(13) { min-width: 92px; }   /* 土日休み */
+.staff-table th:nth-child(14) { min-width: 104px; }  /* 休み方: なるべく連休 */
+.staff-table th:nth-child(17) { min-width: 76px; }   /* 前月末シフト */
 
 .allowed-shifts-wrap { display: flex; flex-wrap: wrap; gap: 2px; min-width: 160px; }
 .allowed-label {

@@ -30,6 +30,13 @@ const POSITION_TYPES = {
   staff:       { label: 'スタッフ', priority: 4 },
 };
 
+// 余剰休み（余）の付け方。人手が余った月に、誰を余らせるかの方針。
+const SURPLUS_PREF = {
+  '':       { label: 'おまかせ' },
+  'avoid':  { label: '付けない（優先して出勤）' },
+  'prefer': { label: '優先して付ける' },
+};
+
 // 早遅バランス比率
 const SHIFT_BALANCE = {
   earlyHeavy: { label: '早番多め',     earlyRatio: 0.7, lateRatio: 0.3 },
@@ -82,6 +89,8 @@ const DEFAULT_PENALTIES = {
   longRest:          2000,  // 4連休以上（自動配置分）— 【優先3】連休は最大3日まで
   offSurplus:         400,  // 公休余剰（未使用 — tryConvertSurplusRest ムーブで自然削減）
   balanceDiff:         80,  // 早遅バランスずれ（1日あたり）
+  surplusAvoid:      700,  // 「余を付けない」人が目標日数まで働けていない（1日あたり）
+  surplusPrefer:     200,  // 「余を優先して付ける」人を働かせる（1日あたり・余りをこの人へ寄せる）
   viceManagerRest:   1200,  // 副店長が任意で休む
   viceManagerDailyAbsent: 9000, // その日、副店長が1人も出勤していない（毎日1人は必須）
   hierarchyViolation: 3000, // 責任者ヒエラルキー違反（より上位者が働いているのに下位者が責任者）
@@ -478,6 +487,7 @@ function loadFromStorage() {
         paidLeave:       s.paidLeave != null ? s.paidLeave : 0,
         prefs:           Array.isArray(s.prefs) ? s.prefs : ['早可', '遅可'],
         balance:         s.balance || 'balanced',
+        surplusPref:     s.surplusPref || '',
         prevConsecutive: s.prevConsecutive || 0,
         // 連勤0（＝前月末は休み）なのに前月末シフトが残っていると月初判定を誤るため整合させる
         prevLastShift:   (s.prevConsecutive || 0) >= 1 ? (s.prevLastShift || '') : '',

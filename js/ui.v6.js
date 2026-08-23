@@ -293,6 +293,7 @@ const RULE_LEVEL_META = [
     num: { key: 'maxConsecutiveOff', min: 1, max: 14, def: 3,
            before: '上限', after: '日まで（これを超えるとエラー）' } },
   { g: '個人希望',   t: 'pref-mismatch',     l: '早遅希望（早可/遅可）', def: 'must' },
+  { g: '個人希望',   t: 'surplus-unwanted',  l: '余剰休み（余）の希望', def: 'should' },
   { g: '個人希望',   t: 'balance-diff',      l: '早遅バランス（早番多め等）', def: 'should',
     num: { key: 'balanceTolerance', min: 0, max: 15, def: 2,
            before: '許容', after: '日までのずれは許す' } },
@@ -811,6 +812,7 @@ function setupStaffPanel() {
       paidLeave:       0,
       prefs:           ['早可', '遅可'],
       balance:         'balanced',
+      surplusPref:     '',
       prevConsecutive: 0,
       prevLastShift:   '',
       note:            '',
@@ -993,6 +995,14 @@ function renderStaffTable() {
       <td>
         <input type="number" min="0" max="31" value="${s.paidLeave || 0}"
                data-field="paidLeave" data-id="${s.id}" style="width:50px"/>
+      </td>
+      <td>
+        <select data-field="surplusPref" data-id="${s.id}" style="min-width:150px"
+                title="人手が余った月に「余」を付けるかどうか。付けない＝優先して出勤に回します">
+          ${Object.entries(SURPLUS_PREF).map(([k, v]) =>
+            `<option value="${k}" ${(s.surplusPref || '') === k ? 'selected' : ''}>${v.label}</option>`
+          ).join('')}
+        </select>
       </td>
       <td>
         <div class="shift-pref">

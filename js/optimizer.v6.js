@@ -2918,6 +2918,7 @@ function checkViolations(shifts) {
     let offCount  = 0;
     let offRun    = 0;
     let earlyBand = 0, lateBand = 0;   // 早遅バランス判定用（研修は早番帯として数える）
+    let surplusN  = 0;                 // 「余」の日数（余剰休みの希望どおりか見るため）
     // キャスト（パート的な少日数勤務）は、単発出勤・長期連休・切替などの
     // リズム系ルールを適用しない（部分勤務では自然に起きるためノイズになる）。
     // 人員不足・スキル・担当外などの構造ルールは通常どおり適用される。
@@ -3028,6 +3029,7 @@ function checkViolations(shifts) {
         prevShift = cur;
         offRun = 0;
       } else {
+        if (cur === '余') surplusN++;
         if (isPublicOff(cur)) offCount++; // 公休のみカウント（有給・季節休暇は別枠）
         consWork = 0;
 
@@ -3099,6 +3101,15 @@ function checkViolations(shifts) {
         staffId: s.id, day: 0, type: 'off-count',
         message: `🚨 公休数 ${offCount}日（目標${s.maxOff}日, 差${diff}）`,
         action:  '公休数を増やしてください',
+      });
+    }
+
+    // 余剰休み（余）の希望どおりか。「付けない」設定の人に余が付いていたら知らせる。
+    if (surplusN > 0 && (s.surplusPref || '') === 'avoid' && ruleOn('surplus-unwanted')) {
+      violations.push({
+        staffId: s.id, day: 0, type: 'surplus-unwanted',
+        message: `⚠️ 「余を付けない」設定なのに余が ${surplusN}日 あります`,
+        action:  '出勤枠が足りていません。他の人の余剰休みを「優先して付ける」にするか、必要人数を見直してください',
       });
     }
 
@@ -3737,6 +3748,7 @@ function runAIDiagnosis() {
       'event-absent':    '行事日の休み',
       'vicemanager-absent': '副店長不在の日',
       'balance-diff':    '早遅バランスのずれ',
+      'surplus-unwanted': '余剰休みの希望と不一致',
     };
 
     // 遅→休→早

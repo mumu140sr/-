@@ -214,6 +214,20 @@
           }
           const workTarget = days - (s.maxOff || 0) - trainN - paidN - otherOffN - (paidTarget[s.id] || 0);
           if (roleT.length) { const os = `os_${si}`; addSlack(os, null, wo); cons.push(`off_${si}: ${roleT.join(' + ')} - ${os} <= ${workTarget - fixN}`); }
+          // 余剰休み（余）を誰に寄せるか。余は「目標公休より多く休んだ分」なので、
+          // 目標どおり働けば余は出ない。人員不足より弱いソフト制約にする。
+          if (roleT.length) {
+            const pref = s.surplusPref || '';
+            if (pref === 'avoid') {
+              // 付けたくない人：目標日数を下回ったら罰点（＝優先して出勤に回す）
+              const wa = P.surplusAvoid || 700;
+              if (wa > 0) { const sv = `sv_${si}`; addSlack(sv, null, wa); cons.push(`sur_${si}: ${roleT.join(' + ')} + ${sv} >= ${workTarget - fixN}`); }
+            } else if (pref === 'prefer') {
+              // 優先して付ける人：出勤1日ごとにごく小さな罰点を置き、余りをこの人へ寄せる
+              const wp = P.surplusPrefer || 200;
+              if (wp > 0) roleT.forEach(v => obj.push(`${wp} ${v}`));
+            }
+          }
         }
         // 有給(有)を目標日数だけ確保（不足分をソフトで強制。人員不足より弱いので、埋まっている日は無理に取らない）
         if (paidTarget[s.id] > 0) {
