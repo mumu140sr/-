@@ -3105,7 +3105,7 @@ function checkViolations(shifts) {
     // 早遅バランス（早番多め/遅番多め など）のずれ。
     // 早番帯・遅番帯の両方に入れる人だけが対象（片方しか入れない人は判定しない）。
     if (ruleOn('balance-diff')) {
-      const ratio = SHIFT_BALANCE[s.balance || 'balanced'];
+      const ratio = getBalanceRatio(s);   // 「指定なし(OFF)」の人は null → 判定しない
       // 研は全員が入れるので判定から除く（担当シフトで早遅どちらも選べる人だけが対象）
       const myShifts = (s.allowedShifts || []);
       const canE  = myShifts.some(sh => isEarlyCategory(sh));
@@ -3119,7 +3119,7 @@ function checkViolations(shifts) {
           const over = gap > 0 ? '早番' : '遅番';
           violations.push({
             staffId: s.id, day: 0, type: 'balance-diff',
-            message: `⚠️ 早遅バランスのずれ（${SHIFT_BALANCE[s.balance || 'balanced'].label}: 早${earlyBand}/遅${lateBand}、目標 早${want.toFixed(1)}）`,
+            message: `⚠️ 早遅バランスのずれ（${ratio.label}: 早${earlyBand}/遅${lateBand}、目標 早${want.toFixed(1)}）`,
             action:  `${over}を${Math.abs(gap).toFixed(1)}日ぶん減らすと目標比率に近づきます`,
           });
         }

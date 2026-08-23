@@ -94,6 +94,12 @@ const DEFAULT_PENALTIES = {
   bandConcentration:  5000, // 早番・遅番の片寄せ（少ない方の時間帯の日数×。切替を根本から減らす。検証で最適値）
 };
 
+// 早遅バランスの目標比率を返す。'off'（指定なし）や未設定の値なら null。
+// null の人は、生成でも違反チェックでも早遅バランスを一切判定しない。
+function getBalanceRatio(s) {
+  return SHIFT_BALANCE[(s && s.balance) || 'balanced'] || null;
+}
+
 // アプリケーションの状態
 const AppState = {
   settings: {

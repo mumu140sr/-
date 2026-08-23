@@ -257,7 +257,7 @@
 
         // ② 早遅バランス比率
         const wBAL = ruleW('balance-diff', P.balanceDiff || 80);
-        const ratio = SHIFT_BALANCE[s.balance || 'balanced'];
+        const ratio = getBalanceRatio(s);   // 「指定なし(OFF)」の人は null → 制約を作らない
         if (wBAL > 0 && ratio && myE.length && myL.length) {
           // 目標: 早番数 : 遅番数 = earlyRatio : lateRatio
           // ずれ D = lateRatio*早番数 - earlyRatio*遅番数（0 に近いほど目標どおり）

@@ -1003,7 +1003,8 @@ function renderStaffTable() {
       </td>
       <td>
         <select data-field="balance" data-id="${s.id}" style="min-width:168px"
-                title="出勤日のうち 早番:遅番 をどの割合にするか">
+                title="出勤日のうち 早番:遅番 をどの割合にするか（指定なし＝この人はバランスを気にしない）">
+          <option value="off" ${(s.balance || 'balanced') === 'off' ? 'selected' : ''}>指定なし（OFF）</option>
           ${Object.entries(SHIFT_BALANCE).map(([k, v]) =>
             `<option value="${k}" ${(s.balance || 'balanced') === k ? 'selected' : ''}>${balanceOptionLabel(v)}</option>`
           ).join('')}
