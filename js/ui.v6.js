@@ -2264,7 +2264,8 @@ async function trySurplusChange(apply, opts) {
 function showSurplusResolveModal() {
   const cells = listSurplusCells();
   const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10000;padding:16px';
+  // 生成直後のポップアップ(.modal-overlay, z-index 10001)より前面に出す
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10050;padding:16px';
 
   const render = () => {
     const list = listSurplusCells();
@@ -2361,6 +2362,8 @@ function showSurplusResolveModal() {
     }));
   };
 
+  const pop = document.getElementById('surplusPopup');
+  if (pop) pop.remove();          // 生成直後のポップアップが残っていたら閉じる
   document.body.appendChild(modal);
   render();
   modal.addEventListener('click', e => { if (e.target === modal) { modal.remove(); refreshAllUI(); } });
