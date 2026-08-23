@@ -558,11 +558,26 @@
    *   { types: [最小化するルール], budgets: [{ names:[変数名], max:上限 }] }
    *   budgets は「前の段で達成した件数を超えない」という約束（＝確定の固定）。
    */
+  // 前の段で達成したものを守るための重み。ここまで大きければ、
+  // 前の段の結果を1件でも悪化させる解は選ばれない。
+  const PROTECT_W = 1000000;
+
   function composeLP(parts, opts) {
     const o = opts || {};
-    const entries = o.types
-      ? parts.objEntries.filter(e => o.types.indexOf(e.type) >= 0)
-      : parts.objEntries;
+    let entries;
+    if (o.types) {
+      const cur = o.types, prot = o.protect || [];
+      entries = [];
+      parts.objEntries.forEach(e => {
+        if (cur.indexOf(e.type) >= 0) entries.push(e);
+        // 前の段のルールは「絶対に悪化させない」重みで目的関数に残す。
+        // ハードな上限で縛ると、解ける組合せを一から見つけ直すのが難しく
+        // なって失敗するため、あくまで重みで守る（＝必ず解ける形を保つ）。
+        else if (prot.indexOf(e.type) >= 0) entries.push({ w: PROTECT_W, name: e.name, type: e.type });
+      });
+    } else {
+      entries = parts.objEntries;
+    }
     const objStr = entries.length ? entries.map(e => `${e.w} ${e.name}`).join(' + ') : '0 z_dummy';
     const extra = [];
     (o.budgets || []).forEach((b, i) => {

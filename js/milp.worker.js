@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=145', 'optimizer.js?v=145', 'milp-core.js?v=145');
+self.importScripts('data.js?v=146', 'optimizer.js?v=146', 'milp-core.js?v=146');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=145'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=146'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -82,7 +82,8 @@ self.addEventListener('message', async (e) => {
       let sol = null;
       if (tiered) {
         const tiers = MILP.TIERS.filter(t => (t.types || []).some(ty => (m.parts.slackByType[ty] || []).length));
-        const budgets = [];
+        const budgets = [];        // 検算用（採用可否のチェックに使う）
+        const protect = [];        // 前の段までのルール（重みで守る）
         // 時間配分: 早い段は数秒で終わるので、余った時間を後の段に回す。
         // ただし1つの段が全部使い切って後の段を飢えさせないよう、必ず後続分を残す。
         const MIN_PER = 5;                       // 1段あたりの最低秒数
@@ -94,7 +95,10 @@ self.addEventListener('message', async (e) => {
           const cap = Math.max(MIN_PER, Math.floor(remain / (left + 1)));
           post(20 + Math.floor(((gi + (ti + 1) / (tiers.length + 1)) / groups.length) * 60),
                `【${g.label || g.key}】第${ti + 1}段「${t.label}」を0に近づけています…`);
-          const lp = MILP.composeLP(m.parts, { types: t.types, budgets });
+          // 前の段までのルールは「重み」で守る（上限で縛らない）。
+          // 上限で縛ると、その条件を満たす組合せを一から探し直すことになり、
+          // 時間内に見つからず解けないことがあるため。
+          const lp = MILP.composeLP(m.parts, { types: t.types, protect });
           const t0 = Date.now();
           const s2 = solver.solve(lp, Object.assign({}, opts, { time_limit: cap }));
           remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
@@ -106,6 +110,7 @@ self.addEventListener('message', async (e) => {
           // この段で達成した件数を上限として固定（以後の段で悪化させない）
           const got = MILP.slackTotal(sol, m.parts, t.types);
           budgets.push({ names: MILP.slackNames(m.parts, t.types), max: got });
+          (t.types || []).forEach(ty => protect.push(ty));
         }
       }
       if (!sol) sol = solver.solve(m.lp, opts);
