@@ -4167,3 +4167,146 @@ function buildRelaxPlans(violations) {
     (b.gain - a.gain));
   return plans;
 }
+
+/* ===========================================
+   理論下限の判定（ステップ1）
+   「エラー0件が数学的に可能か」を生成する前に判定する。
+   人日の総量だけでなく、日ごと・役割ごと・スキルごとに
+   「その日、担当できる人が足りているか」まで調べるため、
+   「日曜に責任者ができる人が全員休み希望」のような穴も見つかる。
+   ここで挙がるものは配置をどう変えても消せない＝避けられないエラー。
+   =========================================== */
+
+// その日、そのスタッフが取れる状態を返す
+//   'off'      … 休みで確定（希望休・固定の休み）
+//   'training' … 研修で確定（出勤だが定数には数えない）
+//   'fixed:キー' … その役割で確定
+//   'free'     … 自由（担当シフトの中から選べる）
+function staffDayState(s, d) {
+  const rq = (AppState.requests[s.id] || {})[d];
+  if (rq && isOff(rq)) return 'off';
+  const fx = (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(s.id, d) : null;
+  if (fx && isOff(fx))      return 'off';
+  if (fx && isTraining(fx)) return 'training';
+  if (fx)                   return 'fixed:' + fx;
+  return 'free';
+}
+
+/**
+ * 避けられないエラーの下限を求める。
+ * @returns {{ possible:boolean, minErrors:number, reasons:Array, capacity:Array }}
+ */
+function analyzeLowerBound() {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const res = { possible: true, minErrors: 0, reasons: [], capacity: [] };
+  if (!AppState.staff.length || !days) return res;
+
+  const shiftKeys = getWorkShiftKeys().filter(k => {
+    const t = AppState.shiftTypes.find(x => x.key === k);
+    return t && !t.isTraining;
+  });
+  const groups = getDepartmentGroups(AppState.staff);
+  const multi  = groups.length > 1;
+
+  groups.forEach(g => {
+    const pfx = multi ? `【${g.label}】` : '';
+    let dayShort = 0;   // 日別に確定する不足の合計（＝避けられない人員不足の下限）
+
+    for (let d = 1; d <= days; d++) {
+      // その日、各役割に入れる人を数える
+      const cap = {};    // 役割 → 入れる人数（固定で入っている人も含む）
+      const fixedIn = {};
+      let freeCount = 0;
+      shiftKeys.forEach(k => { cap[k] = 0; fixedIn[k] = 0; });
+      g.staff.forEach(s => {
+        const st = staffDayState(s, d);
+        if (st === 'off' || st === 'training') return;
+        if (st.indexOf('fixed:') === 0) {
+          const k = st.slice(6);
+          if (cap[k] != null) { cap[k]++; fixedIn[k]++; }
+          return;
+        }
+        let any = false;
+        (s.allowedShifts || []).forEach(k => { if (cap[k] != null) { cap[k]++; any = true; } });
+        if (any) freeCount++;
+      });
+
+      // ① 役割ごとの不足（その役割を担当できる人がその日足りない）
+      let roleShort = 0;
+      shiftKeys.forEach(k => {
+        const need = getDayReq(g.reqs, g.dailyReqs || {}, k, d);
+        if (need > 0 && cap[k] < need) {
+          roleShort += (need - cap[k]);
+          res.reasons.push({
+            kind: 'role', day: d, role: k, need, have: cap[k],
+            text: `${pfx}${d}日: 「${k}」が ${need}人 必要ですが、その日入れる人は ${cap[k]}人 しかいません（不足 ${need - cap[k]}人）`,
+          });
+        }
+      });
+
+      // ② その日の総人数（役割ごとには足りていても、合計で足りないことがある）
+      let needAll = 0, fixedAll = 0;
+      shiftKeys.forEach(k => { needAll += getDayReq(g.reqs, g.dailyReqs || {}, k, d); fixedAll += fixedIn[k]; });
+      const availAll = freeCount + fixedAll;
+      let totalShort = 0;
+      if (needAll > availAll) {
+        totalShort = needAll - availAll;
+        res.reasons.push({
+          kind: 'day', day: d, need: needAll, have: availAll,
+          text: `${pfx}${d}日: 合計 ${needAll}人 必要ですが、その日出勤できる人は ${availAll}人 しかいません（不足 ${totalShort}人）`,
+        });
+      }
+      dayShort += Math.max(roleShort, totalShort);
+
+      // ③ スキルの最低ライン
+      (AppState.skills || []).forEach(sk => {
+        const { min } = getDaySkillReq(sk, d);
+        if (!(min > 0)) return;
+        const early = (sk.target || 'late') === 'early';
+        let have = 0;
+        g.staff.forEach(s => {
+          if (!(s.skills || []).includes(sk.name)) return;
+          const st = staffDayState(s, d);
+          if (st === 'off' || st === 'training') return;
+          const ks = (st.indexOf('fixed:') === 0) ? [st.slice(6)] : (s.allowedShifts || []);
+          if (ks.some(k => shiftKeys.includes(k) && (early ? isEarlyCategory(k) : isLate(k)))) have++;
+        });
+        if (have < min) {
+          res.reasons.push({
+            kind: 'skill', day: d, skill: sk.name, need: min, have,
+            text: `${pfx}${d}日: スキル「${sk.name}」は最低 ${min}人 必要ですが、その日入れる保有者は ${have}人 です`,
+          });
+        }
+      });
+
+      // ④ 副店長カバレッジ（2人以上いる場合のみのルール）
+      const vms = g.staff.filter(s => s.positionType === 'viceManager');
+      if (vms.length >= 2) {
+        const can = vms.filter(s => { const st = staffDayState(s, d); return st !== 'off' && st !== 'training'; }).length;
+        if (can === 0) {
+          res.reasons.push({
+            kind: 'vice', day: d,
+            text: `${pfx}${d}日: 副店長が全員休み（希望休・固定）のため、副店長不在が避けられません`,
+          });
+        }
+      }
+    }
+
+    // ⑤ 月全体の人日収支（従来のチェック。日別で見つからない不足を拾う）
+    const cap = calcCapacity(g, days);
+    res.capacity.push({ label: g.label, required: cap.required, avail: cap.avail, surplus: cap.surplus });
+    let monthShort = 0;
+    if (cap.surplus < 0) {
+      monthShort = -cap.surplus;
+      res.reasons.push({
+        kind: 'month', need: cap.required, have: cap.avail,
+        text: `${pfx}月全体: 必要 ${cap.required}人日 に対し、出せるのは ${cap.avail}人日 です（不足 ${monthShort}人日）`,
+      });
+    }
+    // 日別の不足と月全体の不足は重なりうるので、大きいほうを下限として採用する
+    res.minErrors += Math.max(dayShort, monthShort);
+  });
+
+  res.possible = res.reasons.length === 0;
+  return res;
+}

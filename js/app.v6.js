@@ -104,6 +104,8 @@ function showFeasibilityModal() {
     return;
   }
   const items = (typeof runAIDiagnosis === 'function') ? runAIDiagnosis() : [];
+  // 「エラー0件が数学的に可能か」の判定を最上部に出す（配置では消せない原因の特定）
+  const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound() : null;
   const colors = {
     error:   { bg: '#fff5f5', border: '#fc8181', title: '#742a2a', body: '#9b2335' },
     warning: { bg: '#fffaf0', border: '#f6ad55', title: '#744210', body: '#975a16' },
@@ -120,14 +122,40 @@ function showFeasibilityModal() {
     </div>`;
   }).join('') || '<p>データが不足しています。</p>';
 
+  // 判定の見出し（可能／不可能）と、不可能な場合の具体的な原因
+  let verdict = '';
+  if (lb) {
+    if (lb.possible) {
+      verdict = `<div style="padding:14px 16px;border-radius:10px;margin:0 0 14px;
+          background:color-mix(in srgb, var(--success) 14%, var(--surface));
+          border:1px solid color-mix(in srgb, var(--success) 38%, transparent);line-height:1.8">
+        <b style="font-size:15px">✅ エラー0件が可能な条件です</b><br>
+        <span style="font-size:13px">日ごとの人数・役割・スキル・副店長・月全体の人日、いずれにも「配置では消せない不足」はありません。
+        エラーが残る場合は<b>計算時間が足りていない</b>可能性が高いので、🎯じっくり生成をお試しください。</span>
+      </div>`;
+    } else {
+      const lines = lb.reasons.slice(0, 12).map(r => `・${escapeHtml(r.text)}`).join('<br>');
+      const more = lb.reasons.length > 12 ? `<br>…ほか ${lb.reasons.length - 12}件` : '';
+      verdict = `<div style="padding:14px 16px;border-radius:10px;margin:0 0 14px;
+          background:color-mix(in srgb, var(--danger) 12%, var(--surface));
+          border:1px solid color-mix(in srgb, var(--danger) 38%, transparent);line-height:1.8">
+        <b style="font-size:15px">🚨 このデータでは エラー0件は不可能です</b><br>
+        <span style="font-size:13px">配置をどう変えても、最低 <b>${lb.minErrors}件</b> のエラーが残ります。原因は次のとおりです。</span>
+        <div style="font-size:13px;margin-top:8px">${lines}${more}</div>
+        <div style="font-size:13px;margin-top:8px">💡 <b>🩹 エラー解消プラン</b>で、どの設定をいくつ動かせば解消するか確認できます。</div>
+      </div>`;
+    }
+  }
+
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
   modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:720px;width:100%;max-height:85vh;overflow:auto;padding:20px">
-    <h3 style="margin:0 0 4px">🔍 実現性チェック（避けられる / 避けられない）</h3>
+    <h3 style="margin:0 0 4px">🔍 実現性チェック（生成する前の判定）</h3>
     <p class="hint" style="margin:0 0 12px">
-      🔴🟡【避けられない】＝人員構成の限界。配置を変えても消せません（設定/人員の見直しが必要）。<br>
-      それ以外のエラーは「避けられる」＝生成や🛠自動修正で消せます。
+      まず「<b>エラー0件が数学的に可能か</b>」を判定します。不可能な場合は、どの日の何が原因かまで特定します。<br>
+      その下は参考情報です（🔴🟡＝人員構成の限界／それ以外＝配置で消せるもの）。
     </p>
+    ${verdict}
     ${body}
     <div style="text-align:right;margin-top:12px"><button id="feasClose" class="btn btn-primary">閉じる</button></div>
   </div>`;
