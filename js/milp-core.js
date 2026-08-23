@@ -23,7 +23,7 @@
     { label: '公休・有給',     types: ['off-count', 'paid'] },
     { label: '連勤・遅→早',    types: ['consecutive', 'late-early'] },
     { label: '単発出勤・定数',  types: ['single-work', 'overstaff'] },
-    { label: 'リズム',        types: ['category-switch', 'bad-rest', 'long-rest'] },
+    { label: 'リズム',        types: ['category-switch', 'bad-rest', 'long-rest', 'pair-rest'] },
     { label: '希望・その他',   types: ['hierarchy', 'pref-mismatch', 'balance-diff', 'skill-short', 'surplus-unwanted', 'single-off'] },
   ];
 
@@ -82,6 +82,12 @@
     // 段階最適化では「このルールだけを最小化する」ため、ルール別の一覧が必要。
     const objEntries = [];                  // { w, name, type }
     const slackByType = {};                 // ルール → 変数名の配列
+    // 罰点を直接つける（スラック変数ではなく、決定変数そのものに重みを置く場合）
+    const addObj = (weight, name, type) => {
+      if (!(weight > 0)) return;
+      obj.push(`${weight} ${name}`);
+      objEntries.push({ w: weight, name, type: type || 'other' });
+    };
     const addSlack = (name, ub, weight, type) => {
       gen.add(name);
       bnd.push(ub != null ? `0 <= ${name} <= ${ub}` : `0 <= ${name}`);
@@ -246,7 +252,7 @@
             } else if (pref === 'prefer') {
               // 優先して付ける人：出勤1日ごとにごく小さな罰点を置き、余りをこの人へ寄せる
               const wp = P.surplusPrefer || 200;
-              if (wp > 0) roleT.forEach(v => obj.push(`${wp} ${v}`));
+              if (wp > 0) roleT.forEach(v => addObj(wp, v, 'surplus-unwanted'));
             }
           }
         }
@@ -332,7 +338,9 @@
         // （checkViolations は研修も出勤として数えるため。可能なら前後どちらかに勤務を入れて孤立を防ぐ）。
         if (Pd && B && wSW > 0 && (realT(A.w).length || A.c >= 1)) { const v = `sw_${si}_${d}`; addSlack(v, 1, wSW, 'single-work'); const lhs = [...realT(A.w), ...realT(Pd.w).map(x => `- ${x}`), ...realT(B.w).map(x => `- ${x}`), `- ${v}`]; cons.push(`sw_${si}_${d}: ${(lhs.join(' + ').replace(/\+ -/g, '-')) || `- ${v}`} <= ${-A.c + Pd.c + B.c}`); }
         if (B && wCS > 0) { const v = `cs_${si}_${d}`; addSlack(v, 1, wCS, 'category-switch'); const t1 = [...realT(A.e), ...realT(B.l)]; if (t1.length) cons.push(`cs1_${si}_${d}: ${t1.join(' + ')} - ${v} <= ${1 - constOf(A.e) - constOf(B.l)}`); const t2 = [...realT(A.l), ...realT(B.e)]; if (t2.length) cons.push(`cs2_${si}_${d}: ${t2.join(' + ')} - ${v} <= ${1 - constOf(A.l) - constOf(B.e)}`); }
-        if (B && C && wBR > 0) { const v = `br_${si}_${d}`; addSlack(v, 1, wBR, 'bad-rest'); const t = [...realT(A.l), ...realT(C.e), ...realT(B.w).map(x => `- ${x}`), `- ${v}`]; if (realT(A.l).length && realT(C.e).length) cons.push(`br_${si}_${d}: ${t.join(' + ').replace(/\+ -/g, '-')} <= ${1 - constOf(A.l) - constOf(C.e) + B.c}`); }
+        // 「遅→早は連休必須」の人は、遅→休1日→早 をより強く避ける（検査側は月全体で見ている）
+        const wBRm = s.needPairRest ? ruleW('pair-rest', (P.lateEarly || 9000) * 2) : wBR;
+        if (B && C && wBRm > 0) { const v = `br_${si}_${d}`; addSlack(v, 1, wBRm, s.needPairRest ? 'pair-rest' : 'bad-rest'); const t = [...realT(A.l), ...realT(C.e), ...realT(B.w).map(x => `- ${x}`), `- ${v}`]; if (realT(A.l).length && realT(C.e).length) cons.push(`br_${si}_${d}: ${t.join(' + ').replace(/\+ -/g, '-')} <= ${1 - constOf(A.l) - constOf(C.e) + B.c}`); }
         // 連休の上限（設定日数を超える連続休みを避ける）: (上限+1)日の窓に最低1日の勤務を要求
         if (wLR > 0) {
           const lrWin = getMaxOffRun() + 1;
