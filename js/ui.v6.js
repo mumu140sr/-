@@ -71,7 +71,8 @@ function refreshAllUI() {
 
 // ===== タブ切り替え =====
 function setupTabs() {
-  document.querySelectorAll('.tab').forEach(tab => {
+  // .nav-link（マニュアルなど外部ページへのリンク）はタブ切替の対象外
+  document.querySelectorAll('.tab:not(.nav-link)').forEach(tab => {
     tab.addEventListener('click', () => {
       const target = tab.dataset.tab;
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));

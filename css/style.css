@@ -168,6 +168,9 @@ body {
 .tab.active { color: var(--accent-text); background: linear-gradient(135deg, var(--accent), #8b5cf6); box-shadow: var(--shadow-sm); }
 :root[data-theme="dark"] .tab.active { color: #fff; }
 .tab:active { transform: scale(.98); }
+/* マニュアルなど別ページへのリンク（タブと同じ見た目、切替はしない） */
+.tab.nav-link { text-decoration: none; margin-top: 6px; border-top: 1px solid var(--border); padding-top: 15px; border-radius: 0 0 10px 10px; }
+.tab.nav-link:hover { border-radius: 10px; }
 
 .nav-scrim {
   display: none;
