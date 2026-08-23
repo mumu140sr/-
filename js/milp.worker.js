@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=139', 'optimizer.js?v=139', 'milp-core.js?v=139');
+self.importScripts('data.js?v=140', 'optimizer.js?v=140', 'milp-core.js?v=140');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=139'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=140'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -102,7 +102,6 @@ self.addEventListener('message', async (e) => {
           sol = s2;
           // この段で達成した件数を上限として固定（以後の段で悪化させない）
           const got = MILP.slackTotal(sol, m.parts, t.types);
-          tierLog.push(`${g.label || g.key}／${t.label}: ${got}件`);
           budgets.push({ names: MILP.slackNames(m.parts, t.types), max: got });
         }
       }
@@ -121,6 +120,16 @@ self.addEventListener('message', async (e) => {
     try { violations = checkViolations(shifts); }
     catch (e2) { violations = []; self.postMessage({ type: 'progress', pct: 95, label: '検証をスキップ（' + e2.message + '）' }); }
     AppState.violations = violations;
+    // 段ごとの結果は、実際の違反件数から作る（内部の罰点変数の合計は
+    // 1件の違反に複数の変数が対応することがあり、件数として正しくない）
+    if (tiered) {
+      const byType = {};
+      violations.forEach(v => { byType[v.type] = (byType[v.type] || 0) + 1; });
+      MILP.TIERS.forEach(t => {
+        const n = (t.types || []).reduce((a, ty) => a + (byType[ty] || 0), 0);
+        tierLog.push(`${t.label}: ${n}件`);
+      });
+    }
     self.postMessage({ type: 'done', shifts, violations, allOptimal, deep, fast, usedGap, tiered, tierLog });
   } catch (err) {
     self.postMessage({ type: 'error', message: (err && err.message) || String(err) });
