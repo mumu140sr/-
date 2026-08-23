@@ -905,18 +905,19 @@ function setupResultPanel() {
 
       btnQuick.disabled = true;
       btnQuick.textContent = '⏳ 調整中...';
-      // 🔒は保持したまま、短時間の数理最適化でサッと再調整（悪化しない保証つき）
+      // 🔒は保持したまま、いまの表から最小限だけ変えて調整する（悪化しない保証つき）。
+      // 表全体を作り直さないので、確認済みの並びが崩れず、数秒で終わる。
       (async () => {
         try {
           if (typeof optimizeScheduleMILP !== 'function') throw new Error('数理最適化モジュール未読込（再読込してください）');
-          const res = await optimizeScheduleMILP(() => {});
+          const res = await optimizeScheduleMILP(() => {}, { adjustMode: true, adjustK: 40, fastMode: true });
           if (res.violations.length >= before) {
             AppState.shifts = backup;
             AppState.violations = checkViolations(backup);
             if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-            toast('🧩では直せませんでした（変更なし）。より時間をかける「🛠 エラーを自動修正」を試すか、関係する🔒を解除してください', 'info', 6000);
+            toast('🧩では直せませんでした（変更なし）。もう一度押すか、🎯じっくり生成で作り直すか、関係する🔒を解除してください', 'info', 6000);
           } else {
-            toast(`🧩 エラー ${before}件 → ${res.violations.length}件 に調整（🔒は保持・Ctrl+Zで戻せます）`, 'success', 4000);
+            toast(`🧩 エラー ${before}件 → ${res.violations.length}件 に調整（最小限の変更・🔒は保持・Ctrl+Zで戻せます）`, 'success', 4000);
           }
           renderResultTable();
           const reportCard = document.getElementById('reportCard');
