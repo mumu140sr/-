@@ -175,7 +175,7 @@ function showFeasibilityModal() {
  * 生成結果が「数学的に最良と証明できた」のか「時間切れで打ち切った」のかを表示する。
  * 打ち切りだった場合は、時間を延ばして再計算するボタンを出す（＝まだ減る可能性がある）。
  */
-function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFast) {
+function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFast, tierLog) {
   const $report = document.getElementById('reportCard');
   if (!$report) return;
   const old = document.getElementById('optimalityNotice');
@@ -217,6 +217,18 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
         ? '<button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">⏳ 妥協なしで再計算（早期停止を無効・最大10分）</button>'
         : '上限いっぱいまで計算しても解ききれませんでした。⑤自動生成の「🔍 実現性チェック」で人手の不足を確認し、有給日数・日別必要人数・公休数のいずれかを緩めてください。'}`;
   }
+  // 段階最適化の結果（どのルールを何件まで抑えられたか）を表示する
+  if (tierLog && tierLog.length) {
+    const d = document.createElement('div');
+    d.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--surface-2);font-size:12.5px;line-height:1.8';
+    d.innerHTML = '<b>段階ごとの結果（大事な順に確定）</b><br>' +
+      tierLog.map(t => {
+        const zero = /: 0件$/.test(t);
+        return `${zero ? '✅' : '⚠️'} ${escapeHtml(t)}`;
+      }).join('<br>');
+    box.appendChild(d);
+  }
+
   // エラーが残ったときは、その場から「どう緩めれば消えるか」へ行けるようにする
   if (vioCount > 0) {
     const go = document.createElement('button');
@@ -305,7 +317,7 @@ function setupGeneratePanel() {
         renderReport({ success: res.success, score: res.score, violations: res.violations,
           candidateSummary: `数理最適化で生成 — 違反${res.violations.length}件（${elapsed}秒）` });
       } catch (rErr) { console.error('[generate] レポート表示でエラー（表は表示します）:', rErr); }
-      showOptimalityNotice(cutOff, res.violations.length, elapsed, !!opts.deepMode, res.usedGap === true, !!opts.fastMode);
+      showOptimalityNotice(cutOff, res.violations.length, elapsed, !!opts.deepMode, res.usedGap === true, !!opts.fastMode, res.tierLog);
       renderResultTable();
       setTimeout(() => {
         const rt = document.querySelector('.tab[data-tab="result"]'); if (rt) rt.click();

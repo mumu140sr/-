@@ -42,6 +42,8 @@ function refreshAllUI() {
   if ($maxCons)   $maxCons.value     = AppState.settings.maxConsecutive;
   if ($forbidLE)  $forbidLE.checked  = AppState.settings.forbidLateEarly;
   if ($penaltySO) $penaltySO.checked = AppState.settings.penaltySingleOff;
+  const $tiered0 = document.getElementById('tieredOptimize');
+  if ($tiered0) $tiered0.checked = AppState.settings.tieredOptimize !== false;
   if ($maxAtt)    $maxAtt.value      = AppState.settings.maxAttempts;
   const $pairRestR = document.getElementById('pairRestTarget');
   if ($pairRestR) $pairRestR.value   = AppState.settings.pairRestTarget || 0;
@@ -156,6 +158,14 @@ function setupSettingsPanel() {
     AppState.settings.penaltySingleOff = $penaltySO.checked;
     autoSave();
   });
+  const $tiered = document.getElementById('tieredOptimize');
+  if ($tiered) {
+    $tiered.checked = AppState.settings.tieredOptimize !== false;
+    $tiered.addEventListener('change', () => {
+      AppState.settings.tieredOptimize = $tiered.checked;
+      autoSave();
+    });
+  }
   if ($maxAtt) $maxAtt.addEventListener('change', () => {
     AppState.settings.maxAttempts = parseInt($maxAtt.value) || 200000;
     autoSave();

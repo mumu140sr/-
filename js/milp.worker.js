@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=137', 'optimizer.js?v=137', 'milp-core.js?v=137');
+self.importScripts('data.js?v=139', 'optimizer.js?v=139', 'milp-core.js?v=139');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=137'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=139'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -52,6 +52,9 @@ self.addEventListener('message', async (e) => {
     const FAST_LIMIT = 60;    // 秒 = 1分（証明なしモードの上限）
     let allOptimal = true;   // 全グループで最適が証明できたか（false=時間切れで打ち切り）
     let usedGap = false;     // 早期停止(gap許容)を使ったか＝じっくりモードで改善余地あり
+    // 段階最適化を使うか（既定ON。設定でOFFにすると従来どおり一括で解く）
+    const tiered = (incoming.settings || {}).tieredOptimize !== false;
+    const tierLog = [];      // 各段で達成した件数（画面に出す）
     for (const g of groups) {
       post(20 + Math.floor((gi / groups.length) * 60),
            `【${g.label || g.key}】を数理最適化で計算中...` +
@@ -73,7 +76,33 @@ self.addEventListener('message', async (e) => {
         opts = { time_limit: TIME_LIMIT, mip_rel_gap: 0.02, mip_abs_gap: 2000, presolve: 'on' };
         usedGap = true;   // 早期停止あり＝じっくりモードで更に良くなる可能性がある
       }
-      const sol = solver.solve(m.lp, opts);
+      // ── 段階最適化（tiered）──────────────────────────────
+      // 全ルールを一度に解くのをやめ、大事な順に「そのルールだけ」を0に近づける。
+      // 達成した件数は次の段で上限として固定するので、重要なルールが後から崩れない。
+      let sol = null;
+      if (tiered) {
+        const tiers = MILP.TIERS.filter(t => (t.types || []).some(ty => (m.parts.slackByType[ty] || []).length));
+        const budgets = [];
+        const per = Math.max(5, Math.floor(opts.time_limit / Math.max(1, tiers.length)));
+        let spare = 0;
+        for (let ti = 0; ti < tiers.length; ti++) {
+          const t = tiers[ti];
+          post(20 + Math.floor(((gi + (ti + 1) / (tiers.length + 1)) / groups.length) * 60),
+               `【${g.label || g.key}】第${ti + 1}段「${t.label}」を0に近づけています…`);
+          const lp = MILP.composeLP(m.parts, { types: t.types, budgets });
+          const t0 = Date.now();
+          const s2 = solver.solve(lp, Object.assign({}, opts, { time_limit: per + spare }));
+          spare = Math.max(0, (per + spare) - Math.round((Date.now() - t0) / 1000));
+          if (String(s2 && s2.Status) !== 'Optimal') allOptimal = false;
+          if (!s2 || !s2.Columns) break;         // 解が返らなければ直前の解を使う
+          sol = s2;
+          // この段で達成した件数を上限として固定（以後の段で悪化させない）
+          const got = MILP.slackTotal(sol, m.parts, t.types);
+          tierLog.push(`${g.label || g.key}／${t.label}: ${got}件`);
+          budgets.push({ names: MILP.slackNames(m.parts, t.types), max: got });
+        }
+      }
+      if (!sol) sol = solver.solve(m.lp, opts);
       // Status が Optimal 以外＝時間切れなどで打ち切り（＝もっと良い解がある可能性）
       if (String(sol && sol.Status) !== 'Optimal') allOptimal = false;
       MILP.applyGroupSolution(m, sol, shifts);
@@ -88,7 +117,7 @@ self.addEventListener('message', async (e) => {
     try { violations = checkViolations(shifts); }
     catch (e2) { violations = []; self.postMessage({ type: 'progress', pct: 95, label: '検証をスキップ（' + e2.message + '）' }); }
     AppState.violations = violations;
-    self.postMessage({ type: 'done', shifts, violations, allOptimal, deep, fast, usedGap });
+    self.postMessage({ type: 'done', shifts, violations, allOptimal, deep, fast, usedGap, tiered, tierLog });
   } catch (err) {
     self.postMessage({ type: 'error', message: (err && err.message) || String(err) });
   }

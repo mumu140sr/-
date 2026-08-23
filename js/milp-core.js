@@ -16,6 +16,17 @@
   }
   const cat = k => isEarlyCategory(k) ? 'e' : (isLate(k) ? 'l' : null);
 
+  // 段階最適化の順番。大事なものから順に0を目指し、達成できたら以後は動かさない。
+  // 上の段ほど「店舗が回らなくなる」影響が大きいルール。
+  const TIERS = [
+    { label: '人員・役職',       types: ['understaff', 'resp-duplicate', 'skill-late', 'vicemanager-absent'] },
+    { label: '公休・有給',       types: ['off-count', 'paid'] },
+    { label: '連勤・遅→早',      types: ['consecutive', 'late-early'] },
+    { label: '単発出勤',         types: ['single-work'] },
+    { label: '定数超過・上下関係', types: ['overstaff', 'hierarchy', 'pref-mismatch', 'surplus-unwanted'] },
+    { label: 'リズム・希望',     types: ['category-switch', 'bad-rest', 'long-rest', 'skill-short', 'balance-diff', 'single-off'] },
+  ];
+
   // 1部門グループ分の LP を作る。戻り値 { lp, vars, roles, gStaff, days }
   function buildGroupModel(gStaff, reqs, dailyReqs) {
     const days = getDaysInMonth(AppState.settings.targetMonth);
@@ -67,7 +78,17 @@
     const Y = (si, d) => `y_${si}_${d}`;
 
     const obj = [], cons = [], bin = new Set(), gen = new Set(), bnd = [];
-    const addSlack = (name, ub, weight) => { gen.add(name); bnd.push(ub != null ? `0 <= ${name} <= ${ub}` : `0 <= ${name}`); if (weight > 0) obj.push(`${weight} ${name}`); };
+    // 罰点変数（スラック）を、どのルールのものかを覚えながら追加する。
+    // 段階最適化では「このルールだけを最小化する」ため、ルール別の一覧が必要。
+    const objEntries = [];                  // { w, name, type }
+    const slackByType = {};                 // ルール → 変数名の配列
+    const addSlack = (name, ub, weight, type) => {
+      gen.add(name);
+      bnd.push(ub != null ? `0 <= ${name} <= ${ub}` : `0 <= ${name}`);
+      const t = type || 'other';
+      (slackByType[t] || (slackByType[t] = [])).push(name);
+      if (weight > 0) { obj.push(`${weight} ${name}`); objEntries.push({ w: weight, name, type: t }); }
+    };
 
     // 決定変数 x（担当可能かつ自由なマス）＋ 固定・不可マスの0/1固定＋ 1日1シフト
     gStaff.forEach(s => {
@@ -100,20 +121,20 @@
         const cconst = terms.filter(x => x === '1c').length;
         const vterms = terms.filter(x => x !== '1c');
         if (need > 0) {
-          const u = `u_${d}_${roleIdx[k]}`; addSlack(u, null, ruleW('understaff', P.understaff || 20000));
+          const u = `u_${d}_${roleIdx[k]}`; addSlack(u, null, ruleW('understaff', P.understaff || 20000), 'understaff');
           cons.push(`req_${d}_${roleIdx[k]}: ${(vterms.length ? vterms.join(' + ') + ' + ' : '')}${u} >= ${need - cconst}`);
           // 超過（定数より多い）を罰して「定数ちょうど」に寄せる。余った人手は休み(→余)に回る。
           // SOLO役割(早責/遅責等)は下の重複制約(rd)で扱うため二重には入れない。
           const wOver = (P.overstaff || 6000);
           if (wOver > 0 && vterms.length && !SOLO.has(k)) {
-            const ov = `ov_${d}_${roleIdx[k]}`; addSlack(ov, null, wOver);
+            const ov = `ov_${d}_${roleIdx[k]}`; addSlack(ov, null, wOver, 'overstaff');
             cons.push(`ovr_${d}_${roleIdx[k]}: ${vterms.join(' + ')} - ${ov} <= ${need - cconst}`);
           }
         }
         if (SOLO.has(k) && (vterms.length)) {
           const cap = Math.max(0, (need || 1) - cconst);
           const w = ruleW('resp-duplicate', P.respDuplicate || 8000);
-          if (w > 0) { const o = `rd_${d}_${roleIdx[k]}`; addSlack(o, null, w); cons.push(`dup_${d}_${roleIdx[k]}: ${vterms.join(' + ')} - ${o} <= ${cap}`); }
+          if (w > 0) { const o = `rd_${d}_${roleIdx[k]}`; addSlack(o, null, w, 'resp-duplicate'); cons.push(`dup_${d}_${roleIdx[k]}: ${vterms.join(' + ')} - ${o} <= ${cap}`); }
         }
       });
     }
@@ -136,9 +157,9 @@
         });
         const lhs = terms.length ? terms.join(' + ') : '';
         const wm = ruleW('skill-late', P.skillLateShortage || 9000);
-        if (wm > 0 && min > 0) { const sm = `sm_${xi}_${d}`; addSlack(sm, null, wm); cons.push(`skm_${xi}_${d}: ${(lhs ? lhs + ' + ' : '')}${sm} >= ${min - c}`); }
+        if (wm > 0 && min > 0) { const sm = `sm_${xi}_${d}`; addSlack(sm, null, wm, 'skill-late'); cons.push(`skm_${xi}_${d}: ${(lhs ? lhs + ' + ' : '')}${sm} >= ${min - c}`); }
         const ws = ruleW('skill-short', P.skillSoftShortage || 1500);
-        if (ws > 0 && need > min) { const ss = `ss_${xi}_${d}`; addSlack(ss, null, ws); cons.push(`sks_${xi}_${d}: ${(lhs ? lhs + ' + ' : '')}${ss} >= ${need - c}`); }
+        if (ws > 0 && need > min) { const ss = `ss_${xi}_${d}`; addSlack(ss, null, ws, 'skill-short'); cons.push(`sks_${xi}_${d}: ${(lhs ? lhs + ' + ' : '')}${ss} >= ${need - c}`); }
       }
     });
 
@@ -149,7 +170,7 @@
       if (w > 0) for (let d = 1; d <= days; d++) {
         const terms = []; let c = 0;
         vms.forEach(s => { allowRoles(s).forEach(k => { if (fx(s, d) === k) c++; else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k])); }); });
-        if (c === 0) { const va = `va_${d}`; addSlack(va, 1, w); cons.push(`vice_${d}: ${(terms.length ? terms.join(' + ') + ' + ' : '')}${va} >= 1`); }
+        if (c === 0) { const va = `va_${d}`; addSlack(va, 1, w, 'vicemanager-absent'); cons.push(`vice_${d}: ${(terms.length ? terms.join(' + ') + ' + ' : '')}${va} >= 1`); }
       }
     }
 
@@ -177,7 +198,7 @@
         for (let d = 1; d + win - 1 <= days; d++) {
           let cc = 0, t = [];
           for (let dd = d; dd < d + win; dd++) { const o = cellTerms(s, dd); cc += o.c; t = t.concat(realT(o.w)); }
-          if (t.length) { const cv = `cw_${si}_${d}`; addSlack(cv, null, wc); cons.push(`con_${si}_${d}: ${t.join(' + ')} - ${cv} <= ${maxCons - cc}`); }
+          if (t.length) { const cv = `cw_${si}_${d}`; addSlack(cv, null, wc, 'consecutive'); cons.push(`con_${si}_${d}: ${t.join(' + ')} - ${cv} <= ${maxCons - cc}`); }
         }
         // 前月末の連勤を反映：前月から pc 連勤で入ってくる場合、月初の窓に pc を定数として加える。
         // j 日ぶんの前月勤務＋月初(1..win-j 日)の勤務合計 ≤ maxCons。
@@ -187,7 +208,7 @@
           if (lastDay < 1) continue;
           let cc = 0, t = [];
           for (let dd = 1; dd <= lastDay; dd++) { const o = cellTerms(s, dd); cc += o.c; t = t.concat(realT(o.w)); }
-          if (t.length) { const cv = `cb_${si}_${j}`; addSlack(cv, null, wc); cons.push(`conb_${si}_${j}: ${t.join(' + ')} - ${cv} <= ${(maxCons - j) - cc}`); }
+          if (t.length) { const cv = `cb_${si}_${j}`; addSlack(cv, null, wc, 'consecutive'); cons.push(`conb_${si}_${j}: ${t.join(' + ')} - ${cv} <= ${(maxCons - j) - cc}`); }
         }
       }
       // 公休不足（キャストは対象外）
@@ -213,7 +234,7 @@
             if (free(s, d)) allowRoles(s).forEach(k => roleT.push(V(si, d, roleIdx[k])));
           }
           const workTarget = days - (s.maxOff || 0) - trainN - paidN - otherOffN - (paidTarget[s.id] || 0);
-          if (roleT.length) { const os = `os_${si}`; addSlack(os, null, wo); cons.push(`off_${si}: ${roleT.join(' + ')} - ${os} <= ${workTarget - fixN}`); }
+          if (roleT.length) { const os = `os_${si}`; addSlack(os, null, wo, 'off-count'); cons.push(`off_${si}: ${roleT.join(' + ')} - ${os} <= ${workTarget - fixN}`); }
           // 余剰休み（余）を誰に寄せるか。余は「目標公休より多く休んだ分」なので、
           // 目標どおり働けば余は出ない。人員不足より弱いソフト制約にする。
           if (roleT.length) {
@@ -221,7 +242,7 @@
             if (pref === 'avoid') {
               // 付けたくない人：目標日数を下回ったら罰点（＝優先して出勤に回す）
               const wa = P.surplusAvoid || 700;
-              if (wa > 0) { const sv = `sv_${si}`; addSlack(sv, null, wa); cons.push(`sur_${si}: ${roleT.join(' + ')} + ${sv} >= ${workTarget - fixN}`); }
+              if (wa > 0) { const sv = `sv_${si}`; addSlack(sv, null, wa, 'surplus-unwanted'); cons.push(`sur_${si}: ${roleT.join(' + ')} + ${sv} >= ${workTarget - fixN}`); }
             } else if (pref === 'prefer') {
               // 優先して付ける人：出勤1日ごとにごく小さな罰点を置き、余りをこの人へ寄せる
               const wp = P.surplusPrefer || 200;
@@ -235,7 +256,7 @@
           for (let d = 1; d <= days; d++) if (free(s, d)) yt.push(Y(si, d));
           if (yt.length) {
             const need = Math.min(paidTarget[s.id], yt.length);
-            const ps = `ps_${si}`; addSlack(ps, null, 6000);
+            const ps = `ps_${si}`; addSlack(ps, null, 6000, 'paid');
             cons.push(`paid_${si}: ${yt.join(' + ')} + ${ps} >= ${need}`);
             // 目標超過は禁止：余分な'有'は公休(maxOff)を削り「公休不足」を招くため、ちょうど need 日までに制限。
             cons.push(`paidhi_${si}: ${yt.join(' + ')} <= ${need}`);
@@ -263,7 +284,7 @@
               });
             }
             if (bad.length) {
-              const pv = `pf_${si}`; addSlack(pv, null, wPF);
+              const pv = `pf_${si}`; addSlack(pv, null, wPF, 'pref-mismatch');
               cons.push(`pfm_${si}: ${bad.join(' + ')} - ${pv} <= 0`);
             }
           }
@@ -289,7 +310,7 @@
             const tol = 10 * Math.max(0, parseInt(AppState.settings.balanceTolerance) || 0);
             const wu = Math.max(0.1, wBAL / 10);   // 1日ぶんのずれ = wBAL 点
             const bp = `bp_${si}`, bm = `bm_${si}`;
-            addSlack(bp, null, wu); addSlack(bm, null, wu);
+            addSlack(bp, null, wu, 'balance-diff'); addSlack(bm, null, wu, 'balance-diff');
             const lhs = terms.join(' ').replace(/^\+ /, '');
             cons.push(`balh_${si}: ${lhs} - ${bp} <= ${tol - konst}`);
             cons.push(`ball_${si}: ${lhs} + ${bm} >= ${-tol - konst}`);
@@ -306,19 +327,19 @@
       const wLR = ruleW('long-rest', P.longRest || 2000);
       for (let d = 1; d <= days; d++) {
         const A = cellTerms(s, d), B = d < days ? cellTerms(s, d + 1) : null, C = d + 2 <= days ? cellTerms(s, d + 2) : null, Pd = d > 1 ? cellTerms(s, d - 1) : null;
-        if (B && wLE > 0) { const t = [...realT(A.l), ...realT(B.e)]; const rhs = 1 - constOf(A.l) - constOf(B.e); if (t.length && rhs >= 0) { const v = `le_${si}_${d}`; addSlack(v, 1, wLE); cons.push(`le_${si}_${d}: ${t.join(' + ')} - ${v} <= ${rhs}`); } }
+        if (B && wLE > 0) { const t = [...realT(A.l), ...realT(B.e)]; const rhs = 1 - constOf(A.l) - constOf(B.e); if (t.length && rhs >= 0) { const v = `le_${si}_${d}`; addSlack(v, 1, wLE, 'late-early'); cons.push(`le_${si}_${d}: ${t.join(' + ')} - ${v} <= ${rhs}`); } }
         // 単発出勤（前後が休みで1日だけ出勤）。研修・固定出勤(A.c>=1)の日も対象にする
         // （checkViolations は研修も出勤として数えるため。可能なら前後どちらかに勤務を入れて孤立を防ぐ）。
-        if (Pd && B && wSW > 0 && (realT(A.w).length || A.c >= 1)) { const v = `sw_${si}_${d}`; addSlack(v, 1, wSW); const lhs = [...realT(A.w), ...realT(Pd.w).map(x => `- ${x}`), ...realT(B.w).map(x => `- ${x}`), `- ${v}`]; cons.push(`sw_${si}_${d}: ${(lhs.join(' + ').replace(/\+ -/g, '-')) || `- ${v}`} <= ${-A.c + Pd.c + B.c}`); }
-        if (B && wCS > 0) { const v = `cs_${si}_${d}`; addSlack(v, 1, wCS); const t1 = [...realT(A.e), ...realT(B.l)]; if (t1.length) cons.push(`cs1_${si}_${d}: ${t1.join(' + ')} - ${v} <= ${1 - constOf(A.e) - constOf(B.l)}`); const t2 = [...realT(A.l), ...realT(B.e)]; if (t2.length) cons.push(`cs2_${si}_${d}: ${t2.join(' + ')} - ${v} <= ${1 - constOf(A.l) - constOf(B.e)}`); }
-        if (B && C && wBR > 0) { const v = `br_${si}_${d}`; addSlack(v, 1, wBR); const t = [...realT(A.l), ...realT(C.e), ...realT(B.w).map(x => `- ${x}`), `- ${v}`]; if (realT(A.l).length && realT(C.e).length) cons.push(`br_${si}_${d}: ${t.join(' + ').replace(/\+ -/g, '-')} <= ${1 - constOf(A.l) - constOf(C.e) + B.c}`); }
+        if (Pd && B && wSW > 0 && (realT(A.w).length || A.c >= 1)) { const v = `sw_${si}_${d}`; addSlack(v, 1, wSW, 'single-work'); const lhs = [...realT(A.w), ...realT(Pd.w).map(x => `- ${x}`), ...realT(B.w).map(x => `- ${x}`), `- ${v}`]; cons.push(`sw_${si}_${d}: ${(lhs.join(' + ').replace(/\+ -/g, '-')) || `- ${v}`} <= ${-A.c + Pd.c + B.c}`); }
+        if (B && wCS > 0) { const v = `cs_${si}_${d}`; addSlack(v, 1, wCS, 'category-switch'); const t1 = [...realT(A.e), ...realT(B.l)]; if (t1.length) cons.push(`cs1_${si}_${d}: ${t1.join(' + ')} - ${v} <= ${1 - constOf(A.e) - constOf(B.l)}`); const t2 = [...realT(A.l), ...realT(B.e)]; if (t2.length) cons.push(`cs2_${si}_${d}: ${t2.join(' + ')} - ${v} <= ${1 - constOf(A.l) - constOf(B.e)}`); }
+        if (B && C && wBR > 0) { const v = `br_${si}_${d}`; addSlack(v, 1, wBR, 'bad-rest'); const t = [...realT(A.l), ...realT(C.e), ...realT(B.w).map(x => `- ${x}`), `- ${v}`]; if (realT(A.l).length && realT(C.e).length) cons.push(`br_${si}_${d}: ${t.join(' + ').replace(/\+ -/g, '-')} <= ${1 - constOf(A.l) - constOf(C.e) + B.c}`); }
         // 連休の上限（設定日数を超える連続休みを避ける）: (上限+1)日の窓に最低1日の勤務を要求
         if (wLR > 0) {
           const lrWin = getMaxOffRun() + 1;
           if (d + lrWin - 1 <= days) {
             let t = [], cc = 0;
             for (let k = 0; k < lrWin; k++) { const o = cellTerms(s, d + k); cc += o.c; t = t.concat(realT(o.w)); }
-            if (t.length) { const v = `lr_${si}_${d}`; addSlack(v, 1, wLR); cons.push(`lr_${si}_${d}: ${t.join(' + ')} + ${v} >= ${1 - cc}`); }
+            if (t.length) { const v = `lr_${si}_${d}`; addSlack(v, 1, wLR, 'long-rest'); cons.push(`lr_${si}_${d}: ${t.join(' + ')} + ${v} >= ${1 - cc}`); }
           }
         }
       }
@@ -332,12 +353,12 @@
         const earlyD1 = realT(A1.e), lateD1 = realT(A1.l);
         if (isLate(pls)) {
           // 遅→早（🔴）：1日目に早番系を入れない
-          if (wLE > 0 && earlyD1.length) { const v = `leb_${si}`; addSlack(v, 1, wLE); cons.push(`leb_${si}: ${earlyD1.join(' + ')} - ${v} <= 0`); }
+          if (wLE > 0 && earlyD1.length) { const v = `leb_${si}`; addSlack(v, 1, wLE, 'late-early'); cons.push(`leb_${si}: ${earlyD1.join(' + ')} - ${v} <= 0`); }
           // 連勤中の時間帯切替 遅→早（🟡）：前月から連勤継続中なので該当
-          if (wCS > 0 && earlyD1.length) { const v = `csb_${si}`; addSlack(v, 1, wCS); cons.push(`csb_${si}: ${earlyD1.join(' + ')} - ${v} <= 0`); }
+          if (wCS > 0 && earlyD1.length) { const v = `csb_${si}`; addSlack(v, 1, wCS, 'category-switch'); cons.push(`csb_${si}: ${earlyD1.join(' + ')} - ${v} <= 0`); }
         } else if (isEarlyCategory(pls)) {
           // 連勤中の時間帯切替 早→遅（🟡）
-          if (wCS > 0 && lateD1.length) { const v = `csb_${si}`; addSlack(v, 1, wCS); cons.push(`csb_${si}: ${lateD1.join(' + ')} - ${v} <= 0`); }
+          if (wCS > 0 && lateD1.length) { const v = `csb_${si}`; addSlack(v, 1, wCS, 'category-switch'); cons.push(`csb_${si}: ${lateD1.join(' + ')} - ${v} <= 0`); }
         }
         // 月をまたぐ「遅→休→早」を避ける: 早番系(2日目) − 勤務(1日目) ≤ v
         // （1日目が休みで2日目が早番系なら違反。1日目に出勤すれば成立しない）
@@ -346,7 +367,7 @@
           const w1 = realT(A1b.w), e2 = realT(B1b.e);
           const wBad = s.needPairRest ? ruleW('pair-rest', (P.lateEarly || 9000) * 2) : wBR;
           if (wBad > 0 && (e2.length || constOf(B1b.e))) {
-            const v = `brb_${si}`; addSlack(v, 1, wBad);
+            const v = `brb_${si}`; addSlack(v, 1, wBad, 'bad-rest');
             const lhs = [...e2, ...w1.map(x => `- ${x}`), `- ${v}`];
             cons.push(`brb_${si}: ${lhs.join(' + ').replace(/\+ -/g, '-')} <= ${A1b.c - constOf(B1b.e)}`);
           }
@@ -359,7 +380,7 @@
         const A1c = cellTerms(s, 1), B1c = cellTerms(s, 2);
         const w1 = realT(A1c.w), w2 = realT(B1c.w);
         if (wSO > 0 && (w2.length || B1c.c)) {
-          const v = `sob_${si}`; addSlack(v, 1, wSO);
+          const v = `sob_${si}`; addSlack(v, 1, wSO, 'single-off');
           const lhs = [...w2, ...w1.map(x => `- ${x}`), `- ${v}`];
           cons.push(`sob_${si}: ${lhs.join(' + ').replace(/\+ -/g, '-')} <= ${A1c.c - B1c.c}`);
         }
@@ -369,7 +390,7 @@
       if (wSW > 0 && pme.cons === 0 && days >= 2) {
         const A1 = cellTerms(s, 1), B1 = cellTerms(s, 2);
         if (realT(A1.w).length || A1.c >= 1) {
-          const v = `sw1_${si}`; addSlack(v, 1, wSW);
+          const v = `sw1_${si}`; addSlack(v, 1, wSW, 'single-work');
           const lhs = [...realT(A1.w), ...realT(B1.w).map(x => `- ${x}`), `- ${v}`];
           cons.push(`sw1_${si}: ${lhs.join(' + ').replace(/\+ -/g, '-')} <= ${-A1.c + B1.c}`);
         }
@@ -392,8 +413,8 @@
                 if (hi.id === lo.id || getStaffPriority(hi) >= getStaffPriority(lo)) return;
                 const o = cellTerms(hi, d); const bandArr = band === 'e' ? o.e : o.l;
                 const hiT = realT(bandArr), hiC = constOf(bandArr);
-                if (loResp === '1c') { if (hiT.length) { const v = `h_${band}_${d}_${sidOf[lo.id]}_${sidOf[hi.id]}`; addSlack(v, 1, wH); cons.push(`${v}c: ${hiT.join(' + ')} - ${v} <= ${1 - hiC}`); } return; }
-                const v = `h_${band}_${d}_${sidOf[lo.id]}_${sidOf[hi.id]}`; addSlack(v, 1, wH);
+                if (loResp === '1c') { if (hiT.length) { const v = `h_${band}_${d}_${sidOf[lo.id]}_${sidOf[hi.id]}`; addSlack(v, 1, wH, 'hierarchy'); cons.push(`${v}c: ${hiT.join(' + ')} - ${v} <= ${1 - hiC}`); } return; }
+                const v = `h_${band}_${d}_${sidOf[lo.id]}_${sidOf[hi.id]}`; addSlack(v, 1, wH, 'hierarchy');
                 const t = [loResp, ...hiT, `- ${v}`]; cons.push(`${v}c: ${t.join(' + ').replace(/\+ -/g, '-')} <= ${1 - hiC}`);
               });
             });
@@ -403,8 +424,49 @@
     }
 
     if (!obj.length) obj.push('0 z_dummy'), gen.add('z_dummy'), bnd.push('0 <= z_dummy <= 0');
-    const lp = `Minimize\n obj: ${obj.join(' + ')}\nSubject To\n ${cons.join('\n ')}\nBounds\n ${bnd.join('\n ')}\nBinary\n ${[...bin].join('\n ')}\nGeneral\n ${[...gen].join('\n ')}\nEnd\n`;
-    return { lp, sidOf, roleIdx, roles, gStaff, days };
+    const parts = { objEntries, cons, bnd, bin: [...bin], gen: [...gen], slackByType };
+    const lp = composeLP(parts, null);
+    return { lp, parts, slackByType, sidOf, roleIdx, roles, gStaff, days };
+  }
+
+  /**
+   * モデルの部品から LP 文字列を組み立てる（段階最適化用）。
+   * @param parts buildGroupModel が返す parts
+   * @param opts  null なら従来どおり全ルールを一度に最小化。
+   *   { types: [最小化するルール], budgets: [{ names:[変数名], max:上限 }] }
+   *   budgets は「前の段で達成した件数を超えない」という約束（＝確定の固定）。
+   */
+  function composeLP(parts, opts) {
+    const o = opts || {};
+    const entries = o.types
+      ? parts.objEntries.filter(e => o.types.indexOf(e.type) >= 0)
+      : parts.objEntries;
+    const objStr = entries.length ? entries.map(e => `${e.w} ${e.name}`).join(' + ') : '0 z_dummy';
+    const extra = [];
+    (o.budgets || []).forEach((b, i) => {
+      if (!b.names || !b.names.length) return;
+      extra.push(`bud_${i}: ${b.names.join(' + ')} <= ${b.max}`);
+    });
+    const gen = parts.gen.indexOf('z_dummy') >= 0 ? parts.gen : parts.gen.concat(['z_dummy']);
+    const bnd = parts.bnd.concat(parts.bnd.some(x => /z_dummy/.test(x)) ? [] : ['0 <= z_dummy <= 0']);
+    return `Minimize\n obj: ${objStr}\nSubject To\n ${parts.cons.concat(extra).join('\n ')}` +
+           `\nBounds\n ${bnd.join('\n ')}\nBinary\n ${parts.bin.join('\n ')}` +
+           `\nGeneral\n ${gen.join('\n ')}\nEnd\n`;
+  }
+
+  // 解から、指定ルールのスラック合計（＝そのルールの違反件数）を取り出す
+  function slackTotal(sol, parts, types) {
+    let n = 0;
+    (types || []).forEach(t => (parts.slackByType[t] || []).forEach(name => {
+      const c = sol.Columns && sol.Columns[name];
+      if (c && c.Primal > 0) n += c.Primal;
+    }));
+    return Math.round(n);
+  }
+  function slackNames(parts, types) {
+    const out = [];
+    (types || []).forEach(t => (parts.slackByType[t] || []).forEach(n => out.push(n)));
+    return out;
   }
 
   // 解を shifts に反映（固定・希望休はそのまま）
@@ -426,5 +488,5 @@
     });
   }
 
-  global.MILP = { buildGroupModel, applyGroupSolution };
+  global.MILP = { buildGroupModel, applyGroupSolution, composeLP, slackTotal, slackNames, TIERS };
 })(typeof self !== 'undefined' ? self : this);
