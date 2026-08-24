@@ -750,6 +750,13 @@ function setupResultPanel() {
     toast(`ルールチェック完了: ${AppState.violations.length}件の違反`, 'info');
   });
 
+  // 🔒 まとめて固定: ドラッグで範囲を選び、固定／解除をまとめて行う
+  const btnRange = document.getElementById('btnRangeLock');
+  if (btnRange) btnRange.addEventListener('click', () => {
+    if (!AppState.generated) { toast('シフトを生成してから実行してください', 'error'); return; }
+    RangeLock.toggle();
+  });
+
   document.getElementById('btnClearFixed').addEventListener('click', () => {
     let count = 0;
     for (const sid in AppState.fixedShifts) {

@@ -2527,3 +2527,143 @@ function showSurplusResolveModal() {
   render();
   modal.addEventListener('click', e => { if (e.target === modal) { modal.remove(); refreshAllUI(); } });
 }
+
+/* ===========================================
+   まとめて固定（ドラッグで範囲選択して 🔒固定 / 🔓解除）
+   Excel のように表の上をなぞって四角い範囲を選び、
+   その中のマスをまとめて固定・解除する。
+   =========================================== */
+
+const RangeLock = {
+  on: false,          // 範囲選択モードかどうか
+  action: 'lock',     // 'lock' = 固定する / 'unlock' = 解除する
+  dragging: false,
+  anchor: null,       // ドラッグ開始位置 {row, day}
+
+  // 表の中の「スタッフ行」を上から順に並べ、行番号を引けるようにする
+  rowsOf() {
+    const tbl = document.getElementById('resultTable') || document.querySelector('#panel-result table');
+    if (!tbl) return [];
+    return [...tbl.querySelectorAll('tbody tr')].filter(tr => tr.querySelector('td[data-sid]'));
+  },
+  posOf(td) {
+    const tr = td.closest('tr');
+    const rows = this.rowsOf();
+    return { row: rows.indexOf(tr), day: parseInt(td.dataset.day) };
+  },
+
+  // いま選ばれている四角い範囲に印を付ける
+  paint(cur) {
+    const tbl = document.getElementById('resultTable') || document.querySelector('#panel-result table');
+    if (!tbl) return;
+    tbl.querySelectorAll('td.range-sel').forEach(td => td.classList.remove('range-sel'));
+    if (!this.anchor || !cur) return;
+    const r0 = Math.min(this.anchor.row, cur.row), r1 = Math.max(this.anchor.row, cur.row);
+    const d0 = Math.min(this.anchor.day, cur.day), d1 = Math.max(this.anchor.day, cur.day);
+    const rows = this.rowsOf();
+    let n = 0;
+    for (let r = r0; r <= r1; r++) {
+      const tr = rows[r]; if (!tr) continue;
+      tr.querySelectorAll('td[data-sid]').forEach(td => {
+        const d = parseInt(td.dataset.day);
+        if (d >= d0 && d <= d1) { td.classList.add('range-sel'); n++; }
+      });
+    }
+    const $c = document.getElementById('rangeLockCount');
+    if ($c) $c.textContent = `${n}マス選択中`;
+  },
+
+  // 選んだ範囲に固定／解除を適用する
+  apply() {
+    const tbl = document.getElementById('resultTable') || document.querySelector('#panel-result table');
+    if (!tbl) return;
+    const sel = [...tbl.querySelectorAll('td.range-sel')];
+    if (!sel.length) return;
+    if (typeof recordShiftHistory === 'function') recordShiftHistory();
+    let n = 0;
+    sel.forEach(td => {
+      const sid = td.dataset.sid, d = parseInt(td.dataset.day);
+      const val = (AppState.shifts[sid] || {})[d] || '';
+      AppState.fixedShifts[sid] = AppState.fixedShifts[sid] || {};
+      if (this.action === 'lock') {
+        if (!val) return;                       // 中身が空のマスは固定しない
+        AppState.fixedShifts[sid][d] = val;     // 中身に関係なく、いまの値をそのまま固定
+        n++;
+      } else {
+        if (AppState.fixedShifts[sid][d] == null) return;
+        delete AppState.fixedShifts[sid][d];
+        n++;
+      }
+    });
+    saveToStorage();
+    const keep = this.on;
+    renderResultTable();
+    if (keep) this.enable(true);                // 再描画で消えたモードを戻す
+    toast(this.action === 'lock' ? `🔒 ${n}マスを固定しました（Ctrl+Zで戻せます）`
+                                 : `🔓 ${n}マスの固定を解除しました（Ctrl+Zで戻せます）`, 'success', 3000);
+  },
+
+  bar() {
+    const old = document.getElementById('rangeLockBar');
+    if (old) old.remove();
+    const bar = document.createElement('div');
+    bar.id = 'rangeLockBar';
+    bar.innerHTML = `
+      <b style="font-size:13px">まとめて固定</b>
+      <button class="btn rl-mode ${this.action === 'lock' ? 'active' : ''}" data-rl="lock">🔒 固定する</button>
+      <button class="btn rl-mode ${this.action === 'unlock' ? 'active' : ''}" data-rl="unlock">🔓 解除する</button>
+      <span class="hint" id="rangeLockCount">表の上をドラッグして範囲を選んでください</span>
+      <button class="btn btn-primary" data-rl="close">終了</button>`;
+    document.body.appendChild(bar);
+    bar.querySelectorAll('[data-rl]').forEach(b => b.addEventListener('click', () => {
+      const v = b.dataset.rl;
+      if (v === 'close') { RangeLock.disable(); return; }
+      RangeLock.action = v;
+      bar.querySelectorAll('.rl-mode').forEach(x => x.classList.toggle('active', x.dataset.rl === v));
+    }));
+  },
+
+  enable(silent) {
+    const tbl = document.getElementById('resultTable') || document.querySelector('#panel-result table');
+    if (!tbl) { toast('シフト表がありません', 'error'); return; }
+    this.on = true;
+    tbl.classList.add('range-select-mode');
+    this.bar();
+    const btn = document.getElementById('btnRangeLock');
+    if (btn) { btn.textContent = '✅ まとめて固定を終了'; btn.classList.add('btn-primary'); }
+    if (!silent) toast('表の上をドラッグして範囲を選んでください', 'info', 3500);
+  },
+
+  disable() {
+    this.on = false; this.dragging = false; this.anchor = null;
+    document.querySelectorAll('.range-select-mode').forEach(t => t.classList.remove('range-select-mode'));
+    document.querySelectorAll('td.range-sel').forEach(td => td.classList.remove('range-sel'));
+    const bar = document.getElementById('rangeLockBar'); if (bar) bar.remove();
+    const btn = document.getElementById('btnRangeLock');
+    if (btn) { btn.textContent = '🔒 まとめて固定'; btn.classList.remove('btn-primary'); }
+  },
+
+  toggle() { this.on ? this.disable() : this.enable(); },
+};
+
+// マウス操作は document 側で1回だけ拾う（表は再描画されるため）
+document.addEventListener('mousedown', (e) => {
+  if (!RangeLock.on) return;
+  const td = e.target.closest && e.target.closest('td[data-sid]');
+  if (!td || !td.closest('.range-select-mode')) return;
+  e.preventDefault();
+  RangeLock.dragging = true;
+  RangeLock.anchor = RangeLock.posOf(td);
+  RangeLock.paint(RangeLock.anchor);
+});
+document.addEventListener('mouseover', (e) => {
+  if (!RangeLock.on || !RangeLock.dragging) return;
+  const td = e.target.closest && e.target.closest('td[data-sid]');
+  if (!td || !td.closest('.range-select-mode')) return;
+  RangeLock.paint(RangeLock.posOf(td));
+});
+document.addEventListener('mouseup', () => {
+  if (!RangeLock.on || !RangeLock.dragging) return;
+  RangeLock.dragging = false;
+  RangeLock.apply();
+});
