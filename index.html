@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=157" />
+<link rel="stylesheet" href="css/style.css?v=161" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -22,6 +22,9 @@
     <button id="btnTheme" class="btn btn-ghost btn-theme" aria-label="テーマ切替" title="明暗を切り替え">🌙</button>
     <button id="btnSave" class="btn btn-ghost">💾 保存</button>
     <button id="btnLoad" class="btn btn-ghost">📂 読込</button>
+    <button id="btnExportData" class="btn btn-ghost" title="設定・希望休・シフト表をファイルに書き出します（バックアップ／別PCへの移行に）">📤 書き出し</button>
+    <button id="btnImportData" class="btn btn-ghost" title="書き出したファイルを読み込みます">📥 取り込み</button>
+    <input type="file" id="fileImportData" accept=".json,application/json" style="display:none" />
     <button id="btnReset" class="btn btn-ghost">🗑 リセット</button>
   </div>
 </header>
@@ -329,12 +332,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=157"></script>
-<script src="js/optimizer.v6.js?v=157"></script>
-<script src="js/worker-client.v6.js?v=157"></script>
-<script src="js/ai-explain.v6.js?v=157"></script>
-<script src="js/ui.v6.js?v=157"></script>
-<script src="js/milp.v6.js?v=157"></script>
-<script src="js/app.v6.js?v=157"></script>
+<script src="js/data.v6.js?v=161"></script>
+<script src="js/optimizer.v6.js?v=161"></script>
+<script src="js/worker-client.v6.js?v=161"></script>
+<script src="js/ai-explain.v6.js?v=161"></script>
+<script src="js/ui.v6.js?v=161"></script>
+<script src="js/milp.v6.js?v=161"></script>
+<script src="js/app.v6.js?v=161"></script>
 </body>
 </html>

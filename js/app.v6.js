@@ -87,6 +87,57 @@ function setupHeaderActions() {
     }
   });
 
+  // 設定一式をファイルに書き出す（バックアップ・別PCへの移行・相談用）
+  const btnExp = document.getElementById('btnExportData');
+  if (btnExp) btnExp.addEventListener('click', () => {
+    try {
+      const data = {
+        _app: 'shift-app', _version: 1, _savedAt: new Date().toISOString(),
+        settings: AppState.settings, shiftTypes: AppState.shiftTypes,
+        roleRequirements: AppState.roleRequirements, roleRequirementsCast: AppState.roleRequirementsCast,
+        dailyRequirements: AppState.dailyRequirements, dailyRequirementsCast: AppState.dailyRequirementsCast,
+        skills: AppState.skills, dailySkills: AppState.dailySkills,
+        staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
+        specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `シフト設定_${AppState.settings.targetMonth || '未設定'}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      toast('設定を書き出しました', 'success');
+    } catch (e) { toast('書き出しに失敗しました: ' + e.message, 'error'); }
+  });
+
+  // 書き出したファイルを取り込む
+  const btnImp = document.getElementById('btnImportData');
+  const fileImp = document.getElementById('fileImportData');
+  if (btnImp && fileImp) {
+    btnImp.addEventListener('click', () => fileImp.click());
+    fileImp.addEventListener('change', () => {
+      const f = fileImp.files && fileImp.files[0];
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const d = JSON.parse(rd.result);
+          if (d._app !== 'shift-app') throw new Error('このアプリの書き出しファイルではありません');
+          if (!confirm('いまのデータを、読み込むファイルの内容で置き換えます。よろしいですか？')) return;
+          ['settings','shiftTypes','roleRequirements','roleRequirementsCast','dailyRequirements',
+           'dailyRequirementsCast','skills','dailySkills','staff','requests','fixedShifts',
+           'specialDays','events','shifts'].forEach(k => { if (d[k] !== undefined) AppState[k] = d[k]; });
+          AppState.generated = !!(d.shifts && Object.keys(d.shifts).length);
+          AppState.violations = AppState.generated ? checkViolations(AppState.shifts) : [];
+          saveToStorage(); refreshAllUI();
+          toast('設定を取り込みました', 'success');
+        } catch (e) { toast('取り込みに失敗しました: ' + e.message, 'error', 6000); }
+        finally { fileImp.value = ''; }
+      };
+      rd.readAsText(f);
+    });
+  }
+
   document.getElementById('btnReset').addEventListener('click', () => {
     if (confirm('全てのデータをリセットしますか？（保存データも削除されます）')) {
       resetAll();
