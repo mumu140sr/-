@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=162', 'optimizer.js?v=162', 'milp-core.js?v=162');
+self.importScripts('data.js?v=163', 'optimizer.js?v=163', 'milp-core.js?v=163');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=162'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=163'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -113,6 +113,10 @@ self.addEventListener('message', async (e) => {
       // 全ルールを一度に解くのをやめ、大事な順に「そのルールだけ」を0に近づける。
       // 達成した件数は次の段で上限として固定するので、重要なルールが後から崩れない。
       let sol = null;
+      // 段階最適化では「各段が最適だと証明できたか」で判定する。
+      // 仕上げ処理は数秒上限で回すので必ず Time limit reached を返し、
+      // その状態を見てしまうと、全段が証明済みでも「時間切れ」と表示されてしまう。
+      let tierProven = true;
       if (tiered) {
         const tiers = MILP.TIERS.filter(t => (t.types || []).some(ty => (m.parts.slackByType[ty] || []).length));
         const budgets = [];        // 検算用（採用可否のチェックに使う）
@@ -164,10 +168,11 @@ self.addEventListener('message', async (e) => {
             }
           }
           remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
-          if (String(s2 && s2.Status) !== 'Optimal') allOptimal = false;
+          if (String(s2 && s2.Status) !== 'Optimal') tierProven = false;
           // どちらの方式でも前の段を守れなかった場合は、この段の結果は採用しない。
           // ただし後ろの段は打ち切らない（別の段なら解けることがあるため）。
           if (!okStrict) {
+            tierProven = false;
             if (sol) {
               // 今の解での件数を上限として引き継ぎ、後の段で悪化させないようにする
               bIdx[ti] = budgets.length;
@@ -248,9 +253,9 @@ self.addEventListener('message', async (e) => {
           else break;      // これ以上良くならない
         }
       }
-      if (!sol) sol = solver.solve(m.lp, opts);
-      // Status が Optimal 以外＝時間切れなどで打ち切り（＝もっと良い解がある可能性）
-      if (String(sol && sol.Status) !== 'Optimal') allOptimal = false;
+      if (!sol) { sol = solver.solve(m.lp, opts); tierProven = String(sol && sol.Status) === 'Optimal'; }
+      // 時間切れかどうかは「各段を証明できたか」で決める。仕上げ処理の Status は見ない。
+      if (!tierProven) allOptimal = false;
       MILP.applyGroupSolution(m, sol, shifts);
       gi++;
     }
