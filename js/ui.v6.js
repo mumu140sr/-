@@ -2221,6 +2221,49 @@ function candidateShiftsFor(staff, day) {
   });
 }
 
+// 「絶対に崩したくない」ルール。これが増える変更は、はっきり区別して警告する。
+const SURPLUS_CRITICAL_TYPES = [
+  'understaff', 'off-count', 'paid', 'consecutive', 'late-early',
+  'resp-duplicate', 'skill-late', 'skill-short', 'vicemanager-absent',
+  'special-day', 'single-work', 'overstaff', 'role-mismatch', 'event-absent',
+];
+
+const SURPLUS_TYPE_LABEL = {
+  'understaff': '人員不足', 'off-count': '公休数不足', 'paid': '有給の不足',
+  'consecutive': '連勤超過', 'late-early': '遅→早インターバル不足',
+  'resp-duplicate': '責任者・総務の重複', 'skill-late': '遅番のスキル不足',
+  'skill-short': 'スキル人数の不足', 'vicemanager-absent': '副店長不在の日',
+  'special-day': '特別日の責任者不在', 'single-work': '単発出勤',
+  'overstaff': '定数オーバー', 'role-mismatch': '担当外シフト',
+  'event-absent': '行事日の休み', 'hierarchy': '責任者ヒエラルキー違反',
+  'category-switch': '連勤中の時間帯切替', 'bad-rest': '遅→休→早',
+  'long-rest': '連休が長すぎる', 'pair-rest': '遅→早は2連休',
+  'pref-mismatch': '早遅希望の不一致', 'balance-diff': '早遅バランスのずれ',
+  'weekend-pref': '土日休み希望', 'rest-style': '休み方の希望',
+  'pair-rest-count': '連休回数の不足', 'single-off': '単発休み',
+  'night-after-work': '夜勤明けの出勤', 'surplus-unwanted': '余剰休みの希望',
+};
+
+// 違反の一覧を「種類ごとの件数」にする
+function countByType(vios) {
+  const c = {};
+  (vios || []).forEach(v => { c[v.type] = (c[v.type] || 0) + 1; });
+  return c;
+}
+
+// 変更前後を比べて、増えたルールを「重要」と「個人の希望」に分けて返す
+function diffViolations(beforeC, afterC) {
+  const crit = [], soft = [];
+  Object.keys(afterC).forEach(ty => {
+    const n = afterC[ty] - (beforeC[ty] || 0);
+    if (n <= 0) return;
+    const row = { type: ty, n, label: SURPLUS_TYPE_LABEL[ty] || ty };
+    (SURPLUS_CRITICAL_TYPES.indexOf(ty) >= 0 ? crit : soft).push(row);
+  });
+  crit.sort((a, b) => b.n - a.n); soft.sort((a, b) => b.n - a.n);
+  return { crit, soft };
+}
+
 // 変更を試して、エラーの増減を返す。confirm で「増えても実行するか」を人に聞く。
 // @returns {ok:boolean, before:number, after:number, message:string}
 async function trySurplusChange(apply, opts) {
@@ -2242,7 +2285,9 @@ async function trySurplusChange(apply, opts) {
     AppState.staff = backup.staff;
     AppState.violations = checkViolations(AppState.shifts);
   };
-  const before = checkViolations(AppState.shifts).length;
+  const beforeV = checkViolations(AppState.shifts);
+  const before = beforeV.length;
+  const beforeC = countByType(beforeV);
   apply();
   // 周りのつじつまを、最小限の変更で合わせる
   if (o.adjust && typeof optimizeScheduleMILP === 'function') {
@@ -2254,12 +2299,16 @@ async function trySurplusChange(apply, opts) {
   if (after > before) {
     // エラーが増える指定は、取り消さずに本人へ確認する。
     // 「どうしてもこの人をこの日に入れたい」を通せるようにするため。
+    // ただし、公休不足や連勤超過など「絶対に崩したくないルール」が増える場合は
+    // 個人の希望が増えるのとは区別して、はっきり警告する。
+    const d = diffViolations(beforeC, countByType(AppState.violations));
     const go = (typeof o.confirm === 'function')
-      ? await o.confirm(before, after)
+      ? await o.confirm(before, after, d)
       : confirm(`この変更でエラーが ${before}件 → ${after}件 に増えます。\nそれでも実行しますか？`);
-    if (!go) { restore(); return { ok: false, before, after, cancelled: true, message: `エラーが ${before}件 → ${after}件 に増えるため取り消しました` }; }
+    if (!go) { restore(); return { ok: false, before, after, diff: d, cancelled: true, message: `エラーが ${before}件 → ${after}件 に増えるため取り消しました` }; }
     autoSave();
-    return { ok: true, before, after, worsened: true, message: `エラー ${before}件 → ${after}件（${after - before}件増）` };
+    return { ok: true, before, after, diff: d, worsened: true, hadCritical: d.crit.length > 0,
+             message: `エラー ${before}件 → ${after}件（${after - before}件増）` };
   }
   autoSave();
   return { ok: true, before, after, message: `エラー ${before}件 → ${after}件` };
@@ -2293,18 +2342,34 @@ function showSurplusResolveModal() {
     $m.innerHTML = text;
   };
 
-  // 「エラーが増えますが実行しますか？」をモーダル内で聞く
-  const askWorsen = (before, after) => new Promise(resolve => {
+  // 「エラーが増えますが実行しますか？」をモーダル内で聞く。
+  // 公休不足・連勤超過などの重要ルールが増える場合は、個人の希望と分けて表示する。
+  const askWorsen = (before, after, d) => new Promise(resolve => {
     const $m = modal.querySelector('#resolveMsg');
     if (!$m) return resolve(confirm(`エラーが ${before}件 → ${after}件 に増えます。実行しますか？`));
+    const crit = (d && d.crit) || [], soft = (d && d.soft) || [];
+    const danger = crit.length > 0;
+    const chips = (rows, color) => rows.map(r =>
+      `<span style="display:inline-block;margin:3px 6px 0 0;padding:2px 9px;border-radius:999px;font-size:12px;
+        background:color-mix(in srgb, ${color} 20%, var(--surface));border:1px solid color-mix(in srgb, ${color} 45%, transparent)">
+        ${escapeHtml(r.label)} +${r.n}件</span>`).join('');
     $m.style.display = 'block';
-    $m.style.background = 'color-mix(in srgb, var(--warning, #e6a700) 16%, var(--surface))';
-    $m.style.border = '1px solid color-mix(in srgb, var(--warning, #e6a700) 45%, transparent)';
-    $m.innerHTML = `⚠️ <b>この指定を入れると、エラーが ${before}件 → ${after}件 に増えます（${after - before}件増）。</b><br>
-      <span class="hint">それでもこの指定を優先しますか？</span>
-      <div style="margin-top:8px;display:flex;gap:8px">
-        <button id="worsenYes" class="btn btn-primary">増えても実行する</button>
-        <button id="worsenNo" class="btn">やめる</button>
+    $m.style.background = danger ? 'color-mix(in srgb, var(--danger) 14%, var(--surface))'
+                                 : 'color-mix(in srgb, var(--warning, #e6a700) 16%, var(--surface))';
+    $m.style.border = '1px solid ' + (danger ? 'color-mix(in srgb, var(--danger) 50%, transparent)'
+                                             : 'color-mix(in srgb, var(--warning, #e6a700) 45%, transparent)');
+    $m.innerHTML = `
+      ${danger
+        ? `<div style="font-size:14px"><b>⛔ 崩してはいけないルールが増えます</b></div>
+           <div style="margin:4px 0 8px">${chips(crit, 'var(--danger)')}</div>`
+        : `<div style="font-size:14px"><b>⚠️ 個人の希望のエラーだけが増えます</b></div>
+           <div class="hint" style="margin:2px 0 6px">公休数・連勤・人員などの重要なルールは崩れません。</div>`}
+      ${soft.length ? `<div class="hint" style="margin-top:6px">個人の希望：</div>
+                       <div style="margin:2px 0 8px">${chips(soft, 'var(--warning, #e6a700)')}</div>` : ''}
+      <div style="margin-top:6px">合計 <b>${before}件 → ${after}件</b>（${after - before}件増）</div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button id="worsenYes" class="btn ${danger ? '' : 'btn-primary'}">${danger ? '重要なルールを崩してでも実行する' : '実行する'}</button>
+        <button id="worsenNo" class="btn ${danger ? 'btn-primary' : ''}">やめる</button>
       </div>`;
     $m.querySelector('#worsenYes').addEventListener('click', () => resolve(true));
     $m.querySelector('#worsenNo').addEventListener('click', () => resolve(false));
@@ -2389,6 +2454,14 @@ function showSurplusResolveModal() {
     if (lastMsg) say(lastMsg.text, lastMsg.ok, true);   // 再描画後もメッセージを残す
   };
 
+  // 実行後の結果に「何が増えたか」を添える
+  const diffText = (r) => {
+    const d = r && r.diff; if (!d) return '';
+    const all = (d.crit || []).concat(d.soft || []);
+    if (!all.length) return '';
+    return `<br><span class="hint">増えた内訳：${all.map(x => escapeHtml(x.label) + ' +' + x.n).join('、')}</span>`;
+  };
+
   const busy = (on) => modal.querySelectorAll('button, select').forEach(el => {
     if (el.id === 'resolveClose') return;             // 閉じるボタンは常に押せる
     el.disabled = on;
@@ -2418,7 +2491,7 @@ function showSurplusResolveModal() {
         s.paidLeave = (parseInt(s.paidLeave) || 0) + 1;   // 有給の消化日数を1日増やす
       }, { adjust: false, confirm: askWorsen });
       busy(false);
-      say(r.ok ? `${r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を有給にしました（${r.message}）。有給日数は ${s.paidLeave}日 になりました。`
+      say(r.ok ? `${r.hadCritical ? '⛔' : r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を有給にしました（${r.message}）。有給日数は ${s.paidLeave}日 になりました。${diffText(r)}`
                : `↩ ${escapeHtml(s.name)} ${d}日 の有給を取り消しました。${r.message}`, r.ok && !r.worsened);
       renderResultTable(); render();
     });
@@ -2442,7 +2515,7 @@ function showSurplusResolveModal() {
         AppState.shifts[id][d] = key;
       }, { adjust: true, k: 24, confirm: askWorsen });
       busy(false);
-      say(r.ok ? `${r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。`
+      say(r.ok ? `${r.hadCritical ? '⛔' : r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。${diffText(r)}`
                : `↩ ${escapeHtml(s.name)} ${d}日 の「${escapeHtml(key)}」を取り消しました。${r.message}`, r.ok && !r.worsened);
       renderResultTable(); render();
     });
