@@ -122,8 +122,11 @@ self.addEventListener('message', async (e) => {
         const MIN_PER = 5;                       // 1段あたりの最低秒数
         let wLeft = tiers.reduce((a, t) => a + (t.w || 1), 0);   // 残りの重みの合計
         // 仕上げ用に25%を取り置く。段が持ち時間を全部使い切ると仕上げが動かない。
-        const polishBudget = Math.max(8, Math.floor(opts.time_limit * 0.25));
+        // じっくりモードは「一巡目」を短めに切り上げ、残ったルールを何度でも
+        // 詰め直すラウンドに時間を厚く回す（0件を狙うのに効く）。
+        const polishBudget = Math.max(8, Math.floor(opts.time_limit * (deep ? 0.55 : 0.25)));
         let remain = opts.time_limit - polishBudget;
+        const bIdx = [];           // 段ごとの上限（budgets の何番目か）
         for (let ti = 0; ti < tiers.length; ti++) {
           const t = tiers[ti];
           const left = tiers.length - ti - 1;     // この段より後に残っている段数
@@ -167,6 +170,7 @@ self.addEventListener('message', async (e) => {
           if (!okStrict) {
             if (sol) {
               // 今の解での件数を上限として引き継ぎ、後の段で悪化させないようにする
+              bIdx[ti] = budgets.length;
               budgets.push({ names: MILP.slackNames(m.parts, t.types), max: MILP.slackTotal(sol, m.parts, t.types) });
               (t.types || []).forEach(ty => protect.push(ty));
             }
@@ -175,13 +179,60 @@ self.addEventListener('message', async (e) => {
           sol = s2;
           // この段で達成した件数を上限として固定（以後の段で悪化させない）
           const got = MILP.slackTotal(sol, m.parts, t.types);
+          bIdx[ti] = budgets.length;
           budgets.push({ names: MILP.slackNames(m.parts, t.types), max: got });
           (t.types || []).forEach(ty => protect.push(ty));
+        }
+
+        // ── じっくりモード: 0にならなかった段を、何度でも詰め直す ──────
+        // 一巡しただけでは詰め切れない段がある。残っている段だけを対象に、
+        // 探索の広さを少しずつ広げながら、全部0になるか時間切れになるまで繰り返す。
+        let polishLeft = polishBudget + remain;
+        if (deep && sol) {
+          const KS = [80, 160, 320, 0];   // 探索の広さ（0＝制限なし＝一から探し直す）
+          let ki = 0;
+          const reserve = Math.max(8, Math.floor(polishLeft * 0.15));  // 仕上げ用に残す
+          let budget = polishLeft - reserve;
+          while (budget >= 10) {
+            // まだ0になっていない段を、件数の多い順に詰め直す
+            const pend = [];
+            tiers.forEach((t, i) => {
+              const cur = MILP.slackTotal(sol, m.parts, t.types);
+              if (cur > 0) pend.push({ t, i, cur });
+            });
+            if (!pend.length) break;                    // 全段0＝完成なので即終了
+            pend.sort((a, b) => b.cur - a.cur);
+            let improved = false;
+            for (const p of pend) {
+              if (budget < 10) break;
+              const slice = Math.max(10, Math.min(90, Math.floor(budget / pend.length)));
+              post(20 + Math.floor(((gi + 0.9) / groups.length) * 60),
+                   `【${g.label || g.key}】「${p.t.label}」の残り${p.cur}件を詰め直しています…`);
+              const q0 = Date.now();
+              const nb = KS[ki] ? { ones: MILP.onesOf(sol), k: KS[ki] } : null;
+              const s5 = solver.solve(
+                MILP.composeLP(m.parts, { types: p.t.types, budgets, neighbor: nb }),
+                Object.assign({}, opts, { time_limit: slice }));
+              const used = Math.max(1, Math.round((Date.now() - q0) / 1000));
+              budget -= used; polishLeft = Math.max(0, polishLeft - used);
+              if (!MILP.solutionIsValid(s5, m.parts, budgets)) continue;
+              const got2 = MILP.slackTotal(s5, m.parts, p.t.types);
+              if (got2 < p.cur) {
+                sol = s5;
+                improved = true;
+                // 良くなった分だけ上限も締め直す（後の詰め直しで戻らないように）
+                const bi = bIdx[p.i];
+                if (bi != null) budgets[bi].max = got2;
+              }
+            }
+            // どの段も良くならなければ、探索の広さを一段広げて再挑戦
+            if (!improved) { ki++; if (ki >= KS.length) break; }
+          }
         }
         // ── 仕上げ ────────────────────────────────────────
         // 段が一通り終わったら、余った時間で「いまの解の近く」を何度も探し直し、
         // 全ルールの合計罰点を下げる。良くならなければ即やめるので無駄がない。
-        let polish = polishBudget + remain, best = null;      // 取り置き分＋段で余った分
+        let polish = polishLeft, best = null;      // 取り置き分＋段で余った分
         while (polish >= 4 && sol) {
           const p0 = Date.now();
           // budgets を付けるのが重要。付けないと、細かいルールを良くするために
