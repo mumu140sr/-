@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=161', 'optimizer.js?v=161', 'milp-core.js?v=161');
+self.importScripts('data.js?v=162', 'optimizer.js?v=162', 'milp-core.js?v=162');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=161'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=162'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -120,14 +120,17 @@ self.addEventListener('message', async (e) => {
         // 時間配分: 早い段は数秒で終わるので、余った時間を後の段に回す。
         // ただし1つの段が全部使い切って後の段を飢えさせないよう、必ず後続分を残す。
         const MIN_PER = 5;                       // 1段あたりの最低秒数
+        let wLeft = tiers.reduce((a, t) => a + (t.w || 1), 0);   // 残りの重みの合計
         // 仕上げ用に25%を取り置く。段が持ち時間を全部使い切ると仕上げが動かない。
         const polishBudget = Math.max(8, Math.floor(opts.time_limit * 0.25));
         let remain = opts.time_limit - polishBudget;
         for (let ti = 0; ti < tiers.length; ti++) {
           const t = tiers[ti];
           const left = tiers.length - ti - 1;     // この段より後に残っている段数
-          // 残り時間を「この段＋後続の段」で等分する。1つの段が使い切れない。
-          const cap = Math.max(MIN_PER, Math.floor(remain / (left + 1)));
+          // 残り時間を、段ごとの重みで配分する。等分にすると、数秒で終わる段にも
+          // 時間を取られ、5〜10秒必要な段が時間切れになってしまう。
+          const cap = Math.max(MIN_PER, Math.floor(remain * (t.w || 1) / Math.max(1, wLeft)));
+          wLeft -= (t.w || 1);
           post(20 + Math.floor(((gi + (ti + 1) / (tiers.length + 1)) / groups.length) * 60),
                `【${g.label || g.key}】第${ti + 1}段「${t.label}」を0に近づけています…`);
           const t0 = Date.now();
@@ -145,6 +148,17 @@ self.addEventListener('message', async (e) => {
               Object.assign({}, opts, { time_limit: Math.max(3, cap - Math.round((Date.now() - t0) / 1000)) }));
             // 近傍探索でも「前の段を悪化させていないか」は必ず確認する
             if (MILP.solutionIsValid(s3, m.parts, budgets)) { s2 = s3; okStrict = true; }
+          } else if (okStrict && String(s2.Status) !== 'Optimal' && sol) {
+            // ②' 時間切れで中途半端な答えしか出なかった場合、残り時間を捨てずに
+            //     近傍探索でもう一度探し、件数が少ない方を採用する。
+            const rest = cap - Math.round((Date.now() - t0) / 1000);
+            if (rest >= 3) {
+              const s3 = solver.solve(
+                MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(sol), k: 60 } }),
+                Object.assign({}, opts, { time_limit: rest }));
+              if (MILP.solutionIsValid(s3, m.parts, budgets) &&
+                  MILP.slackTotal(s3, m.parts, t.types) < MILP.slackTotal(s2, m.parts, t.types)) s2 = s3;
+            }
           }
           remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
           if (String(s2 && s2.Status) !== 'Optimal') allOptimal = false;

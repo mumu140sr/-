@@ -18,21 +18,25 @@
 
   // 段階最適化の順番。大事なものから順に0を目指し、達成できたら以後は動かさない。
   // 上の段ほど「店舗が回らなくなる」影響が大きいルール。
+  // w = 時間配分の重み。実測（実データ・全ルールON）で各段が0件に達するのに
+  // 必要だった秒数をもとに決めている。上位4段は数秒で終わるので小さく、
+  // リズム〜休み方は5〜10秒必要なので大きく、最後の3段は時間を食う割に
+  // 効果が小さいので小さくしている。
   const TIERS = [
-    { label: '人員・役職',     types: ['understaff', 'resp-duplicate', 'skill-late', 'vicemanager-absent', 'special-day'] },
-    { label: '公休・有給',     types: ['off-count', 'paid'] },
-    { label: '連勤・遅→早',    types: ['consecutive', 'late-early'] },
-    { label: '単発出勤・定数',  types: ['single-work', 'overstaff'] },
-    { label: 'リズム',        types: ['category-switch', 'bad-rest', 'long-rest', 'pair-rest'] },
+    { label: '人員・役職',     w: 2, types: ['understaff', 'resp-duplicate', 'skill-late', 'vicemanager-absent', 'special-day'] },
+    { label: '公休・有給',     w: 2, types: ['off-count', 'paid'] },
+    { label: '連勤・遅→早',    w: 2, types: ['consecutive', 'late-early'] },
+    { label: '単発出勤・定数',  w: 3, types: ['single-work', 'overstaff'] },
+    { label: 'リズム',        w: 4, types: ['category-switch', 'bad-rest', 'long-rest', 'pair-rest'] },
     // 個人の希望は、まとめて1段にすると重すぎて解けないため小分けにする。
     // 1段が小さいほど「大事なルールを守ったままの組合せ」を見つけやすい。
-    { label: '早遅の希望',     types: ['pref-mismatch', 'skill-short', 'surplus-unwanted'] },
-    { label: '土日休み',       types: ['weekend-pref'] },
-    { label: '休み方',        types: ['rest-style'] },
-    { label: '連休の回数',     types: ['pair-rest-count'] },
-    { label: '早遅バランス',   types: ['balance-diff'] },
-    { label: '単発休み',       types: ['single-off'] },
-    { label: '上下関係',       types: ['hierarchy'] },
+    { label: '早遅の希望',     w: 4, types: ['pref-mismatch', 'skill-short', 'surplus-unwanted'] },
+    { label: '土日休み',       w: 4, types: ['weekend-pref'] },
+    { label: '休み方',        w: 3, types: ['rest-style'] },
+    { label: '連休の回数',     w: 2, types: ['pair-rest-count'] },
+    { label: '早遅バランス',   w: 1, types: ['balance-diff'] },
+    { label: '単発休み',       w: 1, types: ['single-off'] },
+    { label: '上下関係',       w: 1, types: ['hierarchy'] },
   ];
 
   // 1部門グループ分の LP を作る。戻り値 { lp, vars, roles, gStaff, days }
