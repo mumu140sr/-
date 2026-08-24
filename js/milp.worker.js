@@ -162,6 +162,19 @@ self.addEventListener('message', async (e) => {
           budgets.push({ names: MILP.slackNames(m.parts, t.types), max: got });
           (t.types || []).forEach(ty => protect.push(ty));
         }
+        // ── 仕上げ ────────────────────────────────────────
+        // 段が一通り終わったら、余った時間で「いまの解の近く」を何度も探し直し、
+        // 全ルールの合計罰点を下げる。良くならなければ即やめるので無駄がない。
+        let polish = remain;
+        while (polish >= 4 && sol) {
+          const p0 = Date.now();
+          const s4 = solver.solve(MILP.composeLP(m.parts, { neighbor: { ones: MILP.onesOf(sol), k: 60 } }),
+                                  Object.assign({}, opts, { time_limit: Math.min(8, polish) }));
+          polish -= Math.max(1, Math.round((Date.now() - p0) / 1000));
+          if (!MILP.solutionIsValid(s4, m.parts, [])) break;
+          if (MILP.objTotal(s4, m.parts) < MILP.objTotal(sol, m.parts) - 1e-6) sol = s4;
+          else break;      // これ以上良くならない
+        }
       }
       if (!sol) sol = solver.solve(m.lp, opts);
       // Status が Optimal 以外＝時間切れなどで打ち切り（＝もっと良い解がある可能性）

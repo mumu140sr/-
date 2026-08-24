@@ -641,6 +641,17 @@
     return out;
   }
 
+  // 解の「総罰点」（全ルールの重み付き合計）。仕上げで良くなったか比べるのに使う。
+  function objTotal(sol, parts) {
+    if (!sol || !sol.Columns) return Infinity;
+    let v = 0;
+    parts.objEntries.forEach(e => {
+      const c = sol.Columns[e.name];
+      if (c && c.Primal > 0) v += e.w * c.Primal;
+    });
+    return v;
+  }
+
   // 解から、指定ルールのスラック合計（＝そのルールの違反件数）を取り出す
   function slackTotal(sol, parts, types) {
     let n = 0;
@@ -675,5 +686,5 @@
     });
   }
 
-  global.MILP = { buildGroupModel, applyGroupSolution, composeLP, slackTotal, slackNames, solutionIsValid, onesOf, TIERS };
+  global.MILP = { buildGroupModel, applyGroupSolution, composeLP, slackTotal, slackNames, solutionIsValid, onesOf, objTotal, TIERS };
 })(typeof self !== 'undefined' ? self : this);
