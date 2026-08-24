@@ -357,6 +357,32 @@
         }
       }
 
+      // 週ごとに時間帯を1つへ寄せる（早番の週 / 遅番の週）。
+      // 「連勤中の切替」を1日ずつ数えるより、週単位でまとめて扱うほうが
+      // ソルバーにとって解きやすく、切替そのものが起きにくくなる。
+      {
+        const wCSw = ruleW('category-switch', P.categorySwitch || 3000);
+        if (wCSw > 0) {
+          for (let w0 = 1; w0 <= days; w0 += 7) {
+            const w1 = Math.min(days, w0 + 6);
+            let eT = [], lT = [], eC = 0, lC = 0;
+            for (let d = w0; d <= w1; d++) {
+              const o = cellTerms(s, d);
+              eT = eT.concat(realT(o.e)); lT = lT.concat(realT(o.l));
+              eC += constOf(o.e);         lC += constOf(o.l);
+            }
+            if (!eT.length || !lT.length) continue;      // 片方しか無い週は対象外
+            const wk = Math.floor(w0 / 7);
+            const bv = `bw_${si}_${wk}`; bin.add(bv);     // 1=遅番の週 / 0=早番の週
+            const sl = `bws_${si}_${wk}`; addSlack(sl, null, wCSw, 'category-switch');
+            const span = (w1 - w0 + 1);
+            // その週の遅番回数 ≤ span×bv ＋ はみ出し / 早番回数 ≤ span×(1−bv) ＋ はみ出し
+            cons.push(`bwl_${si}_${wk}: ${lT.join(' + ')} - ${span} ${bv} - ${sl} <= ${-lC}`);
+            cons.push(`bwe_${si}_${wk}: ${eT.join(' + ')} + ${span} ${bv} - ${sl} <= ${span - eC}`);
+          }
+        }
+      }
+
       // ── 個人の休みの希望（土日休み／休み方／連休回数）─────────────
       {
         // 土日休み希望: その日に出勤したら罰点。「絶対」は重く、「なるべく」は軽く。

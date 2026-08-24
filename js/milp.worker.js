@@ -120,7 +120,9 @@ self.addEventListener('message', async (e) => {
         // 時間配分: 早い段は数秒で終わるので、余った時間を後の段に回す。
         // ただし1つの段が全部使い切って後の段を飢えさせないよう、必ず後続分を残す。
         const MIN_PER = 5;                       // 1段あたりの最低秒数
-        let remain = opts.time_limit;
+        // 仕上げ用に25%を取り置く。段が持ち時間を全部使い切ると仕上げが動かない。
+        const polishBudget = Math.max(8, Math.floor(opts.time_limit * 0.25));
+        let remain = opts.time_limit - polishBudget;
         for (let ti = 0; ti < tiers.length; ti++) {
           const t = tiers[ti];
           const left = tiers.length - ti - 1;     // この段より後に残っている段数
@@ -165,7 +167,7 @@ self.addEventListener('message', async (e) => {
         // ── 仕上げ ────────────────────────────────────────
         // 段が一通り終わったら、余った時間で「いまの解の近く」を何度も探し直し、
         // 全ルールの合計罰点を下げる。良くならなければ即やめるので無駄がない。
-        let polish = remain;
+        let polish = polishBudget + remain;      // 取り置き分＋段で余った分
         while (polish >= 4 && sol) {
           const p0 = Date.now();
           const s4 = solver.solve(MILP.composeLP(m.parts, { neighbor: { ones: MILP.onesOf(sol), k: 60 } }),
