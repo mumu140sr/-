@@ -167,14 +167,19 @@ self.addEventListener('message', async (e) => {
         // ── 仕上げ ────────────────────────────────────────
         // 段が一通り終わったら、余った時間で「いまの解の近く」を何度も探し直し、
         // 全ルールの合計罰点を下げる。良くならなければ即やめるので無駄がない。
-        let polish = polishBudget + remain;      // 取り置き分＋段で余った分
+        let polish = polishBudget + remain, best = null;      // 取り置き分＋段で余った分
         while (polish >= 4 && sol) {
           const p0 = Date.now();
-          const s4 = solver.solve(MILP.composeLP(m.parts, { neighbor: { ones: MILP.onesOf(sol), k: 60 } }),
+          // budgets を付けるのが重要。付けないと、細かいルールを良くするために
+          // 人員不足や公休不足を悪化させた解が「総罰点が下がった」と誤判定される。
+          // （段ごとの解では、その段に関係しない罰点変数の値が抑えられていないため）
+          const s4 = solver.solve(MILP.composeLP(m.parts, { budgets, neighbor: { ones: MILP.onesOf(sol), k: 60 } }),
                                   Object.assign({}, opts, { time_limit: Math.min(8, polish) }));
           polish -= Math.max(1, Math.round((Date.now() - p0) / 1000));
-          if (!MILP.solutionIsValid(s4, m.parts, [])) break;
-          if (MILP.objTotal(s4, m.parts) < MILP.objTotal(sol, m.parts) - 1e-6) sol = s4;
+          if (!MILP.solutionIsValid(s4, m.parts, budgets)) break;
+          const prev = best === null ? Infinity : best;
+          const now  = MILP.objTotal(s4, m.parts);
+          if (now < prev - 1e-6) { sol = s4; best = now; }
           else break;      // これ以上良くならない
         }
       }
