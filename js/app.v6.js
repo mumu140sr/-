@@ -640,104 +640,6 @@ function showSurplusPopup() {
   modal.addEventListener('click', e => { if (e.target === modal) close(); });
 }
 
-/**
- * 🧭 修正ガイド: 残っているエラーごとに「1手で直る具体案」を提示し、
- * 「この修正を適用」ボタンで誰でも直せるようにするモーダル。
- */
-function showFixGuide() {
-  if (!AppState.generated) {
-    toast('シフトを生成してから実行してください', 'error');
-    return;
-  }
-  AppState.violations = checkViolations(AppState.shifts);
-  const total = AppState.violations.length;
-
-  const old = document.getElementById('fixGuideModal');
-  if (old) old.remove();
-
-  let body;
-  if (total === 0) {
-    body = `<p style="font-size:15px">🎉 エラーはありません。修正の必要はありません！</p>`;
-  } else {
-    const sugg = suggestViolationFixes(10);
-    const items = sugg.map((s, i) => {
-      const name = s.v.staffId
-        ? ((AppState.staff.find(m => m.id === s.v.staffId) || {}).name || '')
-        : '全体';
-      const dayStr = s.v.day > 0 ? ` (${s.v.day}日)` : '';
-      const head = `<div style="font-weight:700;margin-bottom:4px">${escapeHtml(name)}${dayStr}｜${escapeHtml(s.v.message)}</div>`;
-      if (s.desc) {
-        return `<div style="background:#f0fff4;border-left:4px solid #68d391;padding:10px 12px;border-radius:6px;margin-bottom:10px">
-          ${head}
-          <div style="color:#276749;margin-bottom:6px">✅ 直し方: <b>${escapeHtml(s.desc)}</b>
-            <span style="color:#718096">（エラー ${total}→${s.after}件）</span></div>
-          <button class="btn btn-primary" data-guide-apply="${i}" style="font-size:13px">この修正を適用</button>
-        </div>`;
-      }
-      return `<div style="background:#fffaf0;border-left:4px solid #f6ad55;padding:10px 12px;border-radius:6px;margin-bottom:10px">
-        ${head}
-        <div style="color:#975a16">⚠ ${escapeHtml(s.reason)}</div>
-      </div>`;
-    }).join('');
-    body = `
-      <p>残りエラー <b>${total}件</b>。緑のカードは<b>ボタン1つで直せます</b>（上から順に押すのがおすすめ。適用のたびに再計算されます）。</p>
-      ${items}
-      ${total > 10 ? `<p class="hint">※上位10件のみ表示。適用して減らすと次が表示されます。</p>` : ''}`;
-    // 適用データを保持
-    showFixGuide._sugg = sugg;
-  }
-
-  const modal = document.createElement('div');
-  modal.id = 'fixGuideModal';
-  modal.className = 'modal-overlay';
-  modal.innerHTML = `
-    <div class="modal-content" style="max-width:640px">
-      <div class="modal-header">
-        <h3 style="margin:0">🧭 修正ガイド</h3>
-        <button class="modal-close" id="fixGuideClose">✕</button>
-      </div>
-      <div class="modal-body" style="padding:16px">${body}</div>
-      <div style="padding:0 16px 16px;text-align:right">
-        <button class="btn" id="fixGuideOk">閉じる</button>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-
-  const close = () => modal.remove();
-  modal.querySelector('#fixGuideClose').addEventListener('click', close);
-  modal.querySelector('#fixGuideOk').addEventListener('click', close);
-  modal.addEventListener('click', e => { if (e.target === modal) close(); });
-
-  modal.querySelectorAll('button[data-guide-apply]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const s = (showFixGuide._sugg || [])[parseInt(btn.dataset.guideApply)];
-      if (!s || !s.move) return;
-      if (typeof recordShiftHistory === 'function') recordShiftHistory();
-      const sh = AppState.shifts, m = s.move;
-      if (m.kind === 'set') {
-        sh[m.sid][m.d] = m.to;
-      } else if (m.kind === 'swapDays') {
-        const a = sh[m.sid][m.d1], b = sh[m.sid][m.d2];
-        sh[m.sid][m.d1] = b; sh[m.sid][m.d2] = a;
-      } else if (m.kind === 'swapStaff') {
-        const a = sh[m.aId][m.d], b = sh[m.bId][m.d];
-        sh[m.aId][m.d] = b; sh[m.bId][m.d] = a;
-      } else if (m.kind === 'swapStaff2') {
-        // 2日連続で絡み合った違反用: 2人のシフトを両日とも入れ替える
-        [m.d1, m.d2].forEach(d => {
-          const a = sh[m.aId][d], b = sh[m.bId][d];
-          sh[m.aId][d] = b; sh[m.bId][d] = a;
-        });
-      }
-      AppState.violations = checkViolations(sh);
-      saveToStorage();
-      renderResultTable();
-      toast(`✅ 適用しました（残りエラー ${AppState.violations.length}件・Ctrl+Zで戻せます）`, 'success', 3000);
-      showFixGuide(); // 再計算して次の提案を表示
-    });
-  });
-}
-
 function renderReport(result) {
   const $c = document.getElementById('reportContent');
 
@@ -932,68 +834,14 @@ function setupResultPanel() {
     });
   }
 
-  // 🧩 かんたん調整: 手動修正(🔒)は保ったまま、玉突きの崩れだけを高速で吸収
+  // ⚖️ 余の解消
   const btnResolve = document.getElementById('btnResolveSurplus');
   if (btnResolve) btnResolve.addEventListener('click', () => {
     if (!AppState.generated) { toast('シフトを生成してから実行してください', 'error'); return; }
     showSurplusResolveModal();
   });
 
-  const btnQuick = document.getElementById('btnQuickAdjust');
-  if (btnQuick) {
-    btnQuick.addEventListener('click', () => {
-      if (!AppState.generated) {
-        toast('シフトを生成してから実行してください', 'error');
-        return;
-      }
-      const before = checkViolations(AppState.shifts).length;
-      if (before === 0) {
-        toast('エラーはありません 🎉', 'success');
-        return;
-      }
-      if (typeof recordShiftHistory === 'function') recordShiftHistory();
-      const backup = JSON.parse(JSON.stringify(AppState.shifts));
 
-      btnQuick.disabled = true;
-      btnQuick.textContent = '⏳ 調整中...';
-      // 🔒は保持したまま、いまの表から最小限だけ変えて調整する（悪化しない保証つき）。
-      // 表全体を作り直さないので、確認済みの並びが崩れず、数秒で終わる。
-      (async () => {
-        try {
-          if (typeof optimizeScheduleMILP !== 'function') throw new Error('数理最適化モジュール未読込（再読込してください）');
-          const res = await optimizeScheduleMILP(() => {}, { adjustMode: true, adjustK: 40, fastMode: true });
-          if (res.violations.length >= before) {
-            AppState.shifts = backup;
-            AppState.violations = checkViolations(backup);
-            if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-            toast('🧩では直せませんでした（変更なし）。もう一度押すか、🎯じっくり生成で作り直すか、関係する🔒を解除してください', 'info', 6000);
-          } else {
-            toast(`🧩 エラー ${before}件 → ${res.violations.length}件 に調整（最小限の変更・🔒は保持・Ctrl+Zで戻せます）`, 'success', 4000);
-          }
-          renderResultTable();
-          const reportCard = document.getElementById('reportCard');
-          if (reportCard && reportCard.style.display !== 'none') {
-            renderReport({ success: AppState.violations.length === 0,
-              score: AppState.violations.length, violations: AppState.violations });
-          }
-          saveToStorage();
-        } catch (e) {
-          console.error(e);
-          AppState.shifts = backup;
-          AppState.violations = checkViolations(backup);
-          if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-          toast('調整中にエラーが発生しました: ' + e.message, 'error');
-        } finally {
-          btnQuick.disabled = false;
-          btnQuick.textContent = '🧩 かんたん調整';
-        }
-      })();
-    });
-  }
-
-  // 🧭 修正ガイド: エラーごとに「1手で直る具体案」を提示してボタンで適用
-  const btnGuide = document.getElementById('btnFixGuide');
-  if (btnGuide) btnGuide.addEventListener('click', () => showFixGuide());
 
   // ↩ 元に戻す / ↪ やり直す
   const btnUndo = document.getElementById('btnUndo');
