@@ -3128,15 +3128,6 @@ function checkViolations(shifts) {
       }
     }
 
-    // 余剰休み（余）の希望どおりか。「付けない」設定の人に余が付いていたら知らせる。
-    if (surplusN > 0 && (s.surplusPref || '') === 'avoid' && ruleOn('surplus-unwanted')) {
-      violations.push({
-        staffId: s.id, day: 0, type: 'surplus-unwanted',
-        message: `⚠️ 「余を付けない」設定なのに余が ${surplusN}日 あります`,
-        action:  '出勤枠が足りていません。他の人の余剰休みを「優先して付ける」にするか、必要人数を見直してください',
-      });
-    }
-
     // 早遅バランス（早番多め/遅番多め など）のずれ。
     // 早番帯・遅番帯の両方に入れる人だけが対象（片方しか入れない人は判定しない）。
     if (ruleOn('balance-diff')) {
@@ -3791,7 +3782,6 @@ function runAIDiagnosis() {
       'event-absent':    '行事日の休み',
       'vicemanager-absent': '副店長不在の日',
       'balance-diff':    '早遅バランスのずれ',
-      'surplus-unwanted': '余剰休みの希望と不一致',
       'pair-rest-count': '連休回数が目安に不足',
       'special-day':     '特別日に副店長が責任者不在',
       'weekend-pref':    '土日休み希望',

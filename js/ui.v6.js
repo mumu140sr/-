@@ -303,7 +303,6 @@ const RULE_LEVEL_META = [
     num: { key: 'maxConsecutiveOff', min: 1, max: 14, def: 3,
            before: '上限', after: '日まで（これを超えるとエラー）' } },
   { g: '個人希望',   t: 'pref-mismatch',     l: '早遅希望（早可/遅可）', def: 'must' },
-  { g: '個人希望',   t: 'surplus-unwanted',  l: '余剰休み（余）の希望', def: 'should' },
   { g: '個人希望',   t: 'balance-diff',      l: '早遅バランス（早番多め等）', def: 'should',
     num: { key: 'balanceTolerance', min: 0, max: 15, def: 2,
            before: '許容', after: '日までのずれは許す' } },
@@ -824,7 +823,6 @@ function setupStaffPanel() {
       paidLeave:       0,
       prefs:           ['早可', '遅可'],
       balance:         'balanced',
-      surplusPref:     '',
       prevConsecutive: 0,
       prevLastShift:   '',
       note:            '',
@@ -1007,14 +1005,6 @@ function renderStaffTable() {
       <td>
         <input type="number" min="0" max="31" value="${s.paidLeave || 0}"
                data-field="paidLeave" data-id="${s.id}" style="width:50px"/>
-      </td>
-      <td>
-        <select data-field="surplusPref" data-id="${s.id}" style="min-width:150px"
-                title="人手が余った月に「余」を付けるかどうか。付けない＝優先して出勤に回します">
-          ${Object.entries(SURPLUS_PREF).map(([k, v]) =>
-            `<option value="${k}" ${(s.surplusPref || '') === k ? 'selected' : ''}>${v.label}</option>`
-          ).join('')}
-        </select>
       </td>
       <td>
         <div class="shift-pref">
@@ -2191,11 +2181,12 @@ function showRelaxModal() {
   });
 }
 
+
 /* ===========================================
-   余の解消（余剰コマを 有給 or 出勤 に振り替える）
+   余の解消（余ったコマを 有給 or 出勤 に振り替える）
    最終的にコマ数をぴったりにするための画面。
-   「有給にするか定数を増やすか」は人が判断し、
-   アプリは “エラーを増やさない” ことだけを保証する。
+   「誰を・どの日に・どのシフトへ」は人が指定する。
+   アプリはエラーの増減を計算して知らせ、実行するかは人が決める。
    =========================================== */
 
 // いま表に出ている「余」を一覧にする
@@ -2230,9 +2221,10 @@ function candidateShiftsFor(staff, day) {
   });
 }
 
-// 変更を試して、エラーが増えたら元に戻す。増えなければ確定。
+// 変更を試して、エラーの増減を返す。confirm で「増えても実行するか」を人に聞く。
 // @returns {ok:boolean, before:number, after:number, message:string}
 async function trySurplusChange(apply, opts) {
+  const o = opts || {};
   const backup = {
     shifts:  JSON.parse(JSON.stringify(AppState.shifts)),
     req:     JSON.parse(JSON.stringify(AppState.requests)),
@@ -2241,16 +2233,7 @@ async function trySurplusChange(apply, opts) {
     dailyC:  JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
     staff:   JSON.parse(JSON.stringify(AppState.staff)),
   };
-  const before = checkViolations(AppState.shifts).length;
-  apply();
-  // 周りのつじつまを、最小限の変更で合わせる
-  if (opts && opts.adjust && typeof optimizeScheduleMILP === 'function') {
-    try { await optimizeScheduleMILP(() => {}, { adjustMode: true, adjustK: (opts.k || 24), fastMode: true }); }
-    catch (_) { /* 調整できなくてもそのまま検証する */ }
-  }
-  AppState.violations = checkViolations(AppState.shifts);
-  const after = AppState.violations.length;
-  if (after > before) {
+  const restore = () => {
     AppState.shifts = backup.shifts;
     AppState.requests = backup.req;
     AppState.fixedShifts = backup.fixed;
@@ -2258,57 +2241,47 @@ async function trySurplusChange(apply, opts) {
     AppState.dailyRequirementsCast = backup.dailyC;
     AppState.staff = backup.staff;
     AppState.violations = checkViolations(AppState.shifts);
-    return { ok: false, before, after, message: `エラーが ${before}件 → ${after}件 に増えるため取り消しました` };
+  };
+  const before = checkViolations(AppState.shifts).length;
+  apply();
+  // 周りのつじつまを、最小限の変更で合わせる
+  if (o.adjust && typeof optimizeScheduleMILP === 'function') {
+    try { await optimizeScheduleMILP(() => {}, { adjustMode: true, adjustK: (o.k || 24), fastMode: true }); }
+    catch (_) { /* 調整できなくてもそのまま検証する */ }
+  }
+  AppState.violations = checkViolations(AppState.shifts);
+  const after = AppState.violations.length;
+  if (after > before) {
+    // エラーが増える指定は、取り消さずに本人へ確認する。
+    // 「どうしてもこの人をこの日に入れたい」を通せるようにするため。
+    const go = (typeof o.confirm === 'function')
+      ? await o.confirm(before, after)
+      : confirm(`この変更でエラーが ${before}件 → ${after}件 に増えます。\nそれでも実行しますか？`);
+    if (!go) { restore(); return { ok: false, before, after, cancelled: true, message: `エラーが ${before}件 → ${after}件 に増えるため取り消しました` }; }
+    autoSave();
+    return { ok: true, before, after, worsened: true, message: `エラー ${before}件 → ${after}件（${after - before}件増）` };
   }
   autoSave();
   return { ok: true, before, after, message: `エラー ${before}件 → ${after}件` };
 }
 
 function showSurplusResolveModal() {
-  const cells = listSurplusCells();
   const modal = document.createElement('div');
   // 生成直後のポップアップ(.modal-overlay, z-index 10001)より前面に出す
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10050;padding:16px';
 
-  let lastMsg = null;      // 直近の結果メッセージ（再描画で消えないように覚えておく）
-  const render = () => {
-    const list = listSurplusCells();
-    const byStaff = {};
-    list.forEach(c => { (byStaff[c.id] || (byStaff[c.id] = { name: c.name, days: [] })).days.push(c.day); });
-    const body = Object.keys(byStaff).length ? Object.keys(byStaff).map(id => {
-      const s = AppState.staff.find(x => x.id === id) || {};
-      const g = byStaff[id];
-      const rows = g.days.map(d => {
-        const cands = candidateShiftsFor(s, d);
-        const sel = cands.length
-          ? `<select data-shift-for="${id}" data-day="${d}" style="min-width:88px">${cands.map(k => `<option value="${k}">${k}</option>`).join('')}</select>`
-          : '<span class="hint">出勤に回せるシフトなし（責任者・総務は1日1人のため増やせません）</span>';
-        return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px dashed var(--border)">
-          <b style="min-width:56px">${d}日</b>
-          <button class="btn" data-paid="${id}" data-day="${d}">有給にする</button>
-          ${sel}
-          <button class="btn" data-work="${id}" data-day="${d}" ${cands.length ? '' : 'disabled'}>出勤にする（定数+1）</button>
-        </div>`;
-      }).join('');
-      return `<div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0;background:var(--surface-2)">
-        <div style="font-weight:700;margin-bottom:2px">${escapeHtml(g.name)}　<span class="hint">余 ${g.days.length}コマ・有給 現在${s.paidLeave || 0}日</span></div>
-        ${rows}
-      </div>`;
-    }).join('') : '<div class="hint" style="padding:12px 0">余はありません 🎉 コマ数はぴったりです。</div>';
-
-    modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:760px;width:100%;max-height:85vh;overflow:auto;padding:20px">
-      <h3 style="margin:0 0 4px">⚖️ 余の解消</h3>
-      <p class="hint" style="margin:0 0 10px">
-        余（人員余り）のコマを、<b>有給</b>にするか、<b>その日の必要人数を1人増やして出勤</b>にするかを選べます。
-        どちらにするかはご判断ください。<b>どちらの操作でも、エラーが増える場合は自動で取り消します。</b>
-      </p>
-      <div id="resolveMsg" style="display:none;margin:10px 0;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.7"></div>
-      ${body}
-      <div style="text-align:right;margin-top:12px"><button id="resolveClose" class="btn btn-primary">閉じる</button></div>
-    </div>`;
-    bind();
-    if (lastMsg) say(lastMsg.text, lastMsg.ok, true);   // 再描画後もメッセージを残す
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const WD = ['日', '月', '火', '水', '木', '金', '土'];
+  const dayLabel = (d) => {
+    const dt = new Date(AppState.settings.targetMonth + '-' + String(d).padStart(2, '0') + 'T00:00:00');
+    return `${d}日(${WD[dt.getDay()] || ''})`;
   };
+  // その人のその日の状態を一言で（余 / 公休 / 出勤中 など）
+  const cellOf = (id, d) => (AppState.shifts[id] || {})[d] || '';
+
+  let lastMsg = null;      // 直近の結果メッセージ（再描画で消えないように覚えておく）
+  let selPaid = { id: '', day: '' };
+  let selWork = { id: '', day: '', key: '' };
 
   const say = (text, ok, keep) => {
     if (!keep) lastMsg = { text, ok };
@@ -2320,37 +2293,140 @@ function showSurplusResolveModal() {
     $m.innerHTML = text;
   };
 
+  // 「エラーが増えますが実行しますか？」をモーダル内で聞く
+  const askWorsen = (before, after) => new Promise(resolve => {
+    const $m = modal.querySelector('#resolveMsg');
+    if (!$m) return resolve(confirm(`エラーが ${before}件 → ${after}件 に増えます。実行しますか？`));
+    $m.style.display = 'block';
+    $m.style.background = 'color-mix(in srgb, var(--warning, #e6a700) 16%, var(--surface))';
+    $m.style.border = '1px solid color-mix(in srgb, var(--warning, #e6a700) 45%, transparent)';
+    $m.innerHTML = `⚠️ <b>この指定を入れると、エラーが ${before}件 → ${after}件 に増えます（${after - before}件増）。</b><br>
+      <span class="hint">それでもこの指定を優先しますか？</span>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button id="worsenYes" class="btn btn-primary">増えても実行する</button>
+        <button id="worsenNo" class="btn">やめる</button>
+      </div>`;
+    $m.querySelector('#worsenYes').addEventListener('click', () => resolve(true));
+    $m.querySelector('#worsenNo').addEventListener('click', () => resolve(false));
+  });
+
+  const staffOptions = (selId) => (AppState.staff || []).map(s =>
+    `<option value="${s.id}" ${selId === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
+
+  // 日付の選択肢。いまの状態（余・公休・出勤中）を併記して選びやすくする
+  const dayOptions = (id, selDay) => {
+    let out = '';
+    for (let d = 1; d <= days; d++) {
+      const cur = cellOf(id, d);
+      const tag = cur === '余' ? '・余' : cur === '公' ? '・公休' : cur === '有' ? '・有給' : cur ? '・' + cur : '';
+      out += `<option value="${d}" ${String(selDay) === String(d) ? 'selected' : ''}>${dayLabel(d)}${tag}</option>`;
+    }
+    return out;
+  };
+
+  const render = () => {
+    const list = listSurplusCells();
+    const total = list.length;
+    // 余の内訳（誰に何コマ）
+    const byStaff = {};
+    list.forEach(c => { (byStaff[c.id] || (byStaff[c.id] = { name: c.name, days: [] })).days.push(c.day); });
+    const breakdown = total
+      ? Object.keys(byStaff).map(id => `<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 8px;border-radius:999px;background:var(--surface-3);font-size:12px">
+          ${escapeHtml(byStaff[id].name)} ${byStaff[id].days.length}コマ（${byStaff[id].days.join('・')}日）</span>`).join('')
+      : '<span class="hint">余はありません 🎉 コマ数はぴったりです。</span>';
+
+    if (!selPaid.id && AppState.staff.length) selPaid.id = AppState.staff[0].id;
+    if (!selWork.id && AppState.staff.length) selWork.id = AppState.staff[0].id;
+    if (!selPaid.day && list.length) selPaid.day = list[0].day;
+    if (!selWork.day && list.length) selWork.day = list[0].day;
+
+    const wStaff = AppState.staff.find(x => x.id === selWork.id) || {};
+    const cands = candidateShiftsFor(wStaff, parseInt(selWork.day) || 1);
+    if (cands.length && !cands.includes(selWork.key)) selWork.key = cands[0];
+
+    const pStaff = AppState.staff.find(x => x.id === selPaid.id) || {};
+
+    modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:820px;width:100%;max-height:85vh;overflow:auto;padding:20px">
+      <h3 style="margin:0 0 4px">⚖️ 余の解消</h3>
+      <p class="hint" style="margin:0 0 10px">
+        余（人員余り）を、<b>有給</b>にするか、<b>その日の必要人数を1人増やして出勤</b>にするかで埋めます。
+        <b>誰を・どの日に入れるかは、あなたが自由に指定できます。</b>
+        エラーが増える指定は警告しますが、実行するかはご自身で選べます。
+      </p>
+
+      <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0;background:var(--surface-2)">
+        <div style="font-weight:700;margin-bottom:6px">残りの余：<span style="font-size:18px">${total}</span> コマ</div>
+        <div>${breakdown}</div>
+      </div>
+
+      <div id="resolveMsg" style="display:none;margin:10px 0;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.7"></div>
+
+      <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0">
+        <div style="font-weight:700;margin-bottom:8px">🏖 有給を入れる</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="paidStaff" style="min-width:150px">${staffOptions(selPaid.id)}</select>
+          <select id="paidDay" style="min-width:130px">${dayOptions(selPaid.id, selPaid.day)}</select>
+          <button id="paidGo" class="btn btn-primary">有給にする</button>
+          <span class="hint">現在の有給日数：${pStaff.paidLeave || 0}日 → 実行すると +1日</span>
+        </div>
+      </div>
+
+      <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0">
+        <div style="font-weight:700;margin-bottom:8px">👥 出勤を増やす（その日の必要人数を+1）</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="workStaff" style="min-width:150px">${staffOptions(selWork.id)}</select>
+          <select id="workDay" style="min-width:130px">${dayOptions(selWork.id, selWork.day)}</select>
+          ${cands.length
+            ? `<select id="workKey" style="min-width:100px">${cands.map(k => `<option value="${k}" ${selWork.key === k ? 'selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>
+               <button id="workGo" class="btn btn-primary">出勤にする（定数+1）</button>`
+            : '<span class="hint">この人が入れるシフトがありません（責任者・総務は1日1人のため増やせません）</span>'}
+        </div>
+      </div>
+
+      <div style="text-align:right;margin-top:12px"><button id="resolveClose" class="btn">閉じる</button></div>
+    </div>`;
+    bind();
+    if (lastMsg) say(lastMsg.text, lastMsg.ok, true);   // 再描画後もメッセージを残す
+  };
+
   const busy = (on) => modal.querySelectorAll('button, select').forEach(el => {
     if (el.id === 'resolveClose') return;             // 閉じるボタンは常に押せる
-    el.disabled = on ? true : (el.dataset.work != null ? !candidateShiftsFor(
-      AppState.staff.find(x => x.id === el.dataset.work) || {}, parseInt(el.dataset.day)).length : false);
+    el.disabled = on;
   });
 
   const bind = () => {
-    modal.querySelector('#resolveClose').addEventListener('click', () => { modal.remove(); refreshAllUI(); });
+    const $ = (id) => modal.querySelector('#' + id);
+    $('resolveClose').addEventListener('click', () => { modal.remove(); refreshAllUI(); });
 
-    modal.querySelectorAll('[data-paid]').forEach(b => b.addEventListener('click', async () => {
-      const id = b.dataset.paid, d = parseInt(b.dataset.day);
-      const s = AppState.staff.find(x => x.id === id); if (!s) return;
+    $('paidStaff').addEventListener('change', e => { selPaid.id = e.target.value; render(); });
+    $('paidDay').addEventListener('change', e => { selPaid.day = e.target.value; });
+    $('workStaff').addEventListener('change', e => { selWork.id = e.target.value; selWork.key = ''; render(); });
+    $('workDay').addEventListener('change', e => { selWork.day = e.target.value; selWork.key = ''; render(); });
+    if ($('workKey')) $('workKey').addEventListener('change', e => { selWork.key = e.target.value; });
+
+    $('paidGo').addEventListener('click', async () => {
+      const id = selPaid.id, d = parseInt(selPaid.day);
+      const s = AppState.staff.find(x => x.id === id); if (!s || !d) return;
+      const cur = cellOf(id, d);
+      if (cur === '有') { say(`⚠️ ${escapeHtml(s.name)} ${d}日 はすでに有給です。`, false); return; }
       busy(true);
       const r = await trySurplusChange(() => {
         AppState.requests[id] = AppState.requests[id] || {};
         AppState.requests[id][d] = '有';
-        AppState.shifts[id][d]   = '有';
+        AppState.shifts[id] = AppState.shifts[id] || {};
+        AppState.shifts[id][d] = '有';
         s.paidLeave = (parseInt(s.paidLeave) || 0) + 1;   // 有給の消化日数を1日増やす
-      }, { adjust: false });
+      }, { adjust: false, confirm: askWorsen });
       busy(false);
-      say(r.ok ? `✅ ${escapeHtml(s.name)} ${d}日 を有給にしました（${r.message}）。有給日数は ${s.paidLeave}日 になりました。`
-               : `⚠️ ${escapeHtml(s.name)} ${d}日 を有給にできませんでした。${r.message}`, r.ok);
+      say(r.ok ? `${r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を有給にしました（${r.message}）。有給日数は ${s.paidLeave}日 になりました。`
+               : `↩ ${escapeHtml(s.name)} ${d}日 の有給を取り消しました。${r.message}`, r.ok && !r.worsened);
       renderResultTable(); render();
-    }));
+    });
 
-    modal.querySelectorAll('[data-work]').forEach(b => b.addEventListener('click', async () => {
-      const id = b.dataset.work, d = parseInt(b.dataset.day);
-      const s = AppState.staff.find(x => x.id === id); if (!s) return;
-      const selEl = modal.querySelector(`select[data-shift-for="${id}"][data-day="${d}"]`);
-      const key = selEl ? selEl.value : '';
-      if (!key) return;
+    if (!$('workGo')) return;
+    $('workGo').addEventListener('click', async () => {
+      const id = selWork.id, d = parseInt(selWork.day), key = selWork.key;
+      const s = AppState.staff.find(x => x.id === id); if (!s || !d || !key) return;
       busy(true);
       say('⏳ 周りのつじつまを合わせています…', true, true);
       const cast = getStaffDepartment(s) === 'cast';
@@ -2362,14 +2438,14 @@ function showSurplusResolveModal() {
         store[key][d] = (store[key][d] != null ? store[key][d] : base) + 1;   // その日だけ定数を+1
         AppState.fixedShifts[id] = AppState.fixedShifts[id] || {};
         AppState.fixedShifts[id][d] = key;                                     // その人をその日に固定
+        AppState.shifts[id] = AppState.shifts[id] || {};
         AppState.shifts[id][d] = key;
-      }, { adjust: true, k: 24 });
+      }, { adjust: true, k: 24, confirm: askWorsen });
       busy(false);
-      say(r.ok ? `✅ ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。`
-               : `⚠️ ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」にできませんでした。${r.message}<br>
-                  <span class="hint">別のシフト種別、または別の日でお試しください。</span>`, r.ok);
+      say(r.ok ? `${r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。`
+               : `↩ ${escapeHtml(s.name)} ${d}日 の「${escapeHtml(key)}」を取り消しました。${r.message}`, r.ok && !r.worsened);
       renderResultTable(); render();
-    }));
+    });
   };
 
   const pop = document.getElementById('surplusPopup');
@@ -2377,5 +2453,4 @@ function showSurplusResolveModal() {
   document.body.appendChild(modal);
   render();
   modal.addEventListener('click', e => { if (e.target === modal) { modal.remove(); refreshAllUI(); } });
-  void cells;
 }
