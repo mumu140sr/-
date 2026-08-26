@@ -2315,9 +2315,13 @@ async function trySurplusChange(apply, opts) {
 }
 
 function showSurplusResolveModal() {
+  // 暗幕を張らない「動かせるパネル」にする。裏のシフト表を見ながら、
+  // どこをどう直すか考えられるようにするため。
+  const old = document.getElementById('surplusPanel');
+  if (old) old.remove();
   const modal = document.createElement('div');
-  // 生成直後のポップアップ(.modal-overlay, z-index 10001)より前面に出す
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10050;padding:16px';
+  modal.id = 'surplusPanel';
+  modal.style.cssText = 'position:fixed;right:24px;top:80px;width:min(820px,calc(100vw - 48px));z-index:10050';
 
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const WD = ['日', '月', '火', '水', '木', '金', '土'];
@@ -2331,6 +2335,8 @@ function showSurplusResolveModal() {
   let lastMsg = null;      // 直近の結果メッセージ（再描画で消えないように覚えておく）
   let selPaid = { id: '', day: '' };
   let selWork = { id: '', day: '', key: '' };
+  let pos = null;            // 動かした位置（再描画で戻らないように覚えておく）
+  let minimized = false;     // 小さくした状態かどうか
 
   const say = (text, ok, keep) => {
     if (!keep) lastMsg = { text, ok };
@@ -2411,8 +2417,14 @@ function showSurplusResolveModal() {
 
     const pStaff = AppState.staff.find(x => x.id === selPaid.id) || {};
 
-    modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:820px;width:100%;max-height:85vh;overflow:auto;padding:20px">
-      <h3 style="margin:0 0 4px">⚖️ 余の解消</h3>
+    modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;width:100%;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.35);border:1px solid var(--border)">
+      <div id="surplusDrag" style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:move;user-select:none;background:var(--surface-2);border-radius:12px 12px 0 0">
+        <h3 style="margin:0;flex:1;font-size:16px">⚖️ 余の解消</h3>
+        <span class="hint" style="font-size:11px">ここをつかんで動かせます</span>
+        <button id="surplusMin" class="btn" style="padding:2px 10px" title="小さくして表を見る">▁</button>
+        <button id="surplusX" class="btn" style="padding:2px 10px" title="閉じる">✕</button>
+      </div>
+      <div id="surplusBody" style="overflow:auto;padding:16px 20px 20px">
       <p class="hint" style="margin:0 0 10px">
         余（人員余り）を、<b>有給</b>にするか、<b>その日の必要人数を1人増やして出勤</b>にするかで埋めます。
         <b>誰を・どの日に入れるかは、あなたが自由に指定できます。</b>
@@ -2448,7 +2460,7 @@ function showSurplusResolveModal() {
         </div>
       </div>
 
-      <div style="text-align:right;margin-top:12px"><button id="resolveClose" class="btn">閉じる</button></div>
+      </div>
     </div>`;
     bind();
     if (lastMsg) say(lastMsg.text, lastMsg.ok, true);   // 再描画後もメッセージを残す
@@ -2463,13 +2475,49 @@ function showSurplusResolveModal() {
   };
 
   const busy = (on) => modal.querySelectorAll('button, select').forEach(el => {
-    if (el.id === 'resolveClose') return;             // 閉じるボタンは常に押せる
+    if (['surplusX', 'surplusMin'].indexOf(el.id) >= 0) return;   // 閉じる・最小化は常に押せる
     el.disabled = on;
   });
 
   const bind = () => {
     const $ = (id) => modal.querySelector('#' + id);
-    $('resolveClose').addEventListener('click', () => { modal.remove(); refreshAllUI(); });
+    $('surplusX').addEventListener('click', () => { modal.remove(); refreshAllUI(); });
+
+    // 小さくして、裏のシフト表をしっかり見られるようにする
+    $('surplusMin').addEventListener('click', () => {
+      const body = $('surplusBody');
+      const min = body.style.display !== 'none';
+      body.style.display = min ? 'none' : '';
+      $('surplusMin').textContent = min ? '▲' : '▁';
+      $('surplusMin').title = min ? '元の大きさに戻す' : '小さくして表を見る';
+      minimized = min;
+    });
+
+    // ヘッダーをつかんで動かす
+    const head = $('surplusDrag');
+    head.addEventListener('mousedown', (e) => {
+      if (e.target.closest('button')) return;
+      const r = modal.getBoundingClientRect();
+      const ox = e.clientX - r.left, oy = e.clientY - r.top;
+      const move = (ev) => {
+        // 画面の外に出て、つかめなくなるのを防ぐ
+        const x = Math.min(Math.max(0, ev.clientX - ox), window.innerWidth  - 120);
+        const y = Math.min(Math.max(0, ev.clientY - oy), window.innerHeight - 60);
+        modal.style.left = x + 'px'; modal.style.top = y + 'px';
+        modal.style.right = 'auto';
+        pos = { x, y };
+      };
+      const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+
+    // 動かした位置・小さくした状態を、再描画のあとも保つ
+    if (pos) { modal.style.left = pos.x + 'px'; modal.style.top = pos.y + 'px'; modal.style.right = 'auto'; }
+    if (minimized) {
+      $('surplusBody').style.display = 'none';
+      $('surplusMin').textContent = '▲';
+    }
 
     $('paidStaff').addEventListener('change', e => { selPaid.id = e.target.value; render(); });
     $('paidDay').addEventListener('change', e => { selPaid.day = e.target.value; });
@@ -2525,7 +2573,6 @@ function showSurplusResolveModal() {
   if (pop) pop.remove();          // 生成直後のポップアップが残っていたら閉じる
   document.body.appendChild(modal);
   render();
-  modal.addEventListener('click', e => { if (e.target === modal) { modal.remove(); refreshAllUI(); } });
 }
 
 /* ===========================================
