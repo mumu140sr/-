@@ -8,6 +8,8 @@ const OFF_TYPES = {
   '休': { label: '公休',     class: 's-off',    isOff: true, countsAsPublic: true  },
   '公': { label: '公休',     class: 's-public', isOff: true, countsAsPublic: true  },
   '有': { label: '有給',     class: 's-paid',   isOff: true, countsAsPublic: false },
+  '半': { label: '半休',     class: 's-half',   isOff: true,  countsAsPublic: false }, // 半休（休み扱い・公休にはカウントしない。集計は有給他に含む）
+  '余': { label: '余剰',     class: 's-surplus',isOff: true,  countsAsPublic: false }, // 人員余剰による休み（公休・有給とは別枠）
   '☆': { label: '希望休',   class: 's-off',    isOff: true, countsAsPublic: true  },
   '季': { label: '季節休暇', class: 's-off',    isOff: true, countsAsPublic: false },
   '引': { label: '引継',     class: 's-off',    isOff: true, countsAsPublic: false },
@@ -64,20 +66,28 @@ function getDefaultShiftTypes() {
 
 // デフォルトのペナルティ重み
 const DEFAULT_PENALTIES = {
-  understaff:      10000,  // 人員不足（1人あたり）
-  overstaff:         200,  // 人員超過（1人あたり）
+  understaff:      20000,  // 人員不足（1人あたり）— 絶対禁止級
+  overstaff:        6000,  // 人員超過（1人あたり）— 【優先1: 定数厳守】超えたら強く回避、余った人は「余」に
   respDuplicate:    8000,  // 責任者重複（早責/遅責が同じ時間帯に2人以上）
   disallowedShift: 50000,  // 担当外シフト
-  consBase:          800,  // 連勤超過（1日超過あたり）
-  consSq:            200,  // 連勤超過（二乗項）
-  lateEarly:        1500,  // 遅→早インターバル不足
-  categorySwitch:    600,  // 連勤中の時間帯切替
-  badRest:           600,  // 遅→休→早
+  consBase:         6000,  // 連勤が絶対上限（基本+1）を超過（1日あたり・🔴）
+  consSq:           1000,  // 連勤超過（二乗項・🔴分のみ）
+  lateEarly:        9000,  // 遅→早（休みを挟まず）— 絶対NG級（🔴）
+  categorySwitch:   3000,  // 連勤中の時間帯切替（早→遅など）
+  badRest:          2500,  // 遅→休→早（リズム悪）
   singleOff:          50,  // 単発休み
-  singleWork:        200,  // 単発出勤（高すぎると surplus-rest スタッフの圧力で他違反が増えるため抑制）
-  offShortage:       1500,  // 公休不足（1日あたり）
+  singleWork:       5000,  // 単発出勤 — 絶対回避（公休4000より優先、定数系より下）
+  offShortage:       4000,  // 公休不足（1日あたり・線形）— 【優先2】設定した公休は必ず消化させる
+  offShortageSq:     1500,  // 公休不足の二次項 — 一人への負担集中を強く罰し全員に分散
+  longRest:          2000,  // 4連休以上（自動配置分）— 【優先3】連休は最大3日まで
   offSurplus:         400,  // 公休余剰（未使用 — tryConvertSurplusRest ムーブで自然削減）
   balanceDiff:         80,  // 早遅バランスずれ（1日あたり）
+  weekendHard:      3500,  // 土日休み希望（絶対）に反して出勤（1日あたり）
+  weekendSoft:       600,  // 土日休み希望（なるべく）に反して出勤（1日あたり）
+  restStyleHard:    3500,  // 休み方の希望（絶対）に反する（1件あたり）
+  restStyleSoft:     600,  // 休み方の希望（なるべく）に反する（1件あたり）
+  pairRestShort:     800,  // 連休（2連休以上）の回数が目安に届かない（1回あたり）
+  specialDayMiss:   9000,  // 特別日（入れ替え日・新装日）に副店長が責任者に入っていない
   viceManagerRest:   1200,  // 副店長が任意で休む
   viceManagerDailyAbsent: 9000, // その日、副店長が1人も出勤していない（毎日1人は必須）
   hierarchyViolation: 3000, // 責任者ヒエラルキー違反（より上位者が働いているのに下位者が責任者）
@@ -85,7 +95,16 @@ const DEFAULT_PENALTIES = {
   eventAbsent:       20000, // イベント日に対象スタッフが休んでいる
   restPairBonus:       100, // 2連休以上のまとまった休みへのボーナス（スコアから減算）
   nightAfterWork:     8000, // 夜勤翌日に休みでない（夜勤明けは必ず休み）
+  skillLateShortage:  9000, // 遅番に必要スキル保有者が最低ラインを下回る（1人あたり・🔴）
+  skillSoftShortage:  1500, // 最低ラインは満たすが目標に届かない（1人あたり・🟡）
+  bandConcentration:  5000, // 早番・遅番の片寄せ（少ない方の時間帯の日数×。切替を根本から減らす。検証で最適値）
 };
+
+// 早遅バランスの目標比率を返す。'off'（指定なし）や未設定の値なら null。
+// null の人は、生成でも違反チェックでも早遅バランスを一切判定しない。
+function getBalanceRatio(s) {
+  return SHIFT_BALANCE[(s && s.balance) || 'balanced'] || null;
+}
 
 // アプリケーションの状態
 const AppState = {
@@ -95,6 +114,21 @@ const AppState = {
     forbidLateEarly: true,
     penaltySingleOff: true,
     maxAttempts: 250000,
+    pairRestTarget: 0, // 月の連休（2連休以上）の目安回数（全体・0=指定なし。個人設定があれば個人優先）
+    // 合算モード: { シフトkey: true } … そのシフトの必要人数を社員＋キャスト合算で扱う。
+    // 1つでも合算指定があると、生成時に社員とキャストを1つのプールとして最適化する。
+    combinedShifts: {},
+    // ルールごとの強弱設定 { 違反type: 'off' | 'should' | 'must' }。
+    // 未設定のtypeは既定分類（MUST_TYPES_OPT にあれば must、無ければ should）を使う。
+    // 空 {} なら全ルール既定＝従来と同じ挙動。人員不足/公休不足/連勤超過/担当外は固定。
+    ruleLevels: {},
+    // 連休（休みの連続）として許容する最大日数。これを超えると「連休◯日以上」エラー。
+    maxConsecutiveOff: 3,
+    // 早遅バランスの許容幅（日）。目標比率からこの日数までのずれは誤差として許す。
+    balanceTolerance: 2,
+    // 段階最適化: 大事なルールから順に0を目指し、達成した件数を以後固定する。
+    // false にすると従来どおり全ルールを一度に解く。
+    tieredOptimize: true,
     penalties: { ...DEFAULT_PENALTIES },
   },
   // ユーザーが自由に定義・編集できるシフト種別
@@ -109,6 +143,11 @@ const AppState = {
   dailyRequirements: {},
   // キャスト部門の日別必要人数
   dailyRequirementsCast: {},
+  // スキル要件 [{ name: '営業', target:'late', req:2, min:1 }]
+  skills: [],
+  // スキル要件の日別上書き { スキル名: { day: { req: 目標人数, min: 最低ライン } } }
+  // 指定が無い日は skills の既定値を使う
+  dailySkills: {},
   // スタッフ一覧
   // 各スタッフ: { id, name, department, positionType, allowedShifts[], maxOff, prefs[], balance, prevConsecutive, prevLastShift, note }
   staff: [],
@@ -163,6 +202,31 @@ function isPublicOff(shift) {
   return t ? !!t.countsAsPublic : false;
 }
 
+/**
+ * そのマスに「固定」されているシフトを返す（無ければ ''）。
+ * ④希望休入力で出勤系シフト（早責・遅責・研など）を指定した場合も固定として扱う。
+ * 旧データでは出勤系の指定が requests 側に入っているため、そこも見る（互換）。
+ */
+function getFixedShiftAt(staffId, day) {
+  const f = (AppState.fixedShifts[staffId] || {})[day];
+  if (f) return f;
+  const r = (AppState.requests[staffId] || {})[day];
+  return (r && isWork(r)) ? r : '';
+}
+
+// 連休（休みの連続）として許容する最大日数（未設定なら3日）。
+// これを1日でも超えると long-rest 違反（例: 3ならば4連休以上がエラー）。
+function getMaxOffRun() {
+  const v = parseInt(AppState.settings.maxConsecutiveOff);
+  return (v > 0) ? v : 3;
+}
+
+// 個人の連勤上限（未設定・0なら全体設定 maxConsecutive を使う）
+function getMaxConsFor(s) {
+  const v = s ? parseInt(s.personalMaxCons) : NaN;
+  return (v > 0) ? v : (AppState.settings.maxConsecutive || 4);
+}
+
 // 1コマあたりの労働時間（未設定シフトは8h扱い）
 function getShiftHours(shift) {
   const t = getShiftType(shift);
@@ -175,12 +239,46 @@ function getStaffDepartment(s) {
   return s.department === 'cast' ? 'cast' : 'employee';
 }
 
-// 部門ごとのグループ（スタッフが存在する部門のみ返す）
+// そのシフトが「合算（社員＋キャスト）」指定かどうか
+function isCombinedShift(sh) {
+  const cs = AppState.settings.combinedShifts;
+  return !!(cs && cs[sh]);
+}
+
+// 部門ごとのグループ（スタッフが存在する部門のみ返す）。
+// 合算指定シフトが1つでもあり、社員・キャスト両方が居る場合は、全員を1つの
+// プール（部門横断）として最適化する。合算シフトは1つの合計数、部門別シフトは
+// 社員＋キャストの合計人数を必要数として扱う（担当シフトとスキルで自然に振り分く）。
 function getDepartmentGroups(staffList) {
   const all = staffList || AppState.staff;
-  const groups = [];
   const emp  = all.filter(s => getStaffDepartment(s) === 'employee');
   const cast = all.filter(s => getStaffDepartment(s) === 'cast');
+  const cs   = AppState.settings.combinedShifts || {};
+  const hasCombined = Object.keys(cs).some(k => cs[k]);
+
+  if (hasCombined && emp.length && cast.length) {
+    const eReq = AppState.roleRequirements     || {};
+    const cReq = AppState.roleRequirementsCast || {};
+    const eD   = AppState.dailyRequirements     || {};
+    const cD   = AppState.dailyRequirementsCast || {};
+    const mergedReqs = {};
+    new Set([...Object.keys(eReq), ...Object.keys(cReq)]).forEach(k => {
+      // 合算指定: 社員側の数字を「合計値」として使う。部門別: 社員＋キャストの合計。
+      mergedReqs[k] = isCombinedShift(k) ? (eReq[k] || 0) : ((eReq[k] || 0) + (cReq[k] || 0));
+    });
+    const mergedDaily = {};
+    new Set([...Object.keys(eD), ...Object.keys(cD)]).forEach(k => {
+      mergedDaily[k] = {};
+      new Set([...Object.keys(eD[k] || {}), ...Object.keys(cD[k] || {})]).forEach(d => {
+        mergedDaily[k][d] = isCombinedShift(k)
+          ? (eD[k] || {})[d]
+          : (((eD[k] || {})[d] || 0) + ((cD[k] || {})[d] || 0));
+      });
+    });
+    return [{ key: 'all', label: '全体', staff: all, reqs: mergedReqs, dailyReqs: mergedDaily }];
+  }
+
+  const groups = [];
   if (emp.length)  groups.push({ key: 'employee', label: '社員',     staff: emp,  reqs: AppState.roleRequirements,     dailyReqs: AppState.dailyRequirements     || {} });
   if (cast.length) groups.push({ key: 'cast',     label: 'キャスト', staff: cast, reqs: AppState.roleRequirementsCast || {}, dailyReqs: AppState.dailyRequirementsCast || {} });
   return groups;
@@ -213,9 +311,50 @@ function getDayReq(reqs, dailyReqs, shiftKey, day) {
   return reqs[shiftKey] || 0;
 }
 
-// 研修も早番カテゴリ（A）として扱う
+/**
+ * その日のスキル要件を返す。{ need: 目標人数, min: 最低ライン }
+ * 日別必要人数パネルで上書きされていればそれを優先する。
+ */
+function getDaySkillReq(sk, day) {
+  const baseNeed = (sk.req != null ? sk.req : sk.lateReq) || 0;
+  const baseMin  = (sk.min != null && sk.min >= 0) ? sk.min : baseNeed;
+  const ov = ((AppState.dailySkills || {})[sk.name] || {})[day] || {};
+  let need = (ov.req != null) ? parseInt(ov.req) : baseNeed;
+  let min  = (ov.min != null) ? parseInt(ov.min)  : baseMin;
+  if (!(need >= 0)) need = baseNeed;
+  if (!(min  >= 0)) min  = baseMin;
+  if (min > need) min = need;   // 最低ラインは目標を超えない
+  return { need, min };
+}
+
+// そのスキルに日別上書きが1つでもあるか（既定0でも日別指定があれば対象にする）
+function hasDailySkillOverride(name) {
+  const m = (AppState.dailySkills || {})[name] || {};
+  return Object.keys(m).length > 0;
+}
+
+// 研修は既定で早番カテゴリ（A）扱い。ただし②シフト種別マスターで
+// カテゴリB（遅番）に設定された場合はその設定を優先する。
 function isEarlyCategory(shift) {
+  if (isLate(shift)) return false;
   return isEarly(shift) || isTraining(shift);
+}
+
+/**
+ * 前月末の状態を正規化して返す。
+ *  - lastShift: 前月末シフト（出勤シフトのときのみ有効）
+ *  - cons:      前月末時点の連勤日数
+ * 「前月末シフト」を選んでいれば前月末は出勤で終わっている＝連勤1日以上とみなす。
+ * （連勤日数が未入力/0のままでも前月末シフトの設定が効くようにするため）
+ */
+function getPrevMonthEnd(s) {
+  const cons = Math.max(0, parseInt(s && s.prevConsecutive) || 0);
+  // 「前月末連勤日数」が 0 ＝ 前月末は休みで終わっている。
+  // このとき前月末シフトに古い値が残っていても無視する（残っていると
+  // 「前日は勤務」と誤認し、1日目の単発出勤を見逃してしまうため）。
+  if (cons < 1) return { lastShift: '', cons: 0 };
+  const last = (s && s.prevLastShift && isWork(s.prevLastShift)) ? s.prevLastShift : '';
+  return { lastShift: last, cons };
 }
 
 // 連勤カテゴリ（'A' / 'B' / null）
@@ -256,6 +395,8 @@ function saveToStorage() {
       roleRequirementsCast: AppState.roleRequirementsCast,
       dailyRequirements:    AppState.dailyRequirements,
       dailyRequirementsCast: AppState.dailyRequirementsCast,
+      skills:               AppState.skills,
+      dailySkills:          AppState.dailySkills,
       staff:                AppState.staff,
       requests:             AppState.requests,
       shifts:               AppState.shifts,
@@ -282,7 +423,27 @@ function loadFromStorage() {
 
     // settings（penalties がなければデフォルトで補完）
     const penalties = Object.assign({ ...DEFAULT_PENALTIES }, (data.settings || {}).penalties || {});
+    // 優先順位（定数厳守 > 公休 > 連休）を反映して旧データのペナルティを補正
+    if (!(penalties.overstaff  >= 5000)) penalties.overstaff  = DEFAULT_PENALTIES.overstaff;  // 優先1
+    if (!(penalties.offShortage >= 3000)) penalties.offShortage = DEFAULT_PENALTIES.offShortage; // 優先2
+    if (penalties.longRest == null || penalties.longRest >= 3000) penalties.longRest = DEFAULT_PENALTIES.longRest; // 優先3
+    // 残り違反（切替・リズム・単発出勤・連勤超過・遅→早）を減らすため旧データも引き上げ
+    if (!(penalties.categorySwitch >= 3000)) penalties.categorySwitch = DEFAULT_PENALTIES.categorySwitch;
+    if (!(penalties.badRest        >= 2500)) penalties.badRest        = DEFAULT_PENALTIES.badRest;
+    if (!(penalties.singleWork     >= 5000)) penalties.singleWork     = DEFAULT_PENALTIES.singleWork;
+    if (!(penalties.understaff     >= 20000)) penalties.understaff    = DEFAULT_PENALTIES.understaff;
+    if (!(penalties.consBase       >= 6000)) penalties.consBase       = DEFAULT_PENALTIES.consBase;
+    if (!(penalties.consSq         >= 1000)) penalties.consSq         = DEFAULT_PENALTIES.consSq;
+    if (!(penalties.lateEarly      >= 2500)) penalties.lateEarly      = DEFAULT_PENALTIES.lateEarly;
+    // 旧デフォルト(700)のままなら新デフォルト(1500)へ引き上げ（手動調整済みなら尊重）
+    if (penalties.bandConcentration == null || penalties.bandConcentration === 700)
+      penalties.bandConcentration = DEFAULT_PENALTIES.bandConcentration;
     Object.assign(AppState.settings, data.settings || {}, { penalties });
+    if (!AppState.settings.combinedShifts) AppState.settings.combinedShifts = {}; // 旧データ補完
+    if (!AppState.settings.ruleLevels || typeof AppState.settings.ruleLevels !== 'object') AppState.settings.ruleLevels = {}; // 旧データ補完
+    if (AppState.settings.balanceTolerance == null) AppState.settings.balanceTolerance = 2;      // 旧データ補完
+    if (AppState.settings.tieredOptimize == null) AppState.settings.tieredOptimize = true;      // 旧データ補完
+    if (!(AppState.settings.maxConsecutiveOff >= 1)) AppState.settings.maxConsecutiveOff = 3;    // 旧データ補完
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
     AppState.shiftTypes = (data.shiftTypes || getDefaultShiftTypes()).map(t =>
@@ -293,6 +454,8 @@ function loadFromStorage() {
     AppState.roleRequirementsCast  = data.roleRequirementsCast  || {};
     AppState.dailyRequirements     = data.dailyRequirements     || {};
     AppState.dailyRequirementsCast = data.dailyRequirementsCast || {};
+    AppState.skills                = Array.isArray(data.skills) ? data.skills : [];
+    AppState.dailySkills           = data.dailySkills || {};
 
     // events（v4以降）
     AppState.events = Array.isArray(data.events) ? data.events : [];
@@ -322,11 +485,20 @@ function loadFromStorage() {
         positionType:    s.positionType || 'staff',
         allowedShifts,
         maxOff:          s.maxOff != null ? s.maxOff : 9,
+        paidLeave:       s.paidLeave != null ? s.paidLeave : 0,
         prefs:           Array.isArray(s.prefs) ? s.prefs : ['早可', '遅可'],
         balance:         s.balance || 'balanced',
         prevConsecutive: s.prevConsecutive || 0,
-        prevLastShift:   s.prevLastShift || '',
+        // 連勤0（＝前月末は休み）なのに前月末シフトが残っていると月初判定を誤るため整合させる
+        prevLastShift:   (s.prevConsecutive || 0) >= 1 ? (s.prevLastShift || '') : '',
         note:            s.note || '',
+        skills:          Array.isArray(s.skills) ? s.skills : [],
+        personalMaxCons: parseInt(s.personalMaxCons) || 0, // 個人の連勤上限（0=全体設定）
+        needPairRest:    !!s.needPairRest,                 // 遅→早の切替時は2連休以上必須
+        // 個人希望は「なるべく」のみ（旧データの'絶対'は自動でなるべくに変換）
+        weekendPref:     s.weekendPref === 'hard' ? 'soft' : (s.weekendPref || ''),
+        restStyle:       (s.restStyle || '').replace('-hard', '-soft'),
+        pairRestTarget:  parseInt(s.pairRestTarget) || 0, // 月の連休回数（個人・0=全体設定）
       };
     });
 
@@ -360,6 +532,8 @@ function resetAll() {
   AppState.roleRequirementsCast  = {};
   AppState.dailyRequirements     = {};
   AppState.dailyRequirementsCast = {};
+  AppState.skills                = [];
+  AppState.dailySkills           = {};
   AppState.settings.penalties = { ...DEFAULT_PENALTIES };
   _staffIdCounter = 1;
   localStorage.removeItem('shiftAppData');
@@ -391,11 +565,18 @@ function addSampleStaff() {
       positionType:    s.positionType,
       allowedShifts:   s.allowedShifts,
       maxOff:          s.maxOff,
+      paidLeave:       0,
       prefs:           s.prefs,
       balance:         s.balance,
       prevConsecutive: 0,
       prevLastShift:   '',
       note:            '',
+      skills:          [],
+      personalMaxCons: 0,
+      needPairRest:    false,
+      weekendPref:     '',
+      restStyle:       '',
+      pairRestTarget:  0,
     });
   });
 }

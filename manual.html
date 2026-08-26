@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>シフト作成の手引き｜シフト自動生成アプリ</title>
+<style>
+/* アプリ側で選んだ明暗テーマを引き継ぐ（読み込み前のちらつき防止のためインラインで実行） */
+</style>
+<script>
+(function(){
+  try {
+    var t = localStorage.getItem('shiftapp-theme');
+    if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+})();
+</script>
+</head>
+<body>
+<div class="manual-bar">
+  <a class="back" href="index.html">← アプリに戻る</a>
+  <button id="btnPrint" type="button">🖨 印刷 / PDF保存</button>
+</div>
+<style>
+:root{
+  --paper:#f5f6f8; --surface:#ffffff; --surface-2:#eceff4;
+  --ink:#161a20; --ink-2:#4d5665; --ink-3:#79818f;
+  --rule:#dee2e9; --rule-strong:#c6ccd7;
+  --accent:#464da0; --accent-soft:#e9eaf7;
+  --early:#a9631c; --early-soft:#fbeedc;
+  --ok:#276f52; --ok-soft:#e2f1ea;
+  --warn:#8f5f0e; --warn-soft:#faeed7;
+  --danger:#a83630; --danger-soft:#fae7e5;
+  --shadow:0 1px 2px rgba(20,26,38,.06),0 8px 24px -16px rgba(20,26,38,.28);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#111419; --surface:#181c23; --surface-2:#212630;
+    --ink:#e7eaef; --ink-2:#a6aeba; --ink-3:#7b8492;
+    --rule:#2b313b; --rule-strong:#3b434f;
+    --accent:#9ba3ef; --accent-soft:#232742;
+    --early:#e0a860; --early-soft:#33281a;
+    --ok:#6cc79d; --ok-soft:#172a22;
+    --warn:#d9aa4d; --warn-soft:#2d2415;
+    --danger:#e5827b; --danger-soft:#311e1d;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#111419; --surface:#181c23; --surface-2:#212630;
+  --ink:#e7eaef; --ink-2:#a6aeba; --ink-3:#7b8492;
+  --rule:#2b313b; --rule-strong:#3b434f;
+  --accent:#9ba3ef; --accent-soft:#232742;
+  --early:#e0a860; --early-soft:#33281a;
+  --ok:#6cc79d; --ok-soft:#172a22;
+  --warn:#d9aa4d; --warn-soft:#2d2415;
+  --danger:#e5827b; --danger-soft:#311e1d;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",YuGothic,Meiryo,system-ui,sans-serif;
+  font-size:16px; line-height:1.85; -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:"Yu Mincho",YuMincho,"Hiragino Mincho ProN","MS PMincho",serif; text-wrap:balance; margin:0}
+a{color:var(--accent)}
+code,.num{font-variant-numeric:tabular-nums}
+
+/* ---------- shell ---------- */
+.wrap{max-width:1180px; margin:0 auto; padding:0 20px 96px}
+.layout{display:grid; grid-template-columns:236px minmax(0,1fr); gap:56px; align-items:start}
+@media (max-width:940px){ .layout{grid-template-columns:1fr; gap:28px} }
+
+/* ---------- masthead ---------- */
+.masthead{padding:56px 0 30px; border-bottom:2px solid var(--ink)}
+.eyebrow{
+  font-size:12px; letter-spacing:.18em; font-weight:700; color:var(--accent);
+  display:flex; align-items:center; gap:10px; margin-bottom:16px;
+}
+.eyebrow::after{content:""; flex:1; height:1px; background:var(--rule-strong)}
+.masthead h1{font-size:clamp(30px,5vw,46px); line-height:1.3; font-weight:700; letter-spacing:.01em}
+.lede{margin:16px 0 0; max-width:60ch; color:var(--ink-2); font-size:16.5px}
+.meta{display:flex; flex-wrap:wrap; gap:8px 26px; margin-top:24px; font-size:13.5px; color:var(--ink-3)}
+.meta b{color:var(--ink-2); font-weight:500}
+
+/* ---------- toc ---------- */
+.toc{position:sticky; top:24px; font-size:14px}
+@media (max-width:940px){ .toc{position:static; background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:18px 20px} }
+.toc h2{font-size:12px; letter-spacing:.16em; font-family:inherit; font-weight:700; color:var(--ink-3); margin-bottom:12px}
+.toc ol{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px}
+.toc a{
+  display:flex; gap:10px; text-decoration:none; color:var(--ink-2);
+  padding:5px 8px; border-radius:6px; border-left:2px solid transparent; line-height:1.5;
+}
+.toc a:hover{background:var(--surface-2); color:var(--ink); border-left-color:var(--accent)}
+.toc a:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.toc .tk{color:var(--ink-3); font-weight:700; min-width:1.6em}
+
+/* ---------- sections ---------- */
+section{padding-top:52px; scroll-margin-top:20px}
+.sec-head{display:flex; align-items:baseline; gap:14px; margin-bottom:6px}
+.step{
+  font-family:"Yu Mincho",YuMincho,"Hiragino Mincho ProN",serif; font-size:26px; font-weight:700;
+  color:var(--accent); line-height:1;
+}
+section h2{font-size:25px; font-weight:700; line-height:1.4}
+.sec-sub{color:var(--ink-3); font-size:14px; margin:0 0 22px; padding-left:2px}
+section h3{font-size:17.5px; font-weight:600; margin:32px 0 10px}
+p{margin:0 0 14px; max-width:66ch}
+ul,ol{max-width:66ch; padding-left:1.3em; margin:0 0 16px}
+li{margin-bottom:6px}
+li::marker{color:var(--ink-3)}
+strong{font-weight:700}
+
+/* ---------- cards / callouts ---------- */
+.card{
+  background:var(--surface); border:1px solid var(--rule); border-radius:12px;
+  padding:22px 24px; box-shadow:var(--shadow); margin:0 0 18px;
+}
+.card > :last-child{margin-bottom:0}
+.grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:16px; margin-bottom:18px}
+.grid3 .card{margin:0}
+.card h4{
+  margin:0 0 10px; font-size:12.5px; letter-spacing:.1em; font-weight:700;
+  color:var(--ink-3); font-family:inherit;
+}
+.note{
+  border-left:3px solid var(--accent); background:var(--accent-soft);
+  padding:16px 20px; border-radius:0 10px 10px 0; margin:0 0 18px;
+}
+.note.warn{border-left-color:var(--warn); background:var(--warn-soft)}
+.note.stop{border-left-color:var(--danger); background:var(--danger-soft)}
+.note.ok{border-left-color:var(--ok); background:var(--ok-soft)}
+.note > :last-child{margin-bottom:0}
+.note b{display:block; margin-bottom:4px}
+
+/* ---------- checklist ---------- */
+.check{list-style:none; padding:0; max-width:none}
+.check li{
+  display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+  padding:13px 0; border-bottom:1px dashed var(--rule); margin:0;
+}
+.check li:last-child{border-bottom:0}
+.check .n{
+  width:26px; height:26px; border-radius:50%; background:var(--accent-soft); color:var(--accent);
+  display:grid; place-items:center; font-size:13px; font-weight:700; margin-top:2px;
+}
+.check .t{line-height:1.7}
+.check .t small{display:block; color:var(--ink-3); font-size:13px; line-height:1.6}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto; margin:0 0 18px; border:1px solid var(--rule); border-radius:10px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:14.5px; min-width:520px}
+th,td{padding:11px 15px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top; line-height:1.7}
+thead th{
+  background:var(--surface-2); font-weight:700; font-size:12.5px; letter-spacing:.06em;
+  color:var(--ink-2); white-space:nowrap; border-bottom:1px solid var(--rule-strong);
+}
+tbody tr:last-child td{border-bottom:0}
+td b{font-weight:700}
+.nw{white-space:nowrap}
+
+/* ---------- inline tokens ---------- */
+.k{
+  display:inline-block; padding:1px 7px; border-radius:5px; font-size:13.5px; font-weight:700;
+  background:var(--surface-2); border:1px solid var(--rule-strong); line-height:1.6;
+}
+.k.e{background:var(--early-soft); border-color:var(--early); color:var(--early)}
+.k.l{background:var(--accent-soft); border-color:var(--accent); color:var(--accent)}
+.k.o{background:var(--ok-soft); border-color:var(--ok); color:var(--ok)}
+.btnref{
+  display:inline-block; padding:1px 8px; border-radius:6px; font-size:13.5px; font-weight:500;
+  background:var(--surface-2); border:1px solid var(--rule-strong); color:var(--ink);
+}
+.sev{display:inline-block; padding:1px 8px; border-radius:20px; font-size:12px; font-weight:700; white-space:nowrap}
+.sev.r{background:var(--danger-soft); color:var(--danger)}
+.sev.y{background:var(--warn-soft); color:var(--warn)}
+
+/* ---------- q&a ---------- */
+.qa{border-top:1px solid var(--rule)}
+.qa details{border-bottom:1px solid var(--rule)}
+.qa summary{
+  cursor:pointer; padding:15px 0; font-weight:700; list-style:none;
+  display:flex; gap:12px; align-items:baseline;
+}
+.qa summary::-webkit-details-marker{display:none}
+.qa summary::before{content:"Q"; color:var(--accent); font-weight:700; font-size:14px}
+.qa summary:hover{color:var(--accent)}
+.qa summary:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.qa .a{padding:0 0 18px 26px; color:var(--ink-2)}
+.qa .a > :last-child{margin-bottom:0}
+
+footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); color:var(--ink-3); font-size:13.5px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important; animation:none!important}}
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">シフト自動生成アプリ</div>
+    <h1>だれでも作れる<br>シフト作成の手引き</h1>
+    <p class="lede">担当者が代わっても同じ手順で同じ品質のシフトが作れるように、設定の意味・毎月の作業・エラーの直し方をひととおりまとめました。上から順に読まなくて構いません。<b>初めての人は「はじめに」と「毎月の作業」だけ</b>読めば作れます。</p>
+    <div class="meta">
+      <span><b>アプリ</b> https://mumu140sr.github.io/-/</span>
+      <span><b>対象</b> シフト作成担当者・引き継ぎを受ける人</span>
+      <span><b>費用</b> 無料（インストール不要）</span>
+    </div>
+  </header>
+
+  <div class="layout">
+
+    <nav class="toc">
+      <h2>もくじ</h2>
+      <ol>
+        <li><a href="#intro"><span class="tk">0</span>はじめに</a></li>
+        <li><a href="#monthly"><span class="tk">◎</span>毎月の作業</a></li>
+        <li><a href="#s1"><span class="tk">①</span>基本設定</a></li>
+        <li><a href="#s2"><span class="tk">②</span>シフト種別</a></li>
+        <li><a href="#s3"><span class="tk">③</span>スタッフ管理</a></li>
+        <li><a href="#s4"><span class="tk">④</span>希望休入力</a></li>
+        <li><a href="#s5"><span class="tk">⑤</span>自動生成</a></li>
+        <li><a href="#s6"><span class="tk">⑥</span>シフト表</a></li>
+        <li><a href="#marks"><span class="tk">▪</span>記号の一覧</a></li>
+        <li><a href="#errors"><span class="tk">▪</span>エラー対処表</a></li>
+        <li><a href="#qa"><span class="tk">▪</span>困ったとき</a></li>
+        <li><a href="#handover"><span class="tk">▪</span>引き継ぐとき</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <!-- 0 -->
+      <section id="intro">
+        <div class="sec-head"><span class="step">0</span><h2>はじめに</h2></div>
+        <p class="sec-sub">まずここだけ読んでください</p>
+
+        <div class="grid3">
+          <div class="card">
+            <h4>できること</h4>
+            <p style="margin:0">条件を入力すると、コンピュータが<b>数学的に最も条件に合うシフト</b>を自動で組みます。人手で総当たりするのとは違い、「これ以上良い組み合わせは存在しない」ところまで計算します。</p>
+          </div>
+          <div class="card">
+            <h4>必要なもの</h4>
+            <p style="margin:0">パソコンとブラウザ（Chrome / Edge など）だけです。<b>インストールもログインも不要</b>。上のURLを開けばすぐ使えます。スマホでも開けますが、表が広いのでパソコンを推奨します。</p>
+          </div>
+          <div class="card">
+            <h4>データの置き場所</h4>
+            <p style="margin:0">入力したデータは<b>そのパソコンのブラウザの中</b>に保存されます。外部には一切送信されません。裏を返すと<b>別のパソコンとは共有されません</b>。</p>
+          </div>
+        </div>
+
+        <div class="note warn">
+          <b>いちばん大事な注意</b>
+          <p>データはブラウザに保存されているだけです。<b>ブラウザの履歴・サイトデータを消すと全部消えます</b>。また <span class="btnref">🗑 リセット</span> ボタンは全データを消すボタンです。押す前に必ず確認してください。作ったシフト表は毎月 <b>Excelに出力して保存</b>しておけば、消えても内容は残ります。</p>
+        </div>
+
+        <h3>画面の構成</h3>
+        <p>左側に <b>①基本設定 → ②シフト種別 → ③スタッフ管理 → ④希望休入力 → ⑤自動生成 → ⑥シフト表</b> の6つのタブがあります。<b>この番号順に進めば完成します。</b></p>
+        <p>①〜③は「一度決めたら基本そのまま」の設定です。<b>毎月さわるのは ④ → ⑤ → ⑥ の3つだけ</b>だと考えてください。</p>
+
+        <h3>共通の操作</h3>
+        <ul>
+          <li>入力すると<b>自動で保存</b>されます。念のため区切りで <span class="btnref">💾 保存</span> を押すと確実です。</li>
+          <li>画面が暗いほうが見やすい人は右上の <span class="btnref">🌙</span> で明暗を切り替えられます。</li>
+          <li>表の見出しの<b>境目をドラッグすると列の幅</b>を変えられます。文字が見切れるときに使ってください。</li>
+        </ul>
+      </section>
+
+      <!-- monthly -->
+      <section id="monthly">
+        <div class="sec-head"><span class="step">◎</span><h2>毎月の作業</h2></div>
+        <p class="sec-sub">来月分を作るときの手順。慣れれば10分ほどです</p>
+
+        <div class="card">
+          <ol class="check">
+            <li><span class="n">1</span><span class="t"><b>①基本設定</b>で「対象年月」を来月に変える<small>変えると「前月末の連勤を取り込みますか？」と聞かれます。前月のシフトが画面にある場合は<b>「はい」</b>を選んでください。月をまたぐ連勤や休みのつながりが正しく計算されます。</small></span></li>
+            <li><span class="n">2</span><span class="t"><b>③スタッフ管理</b>で人の増減・公休数・有給を確認する<small>入退社があった月だけ。無ければ飛ばして構いません。</small></span></li>
+            <li><span class="n">3</span><span class="t"><b>④希望休入力</b>に、集めた希望休をすべて入力する<small>ここが唯一の手入力作業です。ここを丁寧にやれば後が楽になります。</small></span></li>
+            <li><span class="n">4</span><span class="t"><b>⑤自動生成</b>の <span class="btnref">🔍 実現性チェック</span> を先に押す<small>「そもそも人手が足りているか」を生成前に判定します。<b>🚨が出たら、生成しても必ずエラーが残ります。</b>先に公休数や必要人数を見直してください。</small></span></li>
+            <li><span class="n">5</span><span class="t"><span class="btnref">🚀 シフト自動生成を実行</span> を押して待つ<small>ふつうは数秒〜数十秒。計算中も他の画面は触れます。1部門あたり最大10分で打ち切ります。</small></span></li>
+            <li><span class="n">6</span><span class="t">エラーが残ったら <span class="btnref">🩹 エラー解消プラン</span> を押す<small>「どの設定をいくつ動かせばエラーが消えるか」を影響の小さい順に並べてくれます。上の案から1つずつ試し、そのつど生成し直してください。</small></span></li>
+            <li><span class="n">7</span><span class="t"><b>⑥シフト表</b>で結果を確認し、必要なら手で微調整する<small>細かい入れ替えは手作業のほうが早いこともあります。</small></span></li>
+            <li><span class="n">8</span><span class="t"><span class="btnref">📥 Excelエクスポート</span> で出力して保存・配布する<small>これで完了です。ファイルは必ず保管してください。</small></span></li>
+          </ol>
+        </div>
+
+        <div class="note ok">
+          <b>迷ったらこの順番</b>
+          <p>年月を変える → 希望休を入れる → 実現性チェック → 生成 → Excel出力。この5つだけで毎月のシフトは作れます。</p>
+        </div>
+      </section>
+
+      <!-- 1 -->
+      <section id="s1">
+        <div class="sec-head"><span class="step">①</span><h2>基本設定</h2></div>
+        <p class="sec-sub">店舗全体の共通ルール。最初に一度決めれば、あとは毎月「対象年月」を変えるだけ</p>
+
+        <div class="tw"><table>
+          <thead><tr><th class="nw">項目</th><th>意味と決め方</th></tr></thead>
+          <tbody>
+            <tr><td class="nw"><b>対象年月</b></td><td>作りたい月。<b>毎月ここだけ変えます。</b>変更時に前月末の連勤を取り込むか聞かれます。</td></tr>
+            <tr><td class="nw"><b>連勤上限</b></td><td>何日続けて出勤してよいか。<b>4</b>にすると5連勤以上が禁止になります。</td></tr>
+            <tr><td class="nw"><b>遅→早の禁止</b></td><td>遅番の翌日に早番を入れないルール。ONを推奨します。</td></tr>
+            <tr><td class="nw"><b>単発休みのペナルティ</b></td><td>出勤に挟まれた1日だけの休みを避けます。ONを推奨します。</td></tr>
+            <tr><td class="nw"><b>連休の目安回数</b></td><td>全員に月何回2連休を入れたいか。<b>0＝指定なし</b>。個人設定があればそちらが優先されます。</td></tr>
+            <tr><td class="nw"><b>特別日設定</b></td><td>入れ替え日・新装日を日付で入力すると、副店長がその日の責任者に固定されます。</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>ルールごとの強弱（重要）</h3>
+        <p>この画面の <span class="btnref">🎚️ ルールごとの強弱</span> を開くと、ルールを1つずつ調整できます。<b>エラーが多すぎて困るときの調整弁</b>です。</p>
+        <div class="tw"><table>
+          <thead><tr><th class="nw">設定</th><th>意味</th><th>使いどころ</th></tr></thead>
+          <tbody>
+            <tr><td class="nw"><span class="sev r">🔴 絶対</span></td><td>必ず守る</td><td>労務上ゆずれないルール</td></tr>
+            <tr><td class="nw"><span class="sev y">🟡 できれば</span></td><td>なるべく守る。守れなくても表は完成する</td><td>理想だが妥協できるルール</td></tr>
+            <tr><td class="nw"><b>OFF</b></td><td>そのルールを一切見ない</td><td>自店では不要なルール</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note">
+          <b>安全のため変更できない4つ</b>
+          <p>人員不足・公休数不足・連勤超過・担当外シフトは、店舗が回らなくなるため常に「絶対」で固定されています。</p>
+        </div>
+        <p>一部のルールには数値も付いています。<b>連休が長すぎる</b>は「上限◯日まで」、<b>早遅バランス</b>は「許容◯日までのずれは許す」を設定できます。</p>
+      </section>
+
+      <!-- 2 -->
+      <section id="s2">
+        <div class="sec-head"><span class="step">②</span><h2>シフト種別マスター</h2></div>
+        <p class="sec-sub">シフトの種類と「1日に何人必要か」を決める画面</p>
+
+        <p>初期状態では次の7種類が入っています。名前・色・人数は自由に変えられます。</p>
+        <div class="tw"><table>
+          <thead><tr><th class="nw">記号</th><th class="nw">名称</th><th class="nw">区分</th><th>役割</th></tr></thead>
+          <tbody>
+            <tr><td><span class="k e">早責</span></td><td>早番責任者</td><td class="nw">早番系</td><td>その時間帯に1人だけ。2人以上入るとエラー</td></tr>
+            <tr><td><span class="k l">遅責</span></td><td>遅番責任者</td><td class="nw">遅番系</td><td>同上</td></tr>
+            <tr><td><span class="k e">早総務</span></td><td>早番総務</td><td class="nw">早番系</td><td>同上</td></tr>
+            <tr><td><span class="k l">遅総務</span></td><td>遅番総務</td><td class="nw">遅番系</td><td>同上</td></tr>
+            <tr><td><span class="k e">早</span></td><td>早番</td><td class="nw">早番系</td><td>一般</td></tr>
+            <tr><td><span class="k l">遅</span></td><td>遅番</td><td class="nw">遅番系</td><td>一般</td></tr>
+            <tr><td><span class="k o">研</span></td><td>研修</td><td class="nw">早番系</td><td><b>必要人数には数えません</b>（頭数の外）</td></tr>
+          </tbody>
+        </table></div>
+
+        <div class="note">
+          <b>カテゴリ A / B とは</b>
+          <p><b>A＝早番系、B＝遅番系</b>です。「連勤中に早番と遅番を混ぜない」「遅番の翌日に早番を入れない」といったルールは、すべてこのA・Bで判定しています。新しいシフトを追加したら<b>必ずどちらかを正しく選んでください</b>。</p>
+        </div>
+
+        <h3>必要人数（定数）</h3>
+        <p>各シフトの「必要人数/日」が、<b>その日に必ず入れたい人数</b>です。社員とキャストで別々に設定できます。</p>
+        <p>アプリはこの人数を<b>ちょうどに合わせようとします</b>。人が余った場合は、多く入れるのではなく休み（<span class="k">余</span>＝余剰）に回します。</p>
+
+        <h3>日別必要人数</h3>
+        <p><span class="btnref">📅 日別必要人数</span> を開くと、<b>特定の日だけ人数を変える</b>ことができます。土日や繁忙日に使ってください。空欄の日は上の通常人数が使われます。</p>
+        <div class="note warn">
+          <b>ここは効きすぎます</b>
+          <p>土日だけ増やしたつもりでも、月10日ぶん×2人＝20人日の追加になります。<b>人員不足エラーの最大の原因</b>がここです。エラーが多いときは真っ先に見直してください。</p>
+        </div>
+      </section>
+
+      <!-- 3 -->
+      <section id="s3">
+        <div class="sec-head"><span class="step">③</span><h2>スタッフ管理</h2></div>
+        <p class="sec-sub">一人ひとりの条件。ここの精度がシフトの品質を決めます</p>
+
+        <div class="tw"><table>
+          <thead><tr><th class="nw">列</th><th>意味</th></tr></thead>
+          <tbody>
+            <tr><td class="nw"><b>部門</b></td><td><b>社員</b>／<b>キャスト</b>。キャストは連勤やリズム系のルールが免除されます（部分勤務では自然に起きるため）。</td></tr>
+            <tr><td class="nw"><b>役職</b></td><td>副店長／チーフ／リーダー／スタッフ。<b>副店長が2人以上いる場合、毎日必ず1人は出勤</b>するよう組まれます。</td></tr>
+            <tr><td class="nw"><b>担当シフト</b></td><td><b>最重要。</b>この人が入れるシフトすべてにチェック。ここに無いシフトは絶対に割り当てられません。</td></tr>
+            <tr><td class="nw"><b>スキル</b></td><td>下の「スキル設定」で登録した資格・技能。「早番に営業できる人が最低2人」のような条件に使います。</td></tr>
+            <tr><td class="nw"><b>公休数</b></td><td>その月の休みの目標日数。<b>ここに数えるのは <span class="k">休</span> <span class="k">公</span> <span class="k">☆</span> だけ</b>です。有給や季節休暇は別枠なので含めません。</td></tr>
+            <tr><td class="nw"><b>有給</b></td><td>その月に消化させたい有給日数。指定すると自動で <span class="k">有</span> を配置します。</td></tr>
+            <tr><td class="nw"><b>希望（早可/遅可）</b></td><td>本人が入れる時間帯。<b>片方のチェックを外すと、その時間帯を避けて組みます。</b></td></tr>
+            <tr><td class="nw"><b>早遅バランス</b></td><td>出勤日のうち早番と遅番の割合。<b>指定なし（OFF）</b>を選ぶとその人は判定しません。</td></tr>
+            <tr><td class="nw"><b>連勤上限</b></td><td>この人だけの上限。空欄なら①の全体設定に従います。</td></tr>
+            <tr><td class="nw"><b>遅→早は連休必須</b></td><td>遅番から早番へ移るとき、休み1日ではなく2連休を挟みます。</td></tr>
+            <tr><td class="nw"><b>土日休み希望</b></td><td>なるべく土日を休みにします。</td></tr>
+            <tr><td class="nw"><b>休み方</b></td><td>休みをまとめる（連休）か、こまめに散らすか。</td></tr>
+            <tr><td class="nw"><b>連休回数</b></td><td>この人だけの月の2連休の目安回数。空欄なら全体設定。</td></tr>
+            <tr><td class="nw"><b>前月末連勤日数</b></td><td>前月の最終日まで何日続けて出勤していたか。<b>0＝月末は休みだった</b>という意味です。</td></tr>
+            <tr><td class="nw"><b>前月末シフト</b></td><td>前月最終日が早番だったか遅番だったか。<b>連勤日数が0のときは選べません</b>（休みだったので存在しないため）。</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>早遅バランスの読み方</h3>
+        <p>「<b>早番多め（7：3）</b>」は、<b>出勤日のうち早番7割・遅番3割</b>という意味です。日数ではなく割合なので、公休や有給が変わっても設定し直す必要はありません。</p>
+        <div class="tw"><table>
+          <thead><tr><th class="nw">設定</th><th class="nw">出勤20日なら</th><th class="nw">出勤15日なら</th></tr></thead>
+          <tbody>
+            <tr><td class="nw">早番多め（7：3）</td><td class="nw num">早14日 / 遅6日</td><td class="nw num">早10〜11日 / 遅4〜5日</td></tr>
+            <tr><td class="nw">早番やや多め（6：4）</td><td class="nw num">早12日 / 遅8日</td><td class="nw num">早9日 / 遅6日</td></tr>
+            <tr><td class="nw">均等（5：5）</td><td class="nw num">早10日 / 遅10日</td><td class="nw num">早7〜8日 / 遅7〜8日</td></tr>
+            <tr><td class="nw">遅番やや多め（4：6）</td><td class="nw num">早8日 / 遅12日</td><td class="nw num">早6日 / 遅9日</td></tr>
+            <tr><td class="nw">遅番多め（3：7）</td><td class="nw num">早6日 / 遅14日</td><td class="nw num">早4〜5日 / 遅10〜11日</td></tr>
+            <tr><td class="nw"><b>指定なし（OFF）</b></td><td colspan="2">この人はバランスを一切見ません</td></tr>
+          </tbody>
+        </table></div>
+        <p>割合はきれいな整数にならないため、<b>「許容◯日までのずれは許す」</b>（①のルール設定・初期値2日）でどこまで厳しく見るかを決めます。厳しくするほどエラーが増え、計算も長くなります。<b>迷ったら2日のままで問題ありません。</b></p>
+
+        <h3>前月末の取り込み</h3>
+        <p>前月のシフト表が画面に出ている状態で <span class="btnref">🔁 前月末の連勤・シフトを取り込む</span> を押すと、全員ぶんの「前月末連勤日数」と「前月末シフト」が自動入力されます。手入力より確実なのでこちらを使ってください。</p>
+        <div class="note warn">
+          <b>ここを空欄にすると月初がおかしくなります</b>
+          <p>前月末の情報が無いと、アプリは「前月末は休みだった」と判断します。実際には連勤中だった人が月初にさらに出勤してしまい、<b>連勤オーバーや単発出勤の原因</b>になります。</p>
+        </div>
+      </section>
+
+      <!-- 4 -->
+      <section id="s4">
+        <div class="sec-head"><span class="step">④</span><h2>希望休・固定シフト入力</h2></div>
+        <p class="sec-sub">毎月の唯一の手入力作業</p>
+
+        <p>上のボタンで入れたい記号を選び、カレンダーのマスをクリックすると入ります。<b>ダブルクリックで消去</b>できます。</p>
+        <div class="tw"><table>
+          <thead><tr><th class="nw">種類</th><th>入るもの</th><th>効果</th></tr></thead>
+          <tbody>
+            <tr><td class="nw"><b>休系</b></td><td><span class="k">有給</span> <span class="k">休</span> <span class="k">半休</span></td><td>その日は必ず休みになります</td></tr>
+            <tr><td class="nw"><b>出勤系</b></td><td><span class="k e">早責</span> <span class="k l">遅責</span> <span class="k e">早</span> <span class="k l">遅</span> <span class="k o">研</span> など</td><td>その日はそのシフトで<b>固定</b>されます（動かせません）</td></tr>
+            <tr><td class="nw"><b>クリア</b></td><td>—</td><td>入力を消してアプリに任せます</td></tr>
+          </tbody>
+        </table></div>
+
+        <div class="note">
+          <b>研修日はここで指定します</b>
+          <p><span class="k o">研</span> を入れた日は研修で固定されます。研修は<b>早番の時間帯</b>として扱われますが、<b>必要人数には数えません</b>。研修者がいる日も、通常どおりの人数が別に配置されます。</p>
+        </div>
+
+        <div class="note warn">
+          <b>入れすぎに注意</b>
+          <p>希望休を公休の目標日数より多く入れると、その人は必ず公休オーバーになります。また出勤シフトを固定しすぎると、アプリが調整できる余地が無くなりエラーが増えます。<b>固定は本当に動かせない日だけ</b>にしてください。</p>
+        </div>
+      </section>
+
+      <!-- 5 -->
+      <section id="s5">
+        <div class="sec-head"><span class="step">⑤</span><h2>自動生成</h2></div>
+        <p class="sec-sub">ボタンは2つ。必ず先に「実現性チェック」を押してください</p>
+
+        <h3>先に：実現性チェック</h3>
+        <p><span class="btnref">🔍 実現性チェック</span> は<b>生成する前に</b>、必要な人手と出せる人手を計算して足りているかを判定します。</p>
+        <div class="tw"><table>
+          <thead><tr><th class="nw">表示</th><th>意味</th><th>やること</th></tr></thead>
+          <tbody>
+            <tr><td class="nw"><span class="sev r">🚨 赤</span></td><td><b>人手が構造的に足りない。</b>どう配置してもエラーは消えません</td><td>生成する前に、必要人数・公休数・有給日数のどれかを緩める</td></tr>
+            <tr><td class="nw"><span class="sev y">🟡 黄</span></td><td>ぎりぎり足りているが余裕がない</td><td>そのまま生成してよい。エラーが出たら設定を見直す</td></tr>
+            <tr><td class="nw"><b>✅ 緑</b></td><td>余裕あり</td><td>そのまま生成</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>生成する</h3>
+        <p><span class="btnref">🚀 シフト自動生成を実行</span> を押します。多くの場合は数秒〜数十秒、条件が複雑だと数分かかります。<b>1部門あたり最大10分</b>で打ち切ります。計算中も他のタブは操作できます。</p>
+
+        <h3>エラー解消プラン（エラーが残ったとき）</h3>
+        <p><span class="btnref">🩹 エラー解消プラン</span> を押すと、<b>いまの設定をどう変えればエラーが消えるか</b>を具体的な数字で並べます。生成後のレポートからも開けます。</p>
+        <ul>
+          <li>まず<b>人日の収支</b>（必要◯人日 / 出せる◯人日 / 不足◯人日）が表示されます</li>
+          <li><b>① 人手を増やす</b> … 有給・日別必要人数・公休目標・定数。人員不足と公休不足の根本原因はここです</li>
+          <li><b>② ルールを緩める</b> … リズム系や早遅バランス。人手は増減しません</li>
+          <li>各案には <b>影響 小 / 中 / 大</b> が付いており、<b>上にあるものほど現場への影響が小さい</b>順です</li>
+          <li><span class="btnref">この設定にする</span> を押すと設定を自動で変更します。何をどう変えたかは画面に一覧表示され、<span class="btnref">↩ 変更を元に戻す</span> で取り消せます</li>
+        </ul>
+        <div class="note ok">
+          <b>使い方のコツ</b>
+          <p><b>一度に1つだけ</b>適用して、そのつど生成し直してください。同時にいくつも緩めると、何が効いたのか分からなくなり、必要以上に緩めてしまいます。</p>
+        </div>
+
+        <h3>終わったときのメッセージ</h3>
+        <div class="tw"><table>
+          <thead><tr><th class="nw">表示</th><th>意味</th><th>やること</th></tr></thead>
+          <tbody>
+            <tr><td class="nw"><b>✅ 計算完了</b></td><td><b>これ以上良い組み合わせは存在しないと確認済み。</b>残ったエラーは今の設定では避けられません</td><td>設定を見直すか、手で微調整する</td></tr>
+            <tr><td class="nw"><b>⏱ 時間切れ</b></td><td>10分では解ききれなかった。<b>もっと減らせる可能性があります</b></td><td>表示される <span class="btnref">⏳ 妥協なしで再計算</span> を押すか、条件を緩める</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note ok">
+          <b>「エラーが残った＝失敗」ではありません</b>
+          <p>✅が出ているなら、それが今の人員でできる最良の答えです。エラーを減らしたいときは、シフトの並べ方ではなく<b>設定側</b>（必要人数・公休数・希望休）を見直してください。</p>
+        </div>
+      </section>
+
+      <!-- 6 -->
+      <section id="s6">
+        <div class="sec-head"><span class="step">⑥</span><h2>シフト表</h2></div>
+        <p class="sec-sub">確認・手直し・出力</p>
+
+        <h3>手で直す</h3>
+        <ul>
+          <li><b>ドラッグ＆ドロップ</b>で2人のシフトを入れ替え</li>
+          <li><b>クリック</b>で直接編集。編集したマスは <b>🔒 固定</b>され、以後の再計算で動きません</li>
+          <li><b>Ctrl+Z</b> で元に戻す、<b>Ctrl+Y</b> でやり直し</li>
+          <li><span class="btnref">🔓 固定をすべて解除</span> で🔒を全部外せます</li>
+        </ul>
+
+        <h3>直すのを手伝ってもらう</h3>
+        <div class="tw"><table>
+          <thead><tr><th class="nw">ボタン</th><th>すること</th></tr></thead>
+          <tbody>
+            <tr><td class="nw"><span class="btnref">🔍 ルールチェック</span></td><td>今の表をもう一度チェックし直します（手で直した後に使う）</td></tr>
+            <tr><td class="nw"><span class="btnref">🧭 修正ガイド</span></td><td>エラーごとに「こうすれば直る」を提示し、ボタン1つで適用できます。<b>まずこれを試してください</b></td></tr>
+            <tr><td class="nw"><span class="btnref">🧩 かんたん調整</span></td><td>🔒で固定したマスは保ったまま、残りを短時間で再調整します。悪化はしません</td></tr>
+            <tr><td class="nw"><span class="btnref">🛠 エラーを自動修正</span></td><td>アプリが自動でエラーを減らそうとします</td></tr>
+            <tr><td class="nw"><span class="btnref">🤖 AIに解説してもらう</span></td><td>⑤の画面で、なぜエラーが出たのかを日本語で説明します</td></tr>
+          </tbody>
+        </table></div>
+
+        <div class="note">
+          <b>エラーの場所はクリックで飛べます</b>
+          <p>エラー一覧の項目をクリックすると、シフト表の<b>該当するマスまで移動して光ります</b>。人単位のエラー（公休不足など）は、その人の名前の行に飛びます。</p>
+        </div>
+
+        <h3>出力する</h3>
+        <p><span class="btnref">📥 Excelエクスポート</span> または <span class="btnref">📥 CSVエクスポート</span> で書き出せます。<b>完成したら必ずExcelで保存</b>してください。下の「📊 集計」で、一人ひとりの出勤日数・公休数・労働時間も確認できます。</p>
+      </section>
+
+      <!-- marks -->
+      <section id="marks">
+        <div class="sec-head"><span class="step">▪</span><h2>記号の一覧</h2></div>
+        <p class="sec-sub">とくに「公休に数えるかどうか」を間違えやすいので注意</p>
+
+        <div class="tw"><table>
+          <thead><tr><th class="nw">記号</th><th class="nw">意味</th><th class="nw">公休数に数える？</th><th>備考</th></tr></thead>
+          <tbody>
+            <tr><td><span class="k">休</span></td><td>公休</td><td class="nw"><b>数える</b></td><td>通常の休み</td></tr>
+            <tr><td><span class="k">公</span></td><td>公休</td><td class="nw"><b>数える</b></td><td>同上</td></tr>
+            <tr><td><span class="k">☆</span></td><td>希望休</td><td class="nw"><b>数える</b></td><td>本人の希望による休み</td></tr>
+            <tr><td><span class="k">有</span></td><td>有給</td><td class="nw">数えない</td><td>③の「有給」欄で日数を指定</td></tr>
+            <tr><td><span class="k">半</span></td><td>半休</td><td class="nw">数えない</td><td>休み扱い</td></tr>
+            <tr><td><span class="k">余</span></td><td>余剰</td><td class="nw">数えない</td><td><b>人が余ったため生じた休み。</b>アプリが自動で付けます</td></tr>
+            <tr><td><span class="k">季</span></td><td>季節休暇</td><td class="nw">数えない</td><td>別枠</td></tr>
+            <tr><td><span class="k">引</span></td><td>引継</td><td class="nw">数えない</td><td>別枠</td></tr>
+            <tr><td><span class="k">慶</span></td><td>慶弔休</td><td class="nw">数えない</td><td>別枠</td></tr>
+          </tbody>
+        </table></div>
+
+        <div class="note warn">
+          <b>よくある勘違い</b>
+          <p>「公休9日」と設定した人に有給を3日入れても、<b>公休は9日のまま必要</b>です（有給は公休に含まれません）。つまりその人の休みは合計12日になります。<b>公休が足りないと言われたら、まずここを確認</b>してください。</p>
+        </div>
+      </section>
+
+      <!-- errors -->
+      <section id="errors">
+        <div class="sec-head"><span class="step">▪</span><h2>エラー対処表</h2></div>
+        <p class="sec-sub">出たエラーの名前で探してください</p>
+        <div class="note">
+          <b>まず ⑤自動生成 の <span class="btnref">🩹 エラー解消プラン</span> を試してください</b>
+          <p>「どの設定をいくつ動かせば消えるか」を自動で計算し、ボタン1つで変更できます。この表は、そのうえで自分で判断したいときの早見表です。</p>
+        </div>
+
+        <h3>人員・役職に関するもの</h3>
+        <div class="tw"><table>
+          <thead><tr><th class="nw">エラー</th><th>意味</th><th>対処</th></tr></thead>
+          <tbody>
+            <tr><td class="nw"><span class="sev r">人員不足</span></td><td>その日そのシフトの必要人数に届かない</td><td>②の必要人数を下げる／日別必要人数を見直す／希望休を減らす</td></tr>
+            <tr><td class="nw"><span class="sev r">公休数不足</span></td><td>目標の公休日数を消化できていない</td><td>必要人数を下げる／有給日数を減らす／公休目標を下げる</td></tr>
+            <tr><td class="nw"><span class="sev r">連勤超過</span></td><td>連勤上限を超えている</td><td>①または個人の連勤上限を確認／前月末連勤日数が正しいか確認</td></tr>
+            <tr><td class="nw"><span class="sev r">担当外シフト</span></td><td>担当シフトに無いシフトが入っている</td><td>③でその人の担当シフトにチェックを追加</td></tr>
+            <tr><td class="nw"><span class="sev r">副店長不在の日</span></td><td>副店長が誰も出勤していない日がある</td><td>副店長の公休日をずらす</td></tr>
+            <tr><td class="nw"><span class="sev r">責任者・総務の重複</span></td><td>同じ時間帯に責任者が2人以上いる</td><td>片方を通常シフトに変更</td></tr>
+            <tr><td class="nw"><span class="sev r">責任者ヒエラルキー</span></td><td>上位者が出勤しているのに下位者が責任者になっている</td><td>責任者を上位者に入れ替える</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>スキル・勤務リズムに関するもの</h3>
+        <div class="tw"><table>
+          <thead><tr><th class="nw">エラー</th><th>意味</th><th>対処</th></tr></thead>
+          <tbody>
+            <tr><td class="nw"><span class="sev r">スキル最低人数割れ</span></td><td>必要なスキル保有者が最低ラインを下回る</td><td>スキル保有者の休みをずらす／最低ラインを下げる</td></tr>
+            <tr><td class="nw"><span class="sev y">スキル目標人数に不足</span></td><td>最低ラインは満たすが目標に届かない</td><td>許容できるならそのままでOK</td></tr>
+            <tr><td class="nw"><span class="sev r">遅→早（休みなし）</span></td><td>遅番の翌日が早番</td><td>間に休みを入れる／時間帯を揃える</td></tr>
+            <tr><td class="nw"><span class="sev r">夜勤明けの出勤</span></td><td>夜勤の翌日が休みになっていない</td><td>翌日を休みにする</td></tr>
+            <tr><td class="nw"><span class="sev r">単発出勤</span></td><td>前後が休みで、1日だけ出勤している</td><td>前後どちらかの休みをずらして出勤を連続させる。<b>月初に出る場合は前月末連勤日数の入力漏れを疑う</b></td></tr>
+            <tr><td class="nw"><span class="sev y">連勤中の時間帯切替</span></td><td>連勤の途中で早番と遅番が入れ替わっている</td><td>時間帯を揃える。気にしないなら①でOFFに</td></tr>
+            <tr><td class="nw"><span class="sev y">遅→休→早</span></td><td>休み1日を挟んで遅番から早番へ移っている</td><td>2連休にする／時間帯を揃える</td></tr>
+            <tr><td class="nw"><span class="sev y">連休が長すぎる</span></td><td>設定した上限日数を超える連休がある</td><td>①で上限日数を変える／休みを分散させる</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>個人の希望に関するもの</h3>
+        <div class="tw"><table>
+          <thead><tr><th class="nw">エラー</th><th>意味</th><th>対処</th></tr></thead>
+          <tbody>
+            <tr><td class="nw"><span class="sev r">早遅希望不一致</span></td><td>早可／遅可のチェックに反する時間帯が入っている</td><td>③の担当シフトから、その時間帯のシフトを外す</td></tr>
+            <tr><td class="nw"><span class="sev y">早遅バランスのずれ</span></td><td>設定した早番：遅番の割合から離れている</td><td>許容日数を広げる／その人を「指定なし（OFF）」にする</td></tr>
+            <tr><td class="nw"><span class="sev y">土日休み希望</span></td><td>土日休み希望が満たせていない</td><td>他の人と休みを交換する</td></tr>
+            <tr><td class="nw"><span class="sev y">休み方・連休（個人）</span></td><td>連休派／分散派の希望に合っていない</td><td>休みの位置を調整する</td></tr>
+          </tbody>
+        </table></div>
+
+        <div class="note">
+          <b>エラーが多いときの見直し順</b>
+          <ol style="margin-bottom:0">
+            <li><b>日別必要人数</b> — 土日などに増やしすぎていないか</li>
+            <li><b>有給日数</b> — その月に消化させる量が多すぎないか</li>
+            <li><b>希望休</b> — 公休目標より多く入っている人がいないか</li>
+            <li><b>前月末連勤日数</b> — 入力漏れがないか</li>
+            <li><b>ルールの強弱</b> — 「絶対」にしすぎていないか</li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- qa -->
+      <section id="qa">
+        <div class="sec-head"><span class="step">▪</span><h2>困ったとき</h2></div>
+        <p class="sec-sub">よくある質問</p>
+
+        <div class="qa">
+          <details><summary>設定した人数より多く出勤している日があります</summary>
+            <div class="a"><p>必要人数を超えないよう組まれるはずなので、まず<b>日別必要人数</b>でその日だけ増やしていないか確認してください。それでも多い場合は、④で出勤シフトを固定している人がいないか見てください。固定された人は人数調整の対象外になります。</p></div>
+          </details>
+          <details><summary>月初がおかしい（いきなり単発出勤・連勤オーバーになる）</summary>
+            <div class="a"><p>③の<b>前月末連勤日数</b>の入力漏れがほぼ確実な原因です。前月のシフト表を表示した状態で <span class="btnref">🔁 前月末の連勤・シフトを取り込む</span> を押して、自動入力し直してください。</p></div>
+          </details>
+          <details><summary>実現性チェックは大丈夫だったのにエラーが出ました</summary>
+            <div class="a"><p>実現性チェックが見ているのは「人手の総量が足りているか」だけです。総量が足りていても、<b>特定の日・特定の役職に偏り</b>があるとエラーになります。エラーの内容から個別に対処してください。</p></div>
+          </details>
+          <details><summary>生成が遅い／10分かかります</summary>
+            <div class="a"><p>ルールを「絶対」にするほど時間がかかります。時間を短くしたいときは、①のルール設定で<b>優先度の低いルールを「できれば」やOFF</b>にしてください。なお、良い答え自体は序盤で見つかっていることが多く、残り時間は「これが最良だ」と確かめる作業に使われています。</p></div>
+          </details>
+          <details><summary>手で直したところが、再計算で消えてしまいます</summary>
+            <div class="a"><p>クリックで編集したマスは🔒固定されるので消えません。<b>ドラッグで入れ替えただけのマスは固定されません</b>。残したい場合は、そのマスをクリックして選び直してください。</p></div>
+          </details>
+          <details><summary>別のパソコンで続きをやりたい</summary>
+            <div class="a"><p>データはパソコンごとに保存されるため、そのままでは引き継げません。現状は<b>Excelに出力して渡す</b>のが確実です。作業自体は、新しいパソコンでURLを開いて設定を入力し直す形になります。</p></div>
+          </details>
+          <details><summary>画面の文字が見切れています</summary>
+            <div class="a"><p>表の見出しの<b>境目をドラッグ</b>すると列の幅を変えられます。また表全体は左右にスクロールできます。ブラウザの拡大率（Ctrl と − ）を下げるのも有効です。</p></div>
+          </details>
+          <details><summary>全部やり直したい</summary>
+            <div class="a"><p>右上の <span class="btnref">🗑 リセット</span> で初期状態に戻せます。<b>全データが消えます</b>ので、必要なものはExcelに出力してから実行してください。</p></div>
+          </details>
+        </div>
+      </section>
+
+      <!-- handover -->
+      <section id="handover">
+        <div class="sec-head"><span class="step">▪</span><h2>引き継ぐとき</h2></div>
+        <p class="sec-sub">次の担当者に渡すときのチェック項目</p>
+
+        <div class="card">
+          <ol class="check">
+            <li><span class="n">1</span><span class="t">アプリのURLを伝える<small>https://mumu140sr.github.io/-/ ／ この手引きのURLもあわせて。</small></span></li>
+            <li><span class="n">2</span><span class="t"><b>データはパソコンごと</b>だと伝える<small>新しい担当者のパソコンでは、①〜③の設定を入力し直す必要があります。今のパソコンの画面を見ながら写すのが確実です。</small></span></li>
+            <li><span class="n">3</span><span class="t">直近3か月ぶんのExcelを渡す<small>過去の実績があると、必要人数や公休数の妥当性が判断できます。</small></span></li>
+            <li><span class="n">4</span><span class="t">自店で決めているルールを口頭で共有する<small>「土日は早番を1人増やす」「この人は遅番のみ」など、アプリの設定に込めた意図を伝えてください。</small></span></li>
+            <li><span class="n">5</span><span class="t">最初の1か月は一緒に作る<small>④希望休入力 → ⑤生成 → ⑥手直し の流れを、一度隣で通しで見せるのが最短です。</small></span></li>
+          </ol>
+        </div>
+
+        <div class="note stop">
+          <b>やってはいけないこと</b>
+          <ul style="margin-bottom:0">
+            <li><b>🗑 リセット</b>を確認なしで押す（全データが消えます）</li>
+            <li>ブラウザの<b>閲覧履歴・サイトデータの削除</b>を実行する（同じく消えます）</li>
+            <li>作ったシフトを<b>Excelに出力せずに</b>次の月へ進む</li>
+            <li>②の<b>カテゴリ A / B を間違えて</b>設定する（早番・遅番のルールが全部狂います）</li>
+          </ul>
+        </div>
+      </section>
+
+      <footer>
+        <p style="margin:0">この手引きはアプリの現在の画面に合わせて書かれています。アプリを更新したときは、変わった箇所をこの手引きにも反映してください。</p>
+      </footer>
+
+    </main>
+  </div>
+</div>
+
+<style>
+.manual-bar{
+  position:sticky; top:0; z-index:20; display:flex; gap:12px; align-items:center;
+  padding:10px 20px; background:var(--surface); border-bottom:1px solid var(--rule);
+}
+.manual-bar .back{
+  font-size:14px; font-weight:700; text-decoration:none; color:var(--accent);
+  padding:6px 12px; border-radius:8px;
+}
+.manual-bar .back:hover{background:var(--accent-soft)}
+.manual-bar button{
+  margin-left:auto; font:inherit; font-size:13.5px; cursor:pointer;
+  background:var(--surface-2); color:var(--ink); border:1px solid var(--rule-strong);
+  border-radius:8px; padding:6px 12px;
+}
+.manual-bar button:hover{border-color:var(--accent); color:var(--accent)}
+.manual-bar a:focus-visible,.manual-bar button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.wrap .masthead{padding-top:36px}
+@media print{
+  .manual-bar,.toc{display:none}
+  .layout{grid-template-columns:1fr}
+  body{background:#fff; color:#000; font-size:11pt}
+  section{page-break-inside:avoid}
+  .card,.note,.tw{box-shadow:none}
+}
+</style>
+<script>
+document.getElementById('btnPrint').addEventListener('click', function () { window.print(); });
+</script>
+</body>
+</html>

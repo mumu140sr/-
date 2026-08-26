@@ -5,7 +5,7 @@
 
 // data.js と optimizer.js を Worker スコープに取り込む
 // importScripts は Worker 専用 API
-self.importScripts('data.js', 'optimizer.js');
+self.importScripts('data.js?v=169', 'optimizer.js?v=169');
 
 /**
  * メインスレッドからのリクエスト受信
@@ -13,7 +13,7 @@ self.importScripts('data.js', 'optimizer.js');
  */
 self.addEventListener('message', async (e) => {
   const msg = e.data || {};
-  if (msg.type !== 'optimize') return;
+  if (msg.type !== 'optimize' && msg.type !== 'repair') return;
 
   try {
     // Worker 内の AppState を上書き
@@ -22,12 +22,16 @@ self.addEventListener('message', async (e) => {
     if (incoming.shiftTypes) AppState.shiftTypes = incoming.shiftTypes;
     AppState.roleRequirements     = incoming.roleRequirements     || AppState.roleRequirements;
     AppState.roleRequirementsCast = incoming.roleRequirementsCast || {};
+    AppState.dailyRequirements     = incoming.dailyRequirements     || {};
+    AppState.dailyRequirementsCast = incoming.dailyRequirementsCast || {};
+    AppState.skills                = incoming.skills                || [];
     AppState.staff       = incoming.staff       || [];
     AppState.requests    = incoming.requests    || {};
     AppState.fixedShifts = incoming.fixedShifts || {};
     AppState.specialDays = incoming.specialDays || {};
     AppState.events      = incoming.events      || [];
-    AppState.shifts = {};
+    // repair は現在のシフトを種にするので保持、optimize は初期化
+    AppState.shifts = (msg.type === 'repair') ? (incoming.shifts || {}) : {};
     AppState.violations = [];
     AppState.generated = false;
 
@@ -36,7 +40,9 @@ self.addEventListener('message', async (e) => {
       self.postMessage({ type: 'progress', pct, label });
     };
 
-    const result = await optimizeSchedule(onProgress);
+    const result = (msg.type === 'repair')
+      ? await repairSchedule(onProgress)
+      : await optimizeSchedule(onProgress);
 
     // 完了通知（AppState.shifts と violations を返す）
     self.postMessage({
