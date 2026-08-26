@@ -2381,8 +2381,19 @@ function showSurplusResolveModal() {
     $m.querySelector('#worsenNo').addEventListener('click', () => resolve(false));
   });
 
-  const staffOptions = (selId) => (AppState.staff || []).map(s =>
-    `<option value="${s.id}" ${selId === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
+  // 誰を選ぶかの判断材料として、今月の有給数と余の数を名前の横に出す
+  const staffOptions = (selId) => {
+    const sur = {};
+    listSurplusCells().forEach(c => { sur[c.id] = (sur[c.id] || 0) + 1; });
+    return (AppState.staff || []).map(s => {
+      const tag = `有給${s.paidLeave || 0}日` + (sur[s.id] ? `・余${sur[s.id]}` : '');
+      return `<option value="${s.id}" ${selId === s.id ? 'selected' : ''}>${escapeHtml(s.name)}（${tag}）</option>`;
+    }).join('');
+  };
+
+  // その日に何人出勤しているか（どの日に人を足すか決める材料）
+  const workersOn = (d) => (AppState.staff || []).reduce((a, s) =>
+    a + (isWork((AppState.shifts[s.id] || {})[d] || '') ? 1 : 0), 0);
 
   // 日付の選択肢。いまの状態（余・公休・出勤中）を併記して選びやすくする
   const dayOptions = (id, selDay) => {
@@ -2390,7 +2401,7 @@ function showSurplusResolveModal() {
     for (let d = 1; d <= days; d++) {
       const cur = cellOf(id, d);
       const tag = cur === '余' ? '・余' : cur === '公' ? '・公休' : cur === '有' ? '・有給' : cur ? '・' + cur : '';
-      out += `<option value="${d}" ${String(selDay) === String(d) ? 'selected' : ''}>${dayLabel(d)}${tag}</option>`;
+      out += `<option value="${d}" ${String(selDay) === String(d) ? 'selected' : ''}>${dayLabel(d)}${tag}｜出勤${workersOn(d)}人</option>`;
     }
     return out;
   };
@@ -2446,6 +2457,7 @@ function showSurplusResolveModal() {
           <button id="paidGo" class="btn btn-primary">有給にする</button>
           <span class="hint">現在の有給日数：${pStaff.paidLeave || 0}日 → 実行すると +1日</span>
         </div>
+        <div id="previewPaid" style="margin-top:8px;font-size:13px"></div>
       </div>
 
       <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0">
@@ -2458,12 +2470,82 @@ function showSurplusResolveModal() {
                <button id="workGo" class="btn btn-primary">出勤にする（定数+1）</button>`
             : '<span class="hint">この人が入れるシフトがありません（責任者・総務は1日1人のため増やせません）</span>'}
         </div>
+        <div id="previewWork" style="margin-top:8px;font-size:13px"></div>
       </div>
 
       </div>
     </div>`;
     bind();
+    refreshPreview();
     if (lastMsg) say(lastMsg.text, lastMsg.ok, true);   // 再描画後もメッセージを残す
+  };
+
+  // 押す前に「この指定だと何がどうなるか」を先に計算する。
+  // 実際には変えず、調べたあとで必ず元に戻す。
+  const preview = (apply) => {
+    const bk = {
+      shifts: JSON.parse(JSON.stringify(AppState.shifts)),
+      daily:  JSON.parse(JSON.stringify(AppState.dailyRequirements || {})),
+      dailyC: JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
+    };
+    const bV = checkViolations(AppState.shifts);
+    let after, d;
+    try {
+      apply();
+      const aV = checkViolations(AppState.shifts);
+      after = aV.length;
+      d = diffViolations(countByType(bV), countByType(aV));
+    } finally {
+      AppState.shifts = bk.shifts;
+      AppState.dailyRequirements = bk.daily;
+      AppState.dailyRequirementsCast = bk.dailyC;
+    }
+    return { before: bV.length, after, diff: d };
+  };
+
+  // プレビューの結果を1行で表す
+  const previewLine = (r) => {
+    if (!r) return '';
+    const n = r.after - r.before;
+    const names = (rows) => rows.map(x => escapeHtml(x.label) + ' +' + x.n).join('、');
+    if (n <= 0) return `<span style="color:var(--success);font-weight:700">✅ エラーは増えません（${r.before}件 → ${r.after}件）</span>`;
+    if (r.diff.crit.length)
+      return `<span style="color:var(--danger);font-weight:700">⛔ ${names(r.diff.crit)}</span>` +
+             `<span class="hint">（${r.before}件 → ${r.after}件）${r.diff.soft.length ? '／' + names(r.diff.soft) : ''}</span>`;
+    return `<span style="color:#b7791f;font-weight:700">⚠️ ${names(r.diff.soft)}</span>` +
+           `<span class="hint">（${r.before}件 → ${r.after}件・重要ルールは崩れません）</span>`;
+  };
+
+  // いまの選択内容でプレビューを出しなおす
+  const refreshPreview = () => {
+    const $p = modal.querySelector('#previewPaid');
+    if ($p) {
+      const id = selPaid.id, d = parseInt(selPaid.day);
+      const st = AppState.staff.find(x => x.id === id);
+      $p.innerHTML = (st && d)
+        ? previewLine(preview(() => {
+            AppState.shifts[id] = AppState.shifts[id] || {};
+            AppState.shifts[id][d] = '有';
+          }))
+        : '';
+    }
+    const $w = modal.querySelector('#previewWork');
+    if ($w) {
+      const id = selWork.id, d = parseInt(selWork.day), key = selWork.key;
+      const st = AppState.staff.find(x => x.id === id);
+      $w.innerHTML = (st && d && key)
+        ? previewLine(preview(() => {
+            const cast = getStaffDepartment(st) === 'cast';
+            const store = cast ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
+                               : (AppState.dailyRequirements     || (AppState.dailyRequirements     = {}));
+            const base = (cast ? (AppState.roleRequirementsCast || {}) : AppState.roleRequirements)[key] || 0;
+            store[key] = store[key] || {};
+            store[key][d] = (store[key][d] != null ? store[key][d] : base) + 1;
+            AppState.shifts[id] = AppState.shifts[id] || {};
+            AppState.shifts[id][d] = key;
+          })) + '<span class="hint"> ※つじつま合わせ前の目安です</span>'
+        : '';
+    }
   };
 
   // 実行後の結果に「何が増えたか」を添える
@@ -2520,10 +2602,10 @@ function showSurplusResolveModal() {
     }
 
     $('paidStaff').addEventListener('change', e => { selPaid.id = e.target.value; render(); });
-    $('paidDay').addEventListener('change', e => { selPaid.day = e.target.value; });
+    $('paidDay').addEventListener('change', e => { selPaid.day = e.target.value; refreshPreview(); });
     $('workStaff').addEventListener('change', e => { selWork.id = e.target.value; selWork.key = ''; render(); });
     $('workDay').addEventListener('change', e => { selWork.day = e.target.value; selWork.key = ''; render(); });
-    if ($('workKey')) $('workKey').addEventListener('change', e => { selWork.key = e.target.value; });
+    if ($('workKey')) $('workKey').addEventListener('change', e => { selWork.key = e.target.value; refreshPreview(); });
 
     $('paidGo').addEventListener('click', async () => {
       const id = selPaid.id, d = parseInt(selPaid.day);
