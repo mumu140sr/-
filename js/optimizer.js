@@ -25,7 +25,7 @@ function getWorkShiftKeys() {
 }
 
 // 同じ時間帯に必要人数を超えて配置してはいけないシフト（責任者・総務）
-const SOLO_SHIFT_KEYS = ['早責', '遅責', '早総', '遅総'];
+const SOLO_SHIFT_KEYS = ['早責', '遅責', '早総務', '遅総務'];
 
 // 部門別最適化中のスタッフ・必要人数（AppState を書き換えると実行中の保存で
 // データが破損するため、optimizer 内部変数で切り替える）
@@ -70,7 +70,16 @@ async function optimizeSchedule(progressCallback) {
   }
 
   AppState.shifts     = mergedShifts;
-  AppState.violations = checkViolations(mergedShifts);
+  markSurplusRest(AppState.shifts); // 公休を目標数ちょうどにし、余った休みを「余」に振り分ける
+  // 最終保証: 部門ごとに人員不足を全体盤面で潰す（実ロックのみ尊重）
+  groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
+  // 強制フィルが生んだ単発出勤・切替を掃除（違反件数が減る手だけ採用＝人員不足は増えない）
+  violationPolish(AppState.shifts, 4);
+  groups.forEach(g => forceFillUnderstaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
+  // なお残る不足は二部マッチングで確実に埋める（多段の玉突きも解く）
+  groups.forEach(g => guaranteeDayStaffingReal(AppState.shifts, g.staff, g.reqs, g.dailyReqs));
+  // 総合仕上げ: 🔴も🟡も含めて総数を減らす（人員不足は毎回再保証・悪化なし）
+  AppState.violations = finalPolishLoop(AppState.shifts, groups, 6);
   AppState.generated  = true;
 
   // restPairBonus でスコアが負になり得るため、成功判定は違反件数で行う
@@ -78,9 +87,889 @@ async function optimizeSchedule(progressCallback) {
 }
 
 /**
- * 1部門分の最適化（_optStaff / _optReqs に部門のスタッフ・必要人数が設定済みの前提）
+ * 公休を目標数（maxOff）ちょうどに整え、超過分の休みを「余」（余剰）に振り替える。
+ * - 希望休・固定で入れた公休は必ず公休のまま残す（意図した休みのため）
+ * - 有給（有）はそのまま（別枠）
+ * これにより「公休は設定数を全部消化」「余った人員は余で可視化」を実現する。
  */
-async function optimizeGroupSchedule(progressCallback) {
+function markSurplusRest(shifts) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  staff.forEach(s => {
+    if (!shifts[s.id]) return;
+    const quota = s.maxOff || 0;
+    let lockedPublic = 0;
+    const freePublicDays = [];
+    for (let d = 1; d <= days; d++) {
+      const sh = shifts[s.id][d] || '';
+      if (!isPublicOff(sh)) continue; // 公休系のみ対象（有給・余は対象外）
+      const locked = isPublicOff((AppState.requests[s.id]    || {})[d]) ||
+                     isPublicOff((AppState.fixedShifts[s.id] || {})[d]);
+      if (locked) lockedPublic++;
+      else freePublicDays.push(d);
+    }
+    // 目標公休数のうち、固定分を除いた残りだけを公休として残し、超過分は「余」にする。
+    // 「余」は月末に固まらないよう、対象日を月内に均等に散らす。
+    const N       = freePublicDays.length;
+    const keep    = Math.max(0, quota - lockedPublic);
+    const convert = Math.max(0, N - keep); // 余にする日数
+    if (convert > 0) {
+      const surplusIdx = new Set();
+      for (let i = 0; i < convert; i++) {
+        surplusIdx.add(Math.min(N - 1, Math.floor((i + 0.5) * N / convert)));
+      }
+      // 端数で重複したら前から補充してちょうど convert 個にする
+      let j = 0;
+      while (surplusIdx.size < convert && j < N) { surplusIdx.add(j); j++; }
+      freePublicDays.forEach((d, idx) => {
+        if (surplusIdx.has(idx)) shifts[s.id][d] = '余';
+      });
+    }
+  });
+}
+
+/**
+ * エラー箇所だけを再最適化する「修復」エントリ
+ * - 現在の AppState.shifts を種（seed）にする
+ * - 違反に関係するセル（＋前後日）だけロックを外し、それ以外は固定して動かさない
+ * - 違反件数が減った時だけ採用し、悪化した場合は元に戻す（絶対に悪くしない）
+ */
+async function repairSchedule(progressCallback) {
+  const origShifts     = deepCopyShifts(AppState.shifts || {});
+  const origViolations = checkViolations(origShifts);
+  if (origViolations.length === 0) {
+    AppState.violations = origViolations;
+    return { score: 0, violations: [], success: true, improved: false, before: 0, after: 0 };
+  }
+
+  const days     = getDaysInMonth(AppState.settings.targetMonth);
+  const groups   = getDepartmentGroups(AppState.staff);
+  const MAX_PASS = 8;          // 改善が止まるまで最大8回
+  const RADIUS   = [1, 2, 3];  // 段階レベルごとの前後日ウィンドウ
+  const FULL_LEVEL = 3;        // レベル3以上は部門全体を解放して全面再最適化
+
+  // 現在の最良（seed）から1パス修復する内部関数。level が上がるほど動かす範囲を広げる。
+  const onePass = async (seedShifts, seedViolations, level, passLabel) => {
+    const merged = deepCopyShifts(seedShifts);
+    const radius = RADIUS[Math.min(level, RADIUS.length - 1)];
+    const full   = level >= FULL_LEVEL;
+    try {
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g        = groups[gi];
+        const groupIds = new Set(g.staff.map(s => s.id));
+        const cells    = new Set();
+        const staffAll = new Set();
+        const addCell  = (sid, d) => {
+          for (let dd = d - radius; dd <= d + radius; dd++) {
+            if (dd >= 1 && dd <= days) cells.add(sid + ':' + dd);
+          }
+        };
+        if (full) {
+          // 全面再最適化: 部門の全スタッフを解放（希望休・固定は optimizeGroupSchedule 側で保持）
+          g.staff.forEach(s => staffAll.add(s.id));
+        } else {
+          seedViolations.forEach(v => {
+            if (v.staffId && groupIds.has(v.staffId)) {
+              if (v.day === 0) staffAll.add(v.staffId);
+              else addCell(v.staffId, v.day);
+            } else if (!v.staffId && v.day >= 1) {
+              g.staff.forEach(s => addCell(s.id, v.day));
+            }
+          });
+        }
+        if (cells.size === 0 && staffAll.size === 0) continue;
+
+        _optStaff = g.staff; _optReqs = g.reqs; _optDailyReqs = g.dailyReqs;
+        const groupProgress = (pct, msg) => {
+          const mapped = Math.floor((gi * 100 + pct) / groups.length);
+          progressCallback && progressCallback(mapped, `${passLabel} ` + msg);
+        };
+        const res = await optimizeGroupSchedule(groupProgress, { seedShifts, cells, staffAll });
+        Object.assign(merged, res.shifts);
+      }
+    } finally {
+      _optStaff = null; _optReqs = null; _optDailyReqs = null;
+    }
+    markSurplusRest(merged); // 修復後も公休ちょうど＋余に整える
+    // 最終保証: 修復後も人員不足を全体盤面で潰す（実ロックのみ尊重）
+    groups.forEach(g => forceFillUnderstaffingReal(merged, g.staff, g.reqs, g.dailyReqs));
+    groups.forEach(g => guaranteeDayStaffingReal(merged, g.staff, g.reqs, g.dailyReqs));
+    return { shifts: merged, violations: checkViolations(merged) };
+  };
+
+  // 「焼きなまし修復 ⇄ 違反狙い撃ち仕上げ」を最大2周まで往復して粘る
+  let bestShifts     = origShifts;
+  let bestViolations = origViolations;
+  const scope = ['狭い範囲', 'やや広い範囲', '広い範囲', '全面見直し'];
+  for (let cycle = 0; cycle < 2 && bestViolations.length > 0; cycle++) {
+    // フェーズ1: 焼きなまし修復（停滞したら範囲を段階的に拡大）
+    let level = 0;
+    for (let pass = 0; pass < MAX_PASS && bestViolations.length > 0; pass++) {
+      const label = `修復中 ${pass + 1}回目（${scope[Math.min(level, 3)]}）｜ 残りエラー ${bestViolations.length}件 →`;
+      const r = await onePass(bestShifts, bestViolations, level, label);
+      if (better3(key3Of(r.violations), key3Of(bestViolations))) {
+        bestShifts = r.shifts; bestViolations = r.violations;
+        level = 0; // 改善したら再び狭い範囲（安く速い）に戻す
+      } else {
+        level++;                    // 停滞 → 範囲を広げて再挑戦
+        if (level > FULL_LEVEL) break; // 全面再最適化でも減らなければ終了
+      }
+      progressCallback && progressCallback(
+        Math.min(99, Math.floor(((pass + 1) / MAX_PASS) * 100)),
+        `修復中… 残りエラー ${bestViolations.length}件（${pass + 1}回目まで完了）`);
+    }
+
+    // フェーズ2: 違反狙い撃ち仕上げ（1マス置換・2日交換・同日2人交換）
+    if (bestViolations.length > 0) {
+      progressCallback && progressCallback(99, `最終仕上げ（違反狙い撃ち）… 残り ${bestViolations.length}件`);
+      await sleep(0);
+      const beforePolish = bestViolations.length;
+      bestViolations = violationPolish(bestShifts, 4);
+      // 仕上げで公休が目標超過になった分を「余」に整える（悪化したら戻す）
+      const preSurplus = deepCopyShifts(bestShifts);
+      markSurplusRest(bestShifts);
+      const nv = checkViolations(bestShifts);
+      if (!better3(key3Of(bestViolations), key3Of(nv))) bestViolations = nv; // 悪化しなければ採用
+      else { for (const sid in preSurplus) bestShifts[sid] = preSurplus[sid]; }
+      // 仕上げで改善がなければ、もう1周しても同じなので終了
+      if (bestViolations.length >= beforePolish) break;
+    }
+  }
+  progressCallback && progressCallback(100, `修復完了 — 残りエラー ${bestViolations.length}件`);
+
+  AppState.generated = true;
+  const improved   = better3(key3Of(bestViolations), key3Of(origViolations));
+  const finalShifts = improved ? bestShifts : origShifts;
+  // 最後の一手（無条件）: 採用する盤面の人員不足を必ず潰す。修復の採否が
+  // 「違反総数」基準のため、総数が少ない代わりに不足の残る案を選びうるのを補償する。
+  groups.forEach(g => guaranteeDayStaffingReal(finalShifts, g.staff, g.reqs, g.dailyReqs));
+  // 総合仕上げ: 🔴も🟡も含めて総数を減らす（人員不足は毎回再保証・悪化なし）
+  const finalViolations = finalPolishLoop(finalShifts, groups, 6);
+  AppState.shifts     = finalShifts;
+  AppState.violations = finalViolations;
+  return { score: finalViolations.length, violations: finalViolations,
+           success: finalViolations.length === 0, improved: finalViolations.length < origViolations.length,
+           before: origViolations.length, after: finalViolations.length };
+}
+
+/** 修復仕上げ用: そのセルが動かせるか（希望休・固定・有給は不可） */
+function _polishMovable(shifts, sid, d) {
+  const req = (AppState.requests[sid] || {})[d];
+  if (req && (isOff(req) || isWork(req))) return false;
+  if ((AppState.fixedShifts[sid] || {})[d]) return false;
+  if ((shifts[sid] || {})[d] === '有') return false; // 有給は消さない
+  return true;
+}
+
+/**
+ * 違反件数そのものを目的関数にした狙い撃ち探索。
+ * 各違反の周辺で ①1マス置換 ②同一人物の2日交換 ③同日2人交換 を試し、
+ * checkViolations の件数が減る手だけ採用する（悪化ゼロ保証）。
+ * スコア関数では拾いきれない「2手で直る」違反を確実に削る。
+ * @returns {Array} 仕上げ後の violations
+ */
+/**
+ * 人数を一切変えずにリズム違反だけを削る仕上げ。
+ * 「同じ日に働く2人の役割を入れ替える」手だけを使うため、各役職の人数は
+ * 常に不変 ＝ 人員不足・スキル不足を絶対に増やさない。人員不足の最終保証の
+ * 後に安全に走らせて、切替（連勤中の時間帯切替）・遅→休→早 などを掃除する。
+ * @returns {Array} 掃除後の violations
+ */
+// 🔴絶対NG扱いの違反タイプ（表示側の分類と揃える）。単発出勤も含む。
+const MUST_TYPES_OPT = new Set([
+  'understaff', 'skill-late', 'consecutive', 'resp-duplicate', 'hierarchy',
+  'vicemanager-absent', 'single-work', 'pref-mismatch', 'role-mismatch',
+  'event-absent', 'night-after-work',
+  'off-count', 'late-early', // ユーザー要望: 公休不足・遅→早(休みなし) も絶対NG
+]);
+// 設定不可（安全のため常に既定）のルール: 人員不足・公休不足・連勤超過・担当外シフト。
+const RULE_LOCKED = new Set(['understaff', 'off-count', 'consecutive', 'role-mismatch']);
+// ルールの強弱レベルを取得: 'off' | 'should' | 'must'。
+// 固定ルールと未設定は既定分類（MUST_TYPES_OPT にあれば must、無ければ should）。
+function getRuleLevel(type) {
+  if (!RULE_LOCKED.has(type)) {
+    const cfg = (AppState.settings && AppState.settings.ruleLevels) || {};
+    const v = cfg[type];
+    if (v === 'off' || v === 'should' || v === 'must') return v;
+  }
+  return MUST_TYPES_OPT.has(type) ? 'must' : 'should';
+}
+// そのルールが有効か（off でない）。スコアのペナルティ抑制に使う。
+function ruleOn(type) { return getRuleLevel(type) !== 'off'; }
+// 🔴（must）扱いの違反数。設定でmustにした/した分を動的に数える。
+function countMustVios(vios) { return vios.filter(v => getRuleLevel(v.type) === 'must').length; }
+
+// 最優先3項目（ユーザー要望で絶対0）: 人員不足・公休不足・連勤超過。
+// 仕上げ・揺さぶりの採否はこの3項目を最優先し、次に🔴総数、最後に総違反数で比較する
+// （🟡は残ってよいので、🟡を増やしてでも最優先3項目を消す判断ができるようにする）。
+const P3_TYPES_OPT = new Set(['understaff', 'off-count', 'consecutive']);
+function countP3Vios(vios) { return vios.filter(v => P3_TYPES_OPT.has(v.type)).length; }
+// 辞書式キー [最優先3, 🔴総数, 総違反数]。小さいほど良い
+function key3Of(vios) { return [countP3Vios(vios), countMustVios(vios), vios.length]; }
+function better3(a, b) { for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] < b[i]; } return false; }
+
+/**
+ * 🔴リズム違反（単発出勤・連勤超過）を、人数を変えずに解消する専用処理。
+ * 違反者 X をある1日休ませ、その枠を「同じ日に休んでいて前後どちらかで働いている」
+ * 同僚 Y に渡す。役職の人数は不変なので人員不足は増えない。
+ *  - 単発出勤: 孤立した勤務日(その日)で X を休ませる
+ *  - 連勤超過: 連勤ブロックの途中の日で X を休ませて連勤を断ち切る
+ * 🔴違反が減る入替だけを採用する。
+ * @returns {Array} 処理後の violations
+ */
+function eliminateSingleWork(shifts, staffList, reqs, dailyReqs) {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const allowedOf = {};
+  staffList.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    allowedOf[s.id] = base;
+  });
+  const idset = new Set(staffList.map(s => s.id));
+  // その日に X を休ませ、枠を休んでいる同僚 Y に渡す（人数不変で🔴が減れば採用）
+  const tryRestAndHandoff = (X, d, curMust) => {
+    if (!_polishMovable(shifts, X, d) || !isWork(shifts[X][d])) return null;
+    const role = shifts[X][d];
+    // 優先順: ①休みが余っている人（余セル or 公休が目標超過 → 渡しても公休不足にならない）
+    //         ②前後どちらかで働いている人（渡した先が新たな単発出勤にならない）
+    const cands = staffList
+      .filter(Y => Y.id !== X && _polishMovable(shifts, Y.id, d) &&
+                   !isWork(shifts[Y.id][d]) && (allowedOf[Y.id] || []).includes(role))
+      .sort((a, b) => {
+        const surplus = s => (shifts[s.id][d] === '余' ||
+                              countOff(shifts, s, days) > (s.maxOff || 0)) ? 0 : 1;
+        const adj = s => ((d > 1 && isWork(shifts[s.id][d - 1])) ||
+                          (d < days && isWork(shifts[s.id][d + 1]))) ? 0 : 1;
+        return (surplus(a) - surplus(b)) || (adj(a) - adj(b));
+      });
+    for (const Y of cands) {
+      const bx = shifts[X][d], by = shifts[Y.id][d];
+      shifts[X][d] = '休'; shifts[Y.id][d] = role;
+      const nv = checkViolations(shifts), nm = countMustVios(nv);
+      if (nm < curMust.must) return { nv, nm }; // 🔴が確実に減る手だけ採用
+      shifts[X][d] = bx; shifts[Y.id][d] = by;                     // 改善しなければ戻す
+    }
+    return null;
+  };
+  // 玉突き再配置: 休ませる同僚が直接いなくても、X を休ませて空いた枠を
+  // 二部マッチングで連鎖的に埋め直す（働いている人が役を移り、最終的に余の人が入る）。
+  // guaranteeDayStaffingReal は不足日だけを対象にし、余から先に埋めるので、
+  // 人員不足0を保ったまま連鎖の受け渡しで X を休ませられる。辞書式で改善時のみ採用。
+  const tryRestViaCascade = (X, d, curMust) => {
+    if (!_polishMovable(shifts, X, d) || !isWork(shifts[X][d])) return null;
+    const snap = deepCopyShifts(shifts);
+    shifts[X][d] = '休';
+    guaranteeDayStaffingReal(shifts, staffList, reqs, dailyReqs); // 空いた枠を連鎖で再充足
+    const nv = checkViolations(shifts), nm = countMustVios(nv);
+    // 🔴総数が「確実に減る」ときだけ採用。連勤を1つ消す代わりに副店長不在などの
+    // 別の🔴を作る（🔴総数が変わらない）トレードは禁止 ＝ 玉突きで悪化させない。
+    if (nm < curMust) return { nv, nm };
+    for (const sid in snap) shifts[sid] = snap[sid]; // 改善しなければ全面復帰
+    return null;
+  };
+  let vios = checkViolations(shifts);
+  let must = countMustVios(vios);
+  for (let guard = 0; guard < 16; guard++) {
+    let changed = false;
+    const targets = vios.filter(v =>
+      (v.type === 'single-work' || v.type === 'consecutive' || v.type === 'off-count') &&
+      v.staffId && idset.has(v.staffId));
+    // 最優先3項目（人員不足はguaranteeが担当）: 連勤超過・公休不足を単発より先に処理
+    const TP = { 'consecutive': 0, 'off-count': 0, 'single-work': 1 };
+    targets.sort((a, b) => (TP[a.type] ?? 2) - (TP[b.type] ?? 2));
+    for (const v of targets) {
+      const X = v.staffId;
+      // 休ませる候補日: 単発はその日、連勤はブロック途中、公休不足は全出勤日
+      let candDays;
+      if (v.type === 'single-work') {
+        candDays = [v.day];
+      } else if (v.type === 'consecutive') {
+        let a = v.day; while (a > 1 && isWork(shifts[X][a - 1])) a--;
+        let b = v.day; while (b < days && isWork(shifts[X][b + 1])) b++;
+        candDays = [];
+        for (let d = a + 1; d <= b; d++) candDays.push(d); // 先頭は避け、途中で断つ
+      } else if (v.type === 'off-count') {
+        // 公休不足: 出勤している全日を候補に、余裕のある同僚へ枠を渡して X を休ませる
+        candDays = [];
+        for (let d = 1; d <= days; d++) if (isWork(shifts[X][d])) candDays.push(d);
+      } else {
+        candDays = [v.day - 1, v.day].filter(d => d >= 1);
+      }
+      for (const d of candDays) {
+        const r = tryRestAndHandoff(X, d, { must, total: vios.length });
+        if (r) { vios = r.nv; must = r.nm; changed = true; break; }
+      }
+      // 直接の受け渡しで無理な連勤超過・公休不足は、玉突き再配置（多段の受け渡し）で断つ。
+      // X を休ませ、空いた枠を二部マッチングで連鎖的に埋め直す。余から充足するので
+      // 新たな公休不足を作りにくく、人員不足0も保たれる。
+      if (!changed && (v.type === 'consecutive' || v.type === 'off-count')) {
+        let tries = 0;
+        for (const d of candDays) {
+          if (tries++ >= 8) break; // 1違反あたり最大8日まで（総当たりの暴走防止）
+          const r = tryRestViaCascade(X, d, must); // 現在の🔴総数より確実に減る手だけ採用
+          if (r) { vios = r.nv; must = r.nm; changed = true; break; }
+        }
+      }
+      // 単発出勤は逆方向も試す: 隣の日に X の出勤を伸ばして連勤化する
+      // （X がその日働く代わりに、働いていた Y を休ませる。人数は不変）
+      if (!changed && v.type === 'single-work') {
+        for (const d of [v.day - 1, v.day + 1]) {
+          if (d < 1 || d > days) continue;
+          if (!_polishMovable(shifts, X, d) || isWork(shifts[X][d])) continue;
+          for (const Y of staffList) {
+            if (Y.id === X || !_polishMovable(shifts, Y.id, d)) continue;
+            const role = shifts[Y.id][d];
+            if (!isWork(role) || !(allowedOf[X] || []).includes(role)) continue;
+            const bx = shifts[X][d], by = shifts[Y.id][d];
+            shifts[X][d] = role; shifts[Y.id][d] = '休';
+            const nv = checkViolations(shifts), nm = countMustVios(nv);
+            if (nm < must) { vios = nv; must = nm; changed = true; break; }
+            shifts[X][d] = bx; shifts[Y.id][d] = by;
+          }
+          if (changed) break;
+        }
+      }
+      if (changed) break;
+    }
+    if (!changed) break;
+  }
+  return vios;
+}
+
+/**
+ * 固定セル境界の遅番を直す専用パス。
+ * 「翌日が固定の研修/早番系」なのに当日が遅番だと、遅→研/遅→早のエラーが
+ * 必ず出る。当日の遅番を、同じ日に早番系で働く人と役割交換して解消する。
+ * 同日の勤務者同士の交換なので各役職の人数は不変（🔴に影響しない）。
+ * 各境界は1回だけ処理するためループしない。
+ * @returns {Array} 処理後の violations
+ */
+function fixLockedBoundaryLates(shifts) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  const candsOf = {};
+  staff.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    candsOf[s.id] = base;
+  });
+  const isLockedCell = (sid, d) =>
+    !!(AppState.fixedShifts[sid] || {})[d] ||
+    (() => { const rq = (AppState.requests[sid] || {})[d]; return rq && (isOff(rq) || isWork(rq)); })();
+
+  let vios = checkViolations(shifts);
+  for (const s of staff) {
+    for (let d = 1; d < days; d++) {
+      const nx = shifts[s.id][d + 1];
+      // 翌日が「固定の早番系（研修含む）」で、当日が動かせる遅番のとき
+      if (!isLockedCell(s.id, d + 1) || !isWork(nx) || !isEarlyCategory(nx)) continue;
+      const cur = shifts[s.id][d];
+      if (!isLate(cur) || !_polishMovable(shifts, s.id, d)) continue;
+      // 同じ日に早番系で働く人と役割交換
+      for (const p of staff) {
+        if (p.id === s.id || !_polishMovable(shifts, p.id, d)) continue;
+        const pv = shifts[p.id][d];
+        if (!isWork(pv) || !isEarlyCategory(pv) || isTraining(pv)) continue;
+        if (!candsOf[s.id].includes(pv) || !candsOf[p.id].includes(cur)) continue;
+        shifts[s.id][d] = pv; shifts[p.id][d] = cur;
+        const nv = checkViolations(shifts);
+        if (nv.length < vios.length) { vios = nv; break; }
+        shifts[s.id][d] = cur; shifts[p.id][d] = pv; // 減らなければ戻す
+      }
+    }
+  }
+  return vios;
+}
+
+/**
+ * 🔴絶対NGを最優先で消す同日役割交換パス。
+ * 同じ日に働く2人の役割を交換する（人数不変）。🔴が1件でも減るなら、
+ * 代わりに🟡（切替・リズム）が増えても採用する。
+ * 例: 営業スキルが遅番に足りない日、早番にいる営業持ちと遅番の非保有者を交換。
+ * @returns {Array} 処理後の violations
+ */
+function mustFirstSwapPolish(shifts, maxRounds) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  const candsOf = {};
+  staff.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    candsOf[s.id] = base;
+  });
+  let vios = checkViolations(shifts);
+  let must = countMustVios(vios);
+  for (let round = 0; round < (maxRounds || 10) && must > 0; round++) {
+    let changed = false;
+    const mustVios = vios.filter(v => MUST_TYPES_OPT.has(v.type) && v.day >= 1);
+    for (const v of mustVios) {
+      for (let d = Math.max(1, v.day - 1); d <= Math.min(days, v.day + 1) && !changed; d++) {
+        for (let i = 0; i < staff.length && !changed; i++) {
+          const A = staff[i];
+          if (!_polishMovable(shifts, A.id, d)) continue;
+          const va = shifts[A.id][d];
+          if (!isWork(va)) continue;
+          for (let j = i + 1; j < staff.length; j++) {
+            const B = staff[j];
+            if (!_polishMovable(shifts, B.id, d)) continue;
+            const vb = shifts[B.id][d];
+            if (!isWork(vb) || va === vb) continue;
+            if (!candsOf[A.id].includes(vb) || !candsOf[B.id].includes(va)) continue;
+            shifts[A.id][d] = vb; shifts[B.id][d] = va;
+            const nv = checkViolations(shifts), nm = countMustVios(nv);
+            if (nm < must) { vios = nv; must = nm; changed = true; break; }
+            shifts[A.id][d] = va; shifts[B.id][d] = vb;
+          }
+        }
+      }
+      // スキル不足: 保有者が全員働いていても足りない日は、休んでいる保有者に
+      // 非保有者の枠を引き継がせ、非保有者を休ませる（人数不変）
+      if (!changed && v.type === 'skill-late') {
+        const d = v.day;
+        const sk = (AppState.skills || []).find(k => v.message && v.message.includes(k.name));
+        const skName = sk ? sk.name : null;
+        const target = (sk && sk.target) === 'early' ? 'early' : 'late';
+        const inBand = sh => target === 'early' ? (isEarlyCategory(sh) && !isTraining(sh)) : isLate(sh);
+        if (skName) {
+          const holders = staff.filter(s => (s.skills || []).includes(skName) &&
+            _polishMovable(shifts, s.id, d) && !isWork(shifts[s.id][d]));
+          const nonHolders = staff.filter(s => !(s.skills || []).includes(skName) &&
+            _polishMovable(shifts, s.id, d) && isWork(shifts[s.id][d]) && inBand(shifts[s.id][d]));
+          for (const H of holders) {
+            for (const N of nonHolders) {
+              const role = shifts[N.id][d];
+              if (!candsOf[H.id].includes(role)) continue;
+              const bh = shifts[H.id][d], bn = shifts[N.id][d];
+              shifts[H.id][d] = role; shifts[N.id][d] = '休';
+              const nv = checkViolations(shifts), nm = countMustVios(nv);
+              if (nm < must) { vios = nv; must = nm; changed = true; break; }
+              shifts[H.id][d] = bh; shifts[N.id][d] = bn;
+            }
+            if (changed) break;
+          }
+        }
+      }
+      if (changed) break;
+    }
+    if (!changed) break;
+  }
+  return vios;
+}
+
+/**
+ * 総合仕上げ: 🔴も🟡も含めて違反総数を減らすことを目指し、各種の掃除を
+ * 収束するまで反復する。各パスは「違反が減る手だけ」採用し、人員不足は
+ * 毎回 guaranteeDayStaffingReal で再保証するため増えない。最良盤面を保持し、
+ * 改善が止まったら最良に戻して終了する（悪化しない）。
+ * @returns {Array} 最終 violations
+ */
+function finalPolishLoop(shifts, groups, maxRounds) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  const guard = () => groups.forEach(g =>
+    guaranteeDayStaffingReal(shifts, g.staff, g.reqs, g.dailyReqs));
+  const single = () => groups.forEach(g =>
+    eliminateSingleWork(shifts, g.staff, g.reqs, g.dailyReqs));
+
+  // 各スタッフの担当可能シフト（研修除外・prefs適合）
+  const candsOf = {};
+  staff.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh); return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    candsOf[s.id] = base;
+  });
+
+  // 磨きひとまとめ（各パスは違反が減る手だけ採用。人員不足は毎回再保証）
+  const polishOnce = () => {
+    violationPolish(shifts, 4);
+    guard();
+    single();
+    fixLockedBoundaryLates(shifts);
+    mustFirstSwapPolish(shifts, 8);
+    return sameDaySwapPolish(shifts, 12); // 掃除後の violations 配列を返す
+  };
+
+  // 揺さぶり: 同じ日に働く2人の役割をランダムに入れ替える（人数不変＝人員不足を作らない）。
+  // 違反日周辺を優先的に狙って、局所最適から抜け出しやすくする。
+  const perturb = (n, vios) => {
+    const vdays = vios.filter(v => v.day >= 1).map(v => v.day);
+    for (let k = 0; k < n; k++) {
+      const d = (vdays.length && Math.random() < 0.7)
+        ? vdays[Math.floor(Math.random() * vdays.length)]
+        : Math.floor(Math.random() * days) + 1;
+      const workers = staff.filter(s => _polishMovable(shifts, s.id, d) && isWork(shifts[s.id][d]));
+      if (workers.length < 2) continue;
+      const A = workers[Math.floor(Math.random() * workers.length)];
+      const B = workers[Math.floor(Math.random() * workers.length)];
+      if (A.id === B.id) continue;
+      const va = shifts[A.id][d], vb = shifts[B.id][d];
+      if (va === vb || !candsOf[A.id].includes(vb) || !candsOf[B.id].includes(va)) continue;
+      shifts[A.id][d] = vb; shifts[B.id][d] = va;
+    }
+  };
+
+  // まず磨いて基準を作る
+  let bestVios  = polishOnce();
+  let bestKey   = key3Of(bestVios);            // [最優先3, 🔴総数, 総違反数]
+  let bestBoard = deepCopyShifts(shifts);
+
+  // 軽い basin hopping: 揺さぶり→再磨き。辞書式キーで改善したら採用、しなければ最良へ
+  // 戻す（絶対に悪化しない）。最優先3項目(不足/公休/連勤)を最優先で消し、そのためなら
+  // 🟡が増えてもよい。連続で改善が無ければ打ち切る（時間対効果のバランス）。
+  const rounds = (maxRounds || 8);
+  let stale = 0;
+  for (let round = 0; round < rounds && bestKey[2] > 0; round++) {
+    const strength = 2 + Math.min(4, stale); // 停滞するほど少し大きく揺さぶる
+    perturb(strength, bestVios);
+    const nv = polishOnce();
+    const nk = key3Of(nv);
+    if (better3(nk, bestKey)) {
+      bestKey = nk; bestBoard = deepCopyShifts(shifts); bestVios = nv; stale = 0;
+    } else {
+      for (const sid in bestBoard) shifts[sid] = Object.assign({}, bestBoard[sid]); // 最良へ復帰
+      if (++stale >= 4) break; // 4回連続で改善なし → 打ち切り
+    }
+  }
+  for (const sid in bestBoard) shifts[sid] = Object.assign({}, bestBoard[sid]);
+  return checkViolations(shifts);
+}
+
+function sameDaySwapPolish(shifts, maxRounds) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  const candsOf = {};
+  staff.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    candsOf[s.id] = base;
+  });
+  let vios = checkViolations(shifts);
+  for (let round = 0; round < maxRounds && vios.length > 0; round++) {
+    let improved = false;
+    // 違反日の周辺で、働く2人の役割を交換して違反件数が減るなら採用
+    const daysToScan = new Set();
+    vios.forEach(v => { for (let dd = v.day - 1; dd <= v.day + 1; dd++) if (dd >= 1 && dd <= days) daysToScan.add(dd); });
+    for (const d of daysToScan) {
+      for (let i = 0; i < staff.length && !improved; i++) {
+        const A = staff[i];
+        if (!_polishMovable(shifts, A.id, d)) continue;
+        const va = shifts[A.id][d];
+        if (!isWork(va)) continue;
+        for (let j = i + 1; j < staff.length; j++) {
+          const B = staff[j];
+          if (!_polishMovable(shifts, B.id, d)) continue;
+          const vb = shifts[B.id][d];
+          if (!isWork(vb) || va === vb) continue;
+          if (!candsOf[A.id].includes(vb) || !candsOf[B.id].includes(va)) continue;
+          shifts[A.id][d] = vb; shifts[B.id][d] = va;
+          const nv = checkViolations(shifts);
+          // 最優先3(不足/公休/連勤)→🔴総数→総数の辞書式で改善する入替だけ採用。
+          // 🔴を増やして🟡を減らす（総数だけ下げる）手は採らない。
+          if (better3(key3Of(nv), key3Of(vios))) { vios = nv; improved = true; break; }
+          shifts[A.id][d] = va; shifts[B.id][d] = vb; // 戻す
+        }
+      }
+      if (improved) break;
+    }
+    if (!improved) break;
+  }
+  return vios;
+}
+
+function violationPolish(shifts, maxRounds) {
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+
+  // 各スタッフの置換候補（研修除外・prefs適合＋休）
+  const candsOf = {};
+  staff.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    candsOf[s.id] = base.concat(['休']);
+  });
+  // スコア計算用の allowedShifts（休を除く）
+  const allowedMap = {};
+  staff.forEach(s => { allowedMap[s.id] = candsOf[s.id].filter(c => c !== '休'); });
+  const P = AppState.settings.penalties || {};
+
+  let vios     = checkViolations(shifts);
+  let curMust  = countMustVios(vios);
+  let curScore = calculateScore(shifts, allowedMap, days, P);
+  // 受理条件（辞書式）: ①🔴(MUST)件数は絶対に増やさない → ②総違反件数が減る →
+  // ③同数ならスコア改善。これにより「リズムを直す代わりに人員不足を作る」等の
+  // 🔴を増やす手は決して採用しない（自動調整で定数不足が出る問題の根治）。
+  const tryMove = (apply, undo) => {
+    apply();
+    const nv = checkViolations(shifts);
+    const nm = countMustVios(nv);
+    if (nm > curMust) { undo(); return false; }        // 🔴が増える手は却下
+    if (nm < curMust) {                                // 🔴が減るなら即採用
+      vios = nv; curMust = nm; curScore = calculateScore(shifts, allowedMap, days, P); return true;
+    }
+    if (nv.length < vios.length) {                     // 🔴同数で総数が減る
+      vios = nv; curScore = calculateScore(shifts, allowedMap, days, P); return true;
+    }
+    if (nv.length === vios.length) {                   // 同点はスコアで前進
+      const sc = calculateScore(shifts, allowedMap, days, P);
+      if (sc < curScore - 1e-9) { vios = nv; curScore = sc; return true; }
+    }
+    undo();
+    return false;
+  };
+
+  // 絶対に残したくない違反（人員不足・単発出勤・連勤超過）を最優先で処理する
+  const VPRI = { 'understaff': 0, 'skill-late': 1, 'consecutive': 2, 'single-work': 3, 'hierarchy': 4, 'resp-duplicate': 4 };
+  for (let round = 0; round < maxRounds && vios.length > 0; round++) {
+    let improved = false;
+
+    const ordered = vios.slice().sort((a, b) => ((VPRI[a.type] ?? 9) - (VPRI[b.type] ?? 9)));
+    for (const v of ordered) {
+      if (v.day < 1) continue; // 公休不足(day0)は全日対象で高コストのため対象外
+      const targets = v.staffId
+        ? staff.filter(s => s.id === v.staffId)
+        : staff;
+
+      for (const s of targets) {
+        // ① 1マス置換（違反日と前後2日 — 切替・リズムは前後の日が原因のことが多い）
+        for (let d = Math.max(1, v.day - 2); d <= Math.min(days, v.day + 2); d++) {
+          if (!_polishMovable(shifts, s.id, d)) continue;
+          const cur = shifts[s.id][d];
+          for (const c of candsOf[s.id]) {
+            if (c === cur) continue;
+            if (tryMove(() => { shifts[s.id][d] = c; },
+                        () => { shifts[s.id][d] = cur; })) { improved = true; break; }
+          }
+        }
+
+        // ② 同一人物の2日交換（違反日±1 ↔ 月内の別日）
+        for (let d1 = Math.max(1, v.day - 1); d1 <= Math.min(days, v.day + 1); d1++) {
+          if (!_polishMovable(shifts, s.id, d1)) continue;
+          for (let d2 = 1; d2 <= days; d2++) {
+            if (d2 === d1 || !_polishMovable(shifts, s.id, d2)) continue;
+            const a = shifts[s.id][d1], b = shifts[s.id][d2];
+            if (a === b) continue;
+            if (tryMove(() => { shifts[s.id][d1] = b; shifts[s.id][d2] = a; },
+                        () => { shifts[s.id][d1] = a; shifts[s.id][d2] = b; })) { improved = true; break; }
+          }
+        }
+      }
+
+      // ③ 同日2人交換（担当可能な組のみ）。連勤違反は「連勤の途中の日」を
+      //    誰かに肩代わりさせないと直らないため、走査範囲を連勤ブロック全体に広げる
+      const swapFrom = v.type === 'consecutive' ? Math.max(1, v.day - 5) : Math.max(1, v.day - 1);
+      for (let d = swapFrom; d <= Math.min(days, v.day + 1); d++) {
+        for (let i = 0; i < staff.length; i++) {
+          const A = staff[i];
+          if (!_polishMovable(shifts, A.id, d)) continue;
+          for (let j = i + 1; j < staff.length; j++) {
+            const B = staff[j];
+            if (!_polishMovable(shifts, B.id, d)) continue;
+            const va = shifts[A.id][d], vb = shifts[B.id][d];
+            if (va === vb) continue;
+            const aOk = !isWork(vb) || candsOf[A.id].includes(vb);
+            const bOk = !isWork(va) || candsOf[B.id].includes(va);
+            if (!aOk || !bOk) continue;
+            if (tryMove(() => { shifts[A.id][d] = vb; shifts[B.id][d] = va; },
+                        () => { shifts[A.id][d] = va; shifts[B.id][d] = vb; })) { improved = true; break; }
+          }
+        }
+      }
+
+      // ④ 2日同時の2人交換: 同じ違反が2日連続で絡み合っていると（例: ヒエラルキー違反が
+      //    25日と26日）、1日だけ直しても件数が減らず①〜③では採用されない。
+      //    2日まとめて入れ替えれば両方同時に消えるケースを拾う。
+      for (const d0 of [v.day - 1, v.day]) {
+        if (d0 < 1 || d0 + 1 > days) continue;
+        for (let i = 0; i < staff.length; i++) {
+          const A = staff[i];
+          if (!_polishMovable(shifts, A.id, d0) || !_polishMovable(shifts, A.id, d0 + 1)) continue;
+          for (let j = i + 1; j < staff.length; j++) {
+            const B = staff[j];
+            if (!_polishMovable(shifts, B.id, d0) || !_polishMovable(shifts, B.id, d0 + 1)) continue;
+            const a1 = shifts[A.id][d0],     b1 = shifts[B.id][d0];
+            const a2 = shifts[A.id][d0 + 1], b2 = shifts[B.id][d0 + 1];
+            if (a1 === b1 && a2 === b2) continue;
+            const ok = (!isWork(b1) || candsOf[A.id].includes(b1)) &&
+                       (!isWork(a1) || candsOf[B.id].includes(a1)) &&
+                       (!isWork(b2) || candsOf[A.id].includes(b2)) &&
+                       (!isWork(a2) || candsOf[B.id].includes(a2));
+            if (!ok) continue;
+            if (tryMove(
+              () => { shifts[A.id][d0] = b1; shifts[B.id][d0] = a1;
+                      shifts[A.id][d0 + 1] = b2; shifts[B.id][d0 + 1] = a2; },
+              () => { shifts[A.id][d0] = a1; shifts[B.id][d0] = b1;
+                      shifts[A.id][d0 + 1] = a2; shifts[B.id][d0 + 1] = b2; })) { improved = true; break; }
+          }
+        }
+      }
+    }
+
+    if (!improved) break;
+  }
+  return vios;
+}
+
+// ===== 自動チーム分け（早の軸 / 遅の軸） =====
+// 早遅バランスが「均等」の人が多いと、「片寄せしたい」と「半々にしたい」が綱引きになり
+// 切替エラーが残りやすい。そこで生成前に必要コマ数と各自の出勤余力から
+// 「誰を早番の軸に、誰を遅番の軸にするか」をアプリ側で自動決定する。
+// ユーザーが明示的に早寄り/遅寄りを設定している人はその設定を尊重して対象外。
+let _autoBandMap = {};
+let _noLateDayMap = {}; // { staffId: Set<day> } その日は遅番禁止（翌日が固定早番系のため）
+
+function _bandOfShift(sh) {
+  if (isLate(sh)) return 'late';
+  if (isEarlyCategory(sh) && !isTraining(sh)) return 'early';
+  return null;
+}
+
+function computeAutoBands(staff, allowedShifts, days) {
+  const map  = {};
+  const keys = getWorkShiftKeys();
+
+  // 月間の必要コマ数（時間帯別）
+  const demand = { early: 0, late: 0 };
+  for (let d = 1; d <= days; d++) {
+    keys.forEach(sh => {
+      const b = _bandOfShift(sh);
+      if (b) demand[b] += optDayReq(sh, d) || 0;
+    });
+  }
+
+  const cap = s => Math.max(0, days - (s.maxOff || 0) - (s.paidLeave || 0));
+  const assigned = { early: 0, late: 0 };
+  const flexible = [];
+
+  staff.forEach(s => {
+    const shs  = allowedShifts[s.id] || s.allowedShifts || [];
+    const canE = shs.some(sh => _bandOfShift(sh) === 'early');
+    const canL = shs.some(sh => _bandOfShift(sh) === 'late');
+    const bal  = s.balance || 'balanced';
+    if (!canE || !canL) {
+      // 片方の時間帯しか入れない人は、その時間帯の供給として先にカウント
+      const b = canE ? 'early' : (canL ? 'late' : null);
+      if (b) assigned[b] += cap(s);
+      return;
+    }
+    if (bal !== 'balanced' && SHIFT_BALANCE[bal]) {
+      // 明示設定済みの人は設定比率で供給をカウント（軸の自動決定はしない）
+      assigned.early += cap(s) * SHIFT_BALANCE[bal].earlyRatio;
+      assigned.late  += cap(s) * SHIFT_BALANCE[bal].lateRatio;
+      return;
+    }
+    flexible.push(s);
+  });
+
+  // 上位役職から順に、不足が大きい時間帯へ軸を割り当てる
+  // （責任者になれる人が早番・遅番の両方に行き渡るようにする狙い）
+  flexible.sort((a, b) => getStaffPriority(a) - getStaffPriority(b));
+
+  // スキル要件を先に満たす: 「営業は遅番に2人」のようなスキルは、その時間帯に
+  // 保有者が毎日いないと必ずエラーになる。軸割り当てを役職順の前に行い、
+  // 必要なスキル保有者を該当時間帯の軸へ優先的に寄せる（スキルブラインドを解消）。
+  const skillReqs = [];
+  (AppState.skills || []).forEach(sk => {
+    const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
+    if (!need) return;
+    const band = (sk.target || 'late') === 'early' ? 'early' : 'late';
+    skillReqs.push({ name: sk.name, need, band });
+  });
+  const taken = new Set();
+  const assignBand = (s, band) => {
+    map[s.id] = band;
+    taken.add(s.id);
+    const c = cap(s);
+    assigned[band] += c * 0.7;
+    assigned[band === 'early' ? 'late' : 'early'] += c * 0.3;
+  };
+  skillReqs.forEach(req => {
+    // その時間帯に「毎日 need 人」を確保するのに必要な軸保有者数を見積もる。
+    // 1人あたりの供給 ≒ (出勤率) × 0.7（軸でも3割は反対帯に入るため）
+    let coverage = 0;
+    const holders = flexible
+      .filter(s => !taken.has(s.id) && (s.skills || []).includes(req.name))
+      .sort((a, b) => cap(b) - cap(a)); // 出勤日数が多い（＝頼れる）人から
+    for (const s of holders) {
+      if (coverage >= req.need) break;
+      assignBand(s, req.band);
+      coverage += (cap(s) / days) * 0.7;
+    }
+  });
+
+  flexible.forEach(s => {
+    if (taken.has(s.id)) return;
+    const needE = demand.early - assigned.early;
+    const needL = demand.late  - assigned.late;
+    const band  = needE >= needL ? 'early' : 'late';
+    assignBand(s, band);
+  });
+  return map;
+}
+
+/**
+ * 1部門分の最適化（_optStaff / _optReqs に部門のスタッフ・必要人数が設定済みの前提）
+ * @param {object} [repairCtx] 修復モード時のコンテキスト { seedShifts, cells, staffAll }
+ */
+async function optimizeGroupSchedule(progressCallback, repairCtx) {
   _shiftKeysCache = null; // 最適化開始時にリセット
   const days     = getDaysInMonth(AppState.settings.targetMonth);
   const staff    = optStaff();
@@ -108,6 +997,22 @@ async function optimizeGroupSchedule(progressCallback) {
     allowedShifts[s.id] = base;
   });
 
+  // 自動チーム分け: 「均等」設定で両時間帯に入れる人に、早の軸/遅の軸を自動割り当て
+  _autoBandMap = computeAutoBands(staff, allowedShifts, days);
+
+  // 固定セル境界の遅番禁止マップ: 翌日が「固定の早番系（研修含む）出勤」なら
+  // 当日に遅番を置くと必ず 遅→研/遅→早 エラーになるため、生成段階から禁止する
+  _noLateDayMap = {};
+  staff.forEach(s => {
+    _noLateDayMap[s.id] = new Set();
+    for (let d = 1; d < days; d++) {
+      const fx = (AppState.fixedShifts[s.id] || {})[d + 1];
+      const rq = (AppState.requests[s.id]    || {})[d + 1];
+      const nxFixed = fx || (rq && isWork(rq) ? rq : null);
+      if (nxFixed && isWork(nxFixed) && isEarlyCategory(nxFixed)) _noLateDayMap[s.id].add(d);
+    }
+  });
+
   // 2. 希望休と固定シフトをロックして初期化
   let shifts = {};
   const locked = {};
@@ -132,22 +1037,46 @@ async function optimizeGroupSchedule(progressCallback) {
     }
   });
 
-  // 2.5. 特別日の副店長固定
-  applySpecialDaysLogic(shifts, locked, staff, days);
+  if (repairCtx) {
+    // 修復モード: 現在のシフトを種にして、エラー箇所だけロックを外す
+    staff.forEach(s => {
+      for (let d = 1; d <= days; d++) {
+        const seedVal = (repairCtx.seedShifts[s.id] || {})[d] || '';
+        shifts[s.id][d] = seedVal;
+        if (locked[s.id][d]) continue; // 固定シフト・希望休はそのまま動かさない
+        if (seedVal === '有') { locked[s.id][d] = true; continue; } // 有給は消さない（動かさない）
+        const inError = repairCtx.cells.has(s.id + ':' + d) || repairCtx.staffAll.has(s.id);
+        locked[s.id][d] = !inError;
+      }
+    });
+  } else {
+    // 2.5. 特別日の副店長固定
+    applySpecialDaysLogic(shifts, locked, staff, days);
 
-  // 3. 初期解生成
-  generateInitialSolution(shifts, locked, allowedShifts, days);
+    // 3. 初期解生成
+    generateInitialSolution(shifts, locked, allowedShifts, days);
+  }
 
   // 4. 焼きなまし法
   let currentScore = calculateScore(shifts, allowedShifts, days, P);
   let bestShifts   = deepCopyShifts(shifts);
   let bestScore    = currentScore;
 
-  const maxAttempts  = settings.maxAttempts;
+  // 修復モードでは動かせるマス数に応じて反復回数を自動縮小（探索空間が小さいため
+  // フル回数は不要 — 品質を保ったまま大幅に高速化）
+  let maxAttempts = settings.maxAttempts;
+  if (repairCtx) {
+    let unlockedCells = 0;
+    staff.forEach(s => {
+      for (let d = 1; d <= days; d++) if (!locked[s.id][d]) unlockedCells++;
+    });
+    maxAttempts = Math.min(settings.maxAttempts, Math.max(20000, unlockedCells * 2500));
+  }
   let T              = 500.0;
   const coolingRate  = Math.pow(0.01 / T, 1.0 / maxAttempts);
   const reportInterval = Math.max(500, Math.floor(maxAttempts / 200));
   const lastBestUpdate = { attempt: 0 };
+  let genuineLastImprove = 0; // リヒートに影響されない「本当の最良更新」時刻（早期終了用）
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     T *= coolingRate;
@@ -206,10 +1135,16 @@ async function optimizeGroupSchedule(progressCallback) {
         bestScore = newScore;
         bestShifts = deepCopyShifts(shifts);
         lastBestUpdate.attempt = attempt;
+        genuineLastImprove = attempt;
       }
     } else {
       undoFn();
     }
+
+    // 早期終了: 予算の4割を過ぎ、かつ2割の区間ずっと最良が更新されなければ
+    // 収束とみなして打ち切る（品質はほぼ変えずに無駄な反復を削る）。
+    // 修復モードは範囲が狭く収束が速いので対象外にしない。
+    if (attempt > maxAttempts * 0.4 && attempt - genuineLastImprove > maxAttempts * 0.2) break;
 
     if (attempt % reportInterval === 0) {
       const pct = Math.floor((attempt / maxAttempts) * 100);
@@ -220,7 +1155,280 @@ async function optimizeGroupSchedule(progressCallback) {
 
   }
 
+  // 仕上げ: 総当たり微調整（山登り）＋難所の同日入れ替え（A・D）。
+  // 修復モードでは毎パス重くなるためスキップ（修復自体が局所探索のため）。
+  if (!repairCtx) {
+    progressCallback && progressCallback(99, '仕上げ中（総当たり微調整）...');
+    await sleep(0);
+    bestScore = hillClimbPolish(bestShifts, locked, staff, allowedShifts, days, P, 2);
+  }
+
+  // 最終保証: 人員不足は絶対に残さない。埋められる日は必ず埋める（強制フィル）。
+  // 希望休・固定・有給で動かせず物理的に人が足りない日だけが残る。
+  forceFillUnderstaffing(bestShifts, locked, staff, allowedShifts, days);
+
   return { shifts: bestShifts, score: bestScore };
+}
+
+/**
+ * 人員不足を絶対に残さないための最終強制フィル。
+ * 不足しているシフトに、①休み ②「余」 ③同日の過剰シフトの人 の順で
+ * 担当可能な人を移して埋める。ロック（希望休・固定・有給）は動かさない。
+ * ソフト制約（連勤・リズム・公休数）より人員確保を優先する。
+ * @returns {number} 埋めきれず残った不足コマ数（0 なら完全充足）
+ */
+/**
+ * 最終保証（実ロック版）: 生成・修復の最終段で、部門ごとの必要人数に対し
+ * 人員不足を全体盤面で潰す。ロック判定は「希望休・固定・有給」の実ロックのみ
+ * （修復モードの一時ロックに縛られない）ため、埋められる限り必ず埋める。
+ * @returns {number} 埋めきれなかった不足コマ数
+ */
+function forceFillUnderstaffingReal(shifts, staffList, reqs, dailyReqs) {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const locked = {};
+  const allowed = {};
+  staffList.forEach(s => {
+    locked[s.id] = {};
+    for (let d = 1; d <= days; d++) {
+      const fx = (AppState.fixedShifts[s.id] || {})[d];
+      const rq = (AppState.requests[s.id]    || {})[d];
+      locked[s.id][d] = !!fx || (rq && (isOff(rq) || isWork(rq)));
+    }
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    allowed[s.id] = base;
+  });
+  const dayReq = (sh, d) => getDayReq(reqs || AppState.roleRequirements, dailyReqs || {}, sh, d);
+  return forceFillUnderstaffing(shifts, locked, staffList, allowed, days, dayReq);
+}
+
+function forceFillUnderstaffing(shifts, locked, staff, allowedShifts, days, dayReqFn) {
+  const shiftKeys = getWorkShiftKeys();
+  const reqOf = dayReqFn || optDayReq;
+  const movable = (s, d) => {
+    if (locked[s.id][d]) return false;
+    if (shifts[s.id][d] === '有') return false; // 有給は動かさない
+    return true;
+  };
+  let remaining = 0;
+  for (let d = 1; d <= days; d++) {
+    const countOf = sh => staff.filter(s => shifts[s.id][d] === sh).length;
+    shiftKeys.forEach(sh => {
+      const req = reqOf(sh, d);
+      if (!req) return;
+      let count = countOf(sh);
+      if (count >= req) return;
+
+      const canDo = s => (allowedShifts[s.id] || []).includes(sh);
+      // d 日に出勤させたときの連勤の長さ（前後の連続勤務）。小さいほど連勤になりにくい
+      const consLenIfWork = s => {
+        let n = 1, dd = d - 1;
+        while (dd >= 1  && isWork(shifts[s.id][dd])) { n++; dd--; }
+        dd = d + 1;
+        while (dd <= days && isWork(shifts[s.id][dd])) { n++; dd++; }
+        return n;
+      };
+      // ① 休み（余含む）から補充。
+      //    まず「余（余剰休み）」を先に消費し、目標公休（公休）は極力崩さない
+      //    ＝人員不足を埋めても公休不足を新たに作らない。同カテゴリ内では
+      //    連勤になりにくい人（前後が休みの人）を優先する。
+      const isSurplus = s => shifts[s.id][d] === '余';
+      const resting = staff
+        .filter(s => movable(s, d) && canDo(s) && !isWork(shifts[s.id][d]))
+        .sort((a, b) => {
+          const sa = isSurplus(a) ? 0 : 1, sb = isSurplus(b) ? 0 : 1;
+          if (sa !== sb) return sa - sb;               // 余を先に使う
+          return consLenIfWork(a) - consLenIfWork(b);  // 次に連勤になりにくい人
+        });
+      for (const s of resting) {
+        if (count >= req) break;
+        shifts[s.id][d] = sh; count++;
+      }
+      // ② 同日の「過剰な」シフトから玉突きで移す（移動元が req 超過のときだけ）
+      if (count < req) {
+        for (const s of staff) {
+          if (count >= req) break;
+          const cur = shifts[s.id][d];
+          if (!isWork(cur) || cur === sh) continue;
+          if (!movable(s, d) || !canDo(s)) continue;
+          if (countOf(cur) <= reqOf(cur, d)) continue; // 移すと今度は元が不足するので不可
+          shifts[s.id][d] = sh; count++;
+        }
+      }
+      if (count < req) remaining += (req - count); // 物理的に不可能な分
+    });
+  }
+  return remaining;
+}
+
+/**
+ * 人員不足の最終保証（二部マッチング版）。
+ * まだ不足が残る日について、その日に出られる（＝希望休・有給でない）全員を
+ * 対象に、担当可能な役職スロットへ二部マッチング（Kuhn法）で割り当て直す。
+ * 多段の玉突きも自動で解けるため、その日に物理的に人がいる限り必ず埋まる。
+ * 不足が残っている日だけを対象にするので、問題ない日のリズムは崩さない。
+ * @returns {number} それでも埋まらなかった不足コマ数（＝物理的に不可能）
+ */
+function guaranteeDayStaffingReal(shifts, staffList, reqs, dailyReqs) {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const shiftKeys = getWorkShiftKeys();
+  const allowedOf = {};
+  staffList.forEach(s => {
+    let base = (s.allowedShifts || []).filter(sh => {
+      const t = AppState.shiftTypes.find(t => t.key === sh);
+      return t && !t.isTraining;
+    });
+    if (s.prefs && s.prefs.length > 0) {
+      const f = base.filter(sh => {
+        if (isEarly(sh) && !s.prefs.includes('早可')) return false;
+        if (isLate(sh)  && !s.prefs.includes('遅可')) return false;
+        return true;
+      });
+      if (f.length) base = f;
+    }
+    allowedOf[s.id] = base;
+  });
+  const dayReq = (sh, d) => getDayReq(reqs || AppState.roleRequirements, dailyReqs || {}, sh, d);
+  let stillShort = 0;
+
+  for (let d = 1; d <= days; d++) {
+    // この日が不足しているか（不足していなければ触らない）
+    const isShort = shiftKeys.some(k => {
+      const req = dayReq(k, d); if (!req) return false;
+      return staffList.filter(s => shifts[s.id][d] === k).length < req;
+    });
+    if (!isShort) continue;
+
+    // 必要スロットを展開（固定・希望出勤で既に埋まっている分は差し引く）
+    const lockedRole = {};
+    const avail = [];
+    staffList.forEach(s => {
+      const fx = (AppState.fixedShifts[s.id] || {})[d];
+      const rq = (AppState.requests[s.id]    || {})[d];
+      if ((rq && isOff(rq)) || shifts[s.id][d] === '有') return; // その日は出られない
+      if (fx || (rq && isWork(rq))) { lockedRole[shifts[s.id][d]] = (lockedRole[shifts[s.id][d]] || 0) + 1; return; }
+      avail.push(s);
+    });
+    // マッチングで休みの人を引き込む際の優先順位: 既に出勤中(0) → 余剰休み「余」(1)
+    // → 目標公休など(2)。これで不足を埋めるとき「余」を先に消費し、目標公休を
+    // 崩して公休不足を新たに作ることを避ける（最大マッチングの充足性は不変）。
+    avail.sort((a, b) => {
+      const rank = s => isWork(shifts[s.id][d]) ? 0 : (shifts[s.id][d] === '余' ? 1 : 2);
+      return rank(a) - rank(b);
+    });
+    const occ = Object.assign({}, lockedRole);
+    const slots = []; // 割り当て対象の空きスロット（役職名の配列）
+    shiftKeys.forEach(k => {
+      let need = dayReq(k, d); if (!need) return;
+      while (need-- > 0) { if (occ[k] > 0) occ[k]--; else slots.push(k); }
+    });
+    if (!slots.length) continue;
+
+    // Kuhn法: 左=スロット, 右=avail の人。現在の割当を種にして無駄な入替を避ける
+    const matchSlot   = new Array(slots.length).fill(null); // slotIdx -> personId
+    const matchPerson = {};                                 // personId -> slotIdx
+    avail.forEach(s => {
+      const cur = shifts[s.id][d];
+      if (!isWork(cur)) return;
+      const si = slots.findIndex((r, i) => r === cur && matchSlot[i] === null);
+      if (si >= 0 && allowedOf[s.id].includes(cur)) { matchSlot[si] = s.id; matchPerson[s.id] = si; }
+    });
+    const personById = {}; avail.forEach(s => personById[s.id] = s);
+    const tryAug = (si, seen) => {
+      for (const s of avail) {
+        if (seen.has(s.id)) continue;
+        if (!allowedOf[s.id].includes(slots[si])) continue;
+        seen.add(s.id);
+        if (matchPerson[s.id] == null || tryAug(matchPerson[s.id], seen)) {
+          matchPerson[s.id] = si; matchSlot[si] = s.id; return true;
+        }
+      }
+      return false;
+    };
+    for (let si = 0; si < slots.length; si++) {
+      if (matchSlot[si] === null) tryAug(si, new Set());
+    }
+
+    // 全スロット埋まったら適用（埋まらないスロットがあれば物理的に不可能なので現状維持）
+    const filled = matchSlot.every(m => m !== null);
+    if (filled) {
+      avail.forEach(s => {
+        const si = matchPerson[s.id];
+        const to = (si != null) ? slots[si] : '休'; // 割当なしの人は休み
+        if (shifts[s.id][d] !== to) shifts[s.id][d] = to;
+      });
+    } else {
+      stillShort += matchSlot.filter(m => m === null).length;
+    }
+  }
+  return stillShort;
+}
+
+/**
+ * 山登り法による仕上げ（A: 総当たり微調整 / D: 難所の同日入れ替え集中）。
+ * ロックされていない各マスについて、より良いシフトへ置き換える／同じ日の2人を
+ * 入れ替える、を改善がなくなるまで繰り返す。焼きなましの取りこぼしを削る。
+ * @returns {number} 仕上げ後のスコア
+ */
+function hillClimbPolish(shifts, locked, staff, allowedShifts, days, P, maxSweeps) {
+  let cur = calculateScore(shifts, allowedShifts, days, P);
+  for (let sweep = 0; sweep < maxSweeps; sweep++) {
+    let improved = false;
+
+    // (A) 1マスずつ、より良いシフト（担当シフト＋休）に置き換える
+    for (const s of staff) {
+      for (let d = 1; d <= days; d++) {
+        if (locked[s.id][d]) continue;
+        const orig  = shifts[s.id][d];
+        const cands = allowedShifts[s.id].concat(['休']);
+        let bestVal = orig, bestScore = cur;
+        for (const c of cands) {
+          if (c === orig) continue;
+          shifts[s.id][d] = c;
+          const sc = calculateScore(shifts, allowedShifts, days, P);
+          if (sc < bestScore - 1e-9) { bestScore = sc; bestVal = c; }
+        }
+        shifts[s.id][d] = bestVal;
+        if (bestVal !== orig) { cur = bestScore; improved = true; }
+      }
+    }
+
+    // (D) 難所対策: 同じ日の2人のシフトを入れ替えて良くなるなら採用（重いので初回のみ）
+    if (sweep === 0)
+    for (let d = 1; d <= days; d++) {
+      for (let i = 0; i < staff.length; i++) {
+        const a = staff[i];
+        if (locked[a.id][d]) continue;
+        for (let j = i + 1; j < staff.length; j++) {
+          const b = staff[j];
+          if (locked[b.id][d]) continue;
+          const va = shifts[a.id][d], vb = shifts[b.id][d];
+          if (va === vb) continue;
+          // 入れ替え後も担当可能なもの同士のみ（休は誰でも可）
+          const aOk = vb === '休' || (allowedShifts[a.id] || []).includes(vb);
+          const bOk = va === '休' || (allowedShifts[b.id] || []).includes(va);
+          if (!aOk || !bOk) continue;
+          shifts[a.id][d] = vb; shifts[b.id][d] = va;
+          const sc = calculateScore(shifts, allowedShifts, days, P);
+          if (sc < cur - 1e-9) { cur = sc; improved = true; }
+          else { shifts[a.id][d] = va; shifts[b.id][d] = vb; } // 戻す
+        }
+      }
+    }
+
+    if (!improved) break;
+  }
+  return cur;
 }
 
 function deepCopyShifts(shifts) {
@@ -248,35 +1456,132 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
     });
   });
 
-  // 副店長の休みは「毎日1人は出勤」制約を守るため、全員同日に重ならないよう配置する
+  // 副店長の「出勤しない日」(公休・有給を含む) は「毎日1人は出勤」制約を守るため
+  // 全員同日に重ならないよう配置する
   const vmList = staff.filter(s => s.positionType === 'viceManager');
-  const vmRestByDay = {};
+  const vmOffByDay = {};
   vmList.forEach(s => {
     for (let d = 1; d <= days; d++) {
-      if (locked[s.id][d] && isPublicOff(shifts[s.id][d])) vmRestByDay[d] = (vmRestByDay[d] || 0) + 1;
+      if (locked[s.id][d] && isOff(shifts[s.id][d])) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
     }
   });
-  const maxVmRestPerDay = Math.max(0, vmList.length - 1);
+  // 副店長2人以上: 1日に休めるのは（人数-1）まで（毎日1人は出勤）
+  // 副店長1人: ルール自体がオフなので制限なし（maxOff通り休める）
+  const maxVmOffPerDay = vmList.length >= 2 ? vmList.length - 1 : vmList.length;
 
-  // Step1: 各スタッフに休日を配置（ロック済みの公休のみ目標から差し引く。有給は別枠）
+  // 一般の「1日あたり休み上限」: 自動配置の休みでその日の必要総コマ数を割り込ませない。
+  // これにより、有給・公休が同じ日に偏って物理的に埋まらなくなるのを未然に防ぐ。
+  const totalReqOf = d => shiftKeys.reduce((a, k) => a + (optDayReq(k, d) || 0), 0);
+  const offByDay = {};
+  staff.forEach(s => {
+    for (let d = 1; d <= days; d++) {
+      if (locked[s.id][d] && isOff(shifts[s.id][d])) offByDay[d] = (offByDay[d] || 0) + 1;
+    }
+  });
+  const dayOffFull = d => (offByDay[d] || 0) >= Math.max(0, staff.length - totalReqOf(d));
+
+  // スキル保有者の休み集中ガード:
+  // 「営業は遅番に2人」等のスキルは、保有者が同じ日に休みすぎると物理的に
+  // 満たせなくなる。自動配置の有給・公休では、その日の残り保有者が
+  // 必要数を割り込むような日を避ける（buffer=1: 1人余裕を残す → 0: ちょうど → 無効）。
+  // ガードは「最低ライン(min)」基準: 目標(need)ではなく絶対に割ってはいけない
+  // 人数を守る。これで目標2・最低1なら、保有者の休みが1人残る日までは許容される。
+  const skillList = (AppState.skills || [])
+    .map(sk => {
+      const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
+      const min  = (sk.min != null && sk.min >= 0 && sk.min <= need) ? sk.min : need;
+      return { name: sk.name, need: min };
+    })
+    .filter(k => k.need > 0);
+  const holderRest = {}, holderTotal = {};
+  skillList.forEach(k => {
+    holderRest[k.name] = {}; holderTotal[k.name] = 0;
+    staff.forEach(s => {
+      if (!(s.skills || []).includes(k.name)) return;
+      holderTotal[k.name]++;
+      for (let d = 1; d <= days; d++) {
+        if (locked[s.id][d] && isOff(shifts[s.id][d])) {
+          holderRest[k.name][d] = (holderRest[k.name][d] || 0) + 1;
+        }
+      }
+    });
+  });
+  const skillBlocked = (s, d, buffer) => skillList.some(k => {
+    if (!(s.skills || []).includes(k.name)) return false;
+    return holderTotal[k.name] - ((holderRest[k.name][d] || 0) + 1) < k.need + buffer;
+  });
+  const noteSkillRest = (s, d) => skillList.forEach(k => {
+    if ((s.skills || []).includes(k.name)) holderRest[k.name][d] = (holderRest[k.name][d] || 0) + 1;
+  });
+
+  // Step0: 有給を目標日数まで自動配置（日付未指定分をアプリが割り当てロックする）
+  // カレンダーで個別指定済みの有給はロック済みなので差し引く
+  staff.forEach(s => {
+    const target = s.paidLeave || 0;
+    if (target <= 0) return;
+    const isVm = s.positionType === 'viceManager';
+    let alreadyPaid = 0;
+    const cands = [];
+    for (let d = 1; d <= days; d++) {
+      if (locked[s.id][d]) { if (shifts[s.id][d] === '有') alreadyPaid++; continue; }
+      if (eventDays[s.id] && eventDays[s.id].has(d)) continue;
+      if (isVm && (vmOffByDay[d] || 0) >= maxVmOffPerDay) continue;
+      if (dayOffFull(d)) continue; // その日はこれ以上休ませると人員不足になる
+      cands.push(d);
+    }
+    const need = Math.max(0, target - alreadyPaid);
+    shuffleArray(cands);
+    let placed = 0;
+    // buffer=1: 保有者に1人余裕を残す日を優先 → 0: ちょうどの日も許可 → -9: ガード無効
+    for (const buffer of [1, 0, -9]) {
+      for (const d of cands) {
+        if (placed >= need) break;
+        if (shifts[s.id][d] === '有') continue; // 前のパスで配置済み
+        if (dayOffFull(d)) continue; // 混んでいる日には積まない（人員不足を防ぐ）
+        if (buffer > -9 && skillBlocked(s, d, buffer)) continue;
+        shifts[s.id][d] = '有';
+        locked[s.id][d] = true;
+        offByDay[d] = (offByDay[d] || 0) + 1;
+        noteSkillRest(s, d);
+        if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
+        placed++;
+      }
+      if (placed >= need) break;
+    }
+  });
+
+  // Step1: 各スタッフに公休を配置（ロック済みの公休のみ目標から差し引く。有給は別枠）
   staff.forEach(s => {
     const isVm = s.positionType === 'viceManager';
     let alreadyOff = 0;
     const unlockedDays = [];
     for (let d = 1; d <= days; d++) {
       if (locked[s.id][d] && isPublicOff(shifts[s.id][d])) alreadyOff++;
-      // 行事の対象日は初期解では休みを置かない
+      // 行事の対象日・ロック済み日は初期解では休みを置かない
       if (locked[s.id][d] || (eventDays[s.id] && eventDays[s.id].has(d))) continue;
       // 副店長は、既に上限人数が休む予定の日は候補から除外（全員休みを防ぐ）
-      if (isVm && (vmRestByDay[d] || 0) >= maxVmRestPerDay) continue;
+      if (isVm && (vmOffByDay[d] || 0) >= maxVmOffPerDay) continue;
+      if (dayOffFull(d)) continue; // その日はこれ以上休ませると人員不足になる
       unlockedDays.push(d);
     }
     const needMoreOff = Math.max(0, (s.maxOff || 0) - alreadyOff);
     shuffleArray(unlockedDays);
-    unlockedDays.slice(0, needMoreOff).forEach(d => {
-      shifts[s.id][d] = '休';
-      if (isVm) vmRestByDay[d] = (vmRestByDay[d] || 0) + 1;
-    });
+    let placedOff = 0;
+    // 有給と同様、スキル保有者の休みが同じ日に集中しないよう段階的に緩めながら配置
+    for (const buffer of [1, 0, -9]) {
+      for (const d of unlockedDays) {
+        if (placedOff >= needMoreOff) break;
+        if (shifts[s.id][d] === '休') continue; // 前のパスで配置済み
+        if (dayOffFull(d)) continue; // 混んでいる日には積まない（人員不足を防ぐ）
+        if (buffer > -9 && skillBlocked(s, d, buffer)) continue;
+        shifts[s.id][d] = '休';
+        offByDay[d] = (offByDay[d] || 0) + 1;
+        noteSkillRest(s, d);
+        if (isVm) vmOffByDay[d] = (vmOffByDay[d] || 0) + 1;
+        placedOff++;
+      }
+      if (placedOff >= needMoreOff) break;
+    }
   });
 
   // Step2: 各日にシフトを割り当て
@@ -289,8 +1594,17 @@ function generateInitialSolution(shifts, locked, allowedShifts, days) {
       let placed = 0;
       // 早責・遅責は役職優先度順（上位者を優先的に責任者に据える）
       const isRespShift = sh === '早責' || sh === '遅責';
-      const candidates = avail.filter(s => shifts[s.id][d] === '' && allowedShifts[s.id].includes(sh));
-      if (isRespShift) candidates.sort((a, b) => getStaffPriority(a) - getStaffPriority(b));
+      const candidates = avail.filter(s => shifts[s.id][d] === '' && allowedShifts[s.id].includes(sh) &&
+        !(isLate(sh) && _noLateDayMap[s.id] && _noLateDayMap[s.id].has(d)));
+      // 自動チーム分けの軸に合う人を優先（早番コマには早の軸の人から入れる）
+      const shBand = _bandOfShift(sh);
+      const bandRank = s => {
+        if (!shBand || !_autoBandMap[s.id]) return 1;
+        return _autoBandMap[s.id] === shBand ? 0 : 2;
+      };
+      if (shBand) candidates.sort((a, b) => bandRank(a) - bandRank(b));
+      if (isRespShift) candidates.sort((a, b) =>
+        (getStaffPriority(a) - getStaffPriority(b)) || (bandRank(a) - bandRank(b)));
       for (const s of candidates) {
         if (placed >= req) break;
         if (shifts[s.id][d] !== '') continue;
@@ -367,7 +1681,7 @@ function wouldCauseHierarchyViolation(shifts, staff, allowedShifts, A, d, shiftK
 }
 
 function wouldExceedConsWork(shifts, s, d, days) {
-  const maxCons = AppState.settings.maxConsecutive || 5;
+  const maxCons = getMaxConsFor(s); // 個人の連勤上限（未設定なら全体設定）
   let count = 1; // 当該日自体
   let dd = d - 1;
   while (dd >= 1  && isWork(shifts[s.id][dd])) { count++; dd--; }
@@ -677,7 +1991,7 @@ function tryConvertSurplusRest(shifts, locked, staff, days, allowedShifts) {
 
       // 人員不足のシフトを優先、なければ担当可能な早/遅から選ぶ
       const needyShifts = earlyLateShifts.filter(sh => {
-        const req = optReqs()[sh] || 0;
+        const req = optDayReq(sh, d);
         if (!req) return false;
         const count = staff.filter(st => shifts[st.id][d] === sh).length;
         return count < req;
@@ -713,7 +2027,7 @@ function tryCascadeSwapForRest(shifts, locked, staff, days, allowedShifts) {
   const offCountCache = {};
   staff.forEach(s => {
     let c = 0;
-    for (let d = 1; d <= days; d++) { if (isOff(shifts[s.id][d])) c++; }
+    for (let d = 1; d <= days; d++) { if (isPublicOff(shifts[s.id][d])) c++; }
     offCountCache[s.id] = c;
   });
 
@@ -810,7 +2124,7 @@ function tryFixUnderstaffing(shifts, locked, staff, days, allowedShifts) {
   const shiftKeys = getWorkShiftKeys();
   for (let d = 1; d <= days; d++) {
     for (const sh of shiftKeys) {
-      const req   = optReqs()[sh] || 0;
+      const req   = optDayReq(sh, d);
       if (!req) continue;
       const count = staff.filter(s => shifts[s.id][d] === sh).length;
       if (count >= req) continue;
@@ -896,8 +2210,10 @@ function tryFixCategorySwitch(shifts, locked, staff, days, allowedShifts) {
   for (const s of shuffledStaff) {
     // カテゴリ切替違反を収集
     const violations = [];
-    let consWork  = s.prevConsecutive || 0;
-    let prevShift = (consWork > 0 && s.prevLastShift) ? s.prevLastShift : '';
+    const _pme    = getPrevMonthEnd(s);   // 前月末シフト単独でも有効にする
+    let consWork  = _pme.cons;
+    let prevShift = _pme.lastShift;
+    const prevWorked = _pme.cons > 0;     // 前月末が出勤で終わっていたか（バンド不明でも真）
     for (let d = 1; d <= days; d++) {
       const cur = shifts[s.id][d];
       if (isWork(cur)) {
@@ -1163,8 +2479,10 @@ function calculateScore(shifts, allowedShifts, days, P) {
   const maxCons = AppState.settings.maxConsecutive;
   const shiftKeys = getWorkShiftKeys();
 
-  // この部門に副店長がいるか（毎日1人は出勤させる制約に使用）
-  const hasVice = staff.some(s => s.positionType === 'viceManager');
+  // 毎日1人出勤ルール: 副店長が2人以上いる場合のみ有効
+  // 1人の場合は公休目標と数学的に矛盾するため自動オフ
+  const vmCount = staff.filter(s => s.positionType === 'viceManager').length;
+  const hasVice = vmCount >= 2;
 
   // 縦: 各日の必要人数 + 責任者ヒエラルキー
   // staff を1回だけ走査してカウント・責任者特定・ヒエラルキー確認をまとめて行う
@@ -1181,16 +2499,43 @@ function calculateScore(shifts, allowedShifts, days, P) {
       if (s.positionType === 'viceManager' && isWork(sh)) viceWorking++;
     });
 
-    // 毎日、副店長が1人以上出勤していること（早番か遅番にいる）
-    if (hasVice && viceWorking === 0) score += (P.viceManagerDailyAbsent || 9000);
+    // 毎日、副店長が出勤 or 早責・遅責の両方がチーフ以上で埋まっていること
+    const chiefCovered = respEarlyPerson && respLatePerson &&
+      getStaffPriority(respEarlyPerson) <= 2 && getStaffPriority(respLatePerson) <= 2;
+    if (hasVice && viceWorking === 0 && !chiefCovered && ruleOn('vicemanager-absent')) score += (P.viceManagerDailyAbsent || 9000);
     shiftKeys.forEach(k => {
       const req = optDayReq(k, d);
       if (!req) return;
       const diff = req - counts[k];
       if (diff > 0) score += diff * P.understaff;
       // 責任者・総務（早責/遅責/早総/遅総）は同じ時間帯に2人いてはいけないため重罰
-      else if (diff < 0) score += (-diff) * (SOLO_SHIFT_KEYS.includes(k) ? P.respDuplicate : P.overstaff);
+      else if (diff < 0) score += (-diff) * ((SOLO_SHIFT_KEYS.includes(k) && ruleOn('resp-duplicate')) ? P.respDuplicate : P.overstaff);
     });
+
+    // スキル別: 指定時間帯（早番/遅番）に必要なスキル保有者数を満たすか
+    const skills = AppState.skills || [];
+    if (skills.length) {
+      skills.forEach(sk => {
+        const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
+        if (!need) return;
+        // 最低ライン min: これを下回ると🔴（強）、min〜need未満は🟡（弱）。
+        // 未設定なら min=need（従来どおり不足はすべて強ペナルティ）。
+        const min = (sk.min != null && sk.min >= 0 && sk.min <= need) ? sk.min : need;
+        const early = (sk.target || 'late') === 'early';
+        let have = 0;
+        staff.forEach(s => {
+          const sh = shifts[s.id][d];
+          const inTarget = early ? isEarlyCategory(sh) : isLate(sh);
+          if (isWork(sh) && inTarget && (s.skills || []).includes(sk.name)) have++;
+        });
+        if (have < min) {
+          if (ruleOn('skill-late'))  score += (min - have) * (P.skillLateShortage || 9000); // 最低ライン割れ（強）
+          if (ruleOn('skill-short')) score += (need - min) * (P.skillSoftShortage || 1500);
+        } else if (have < need) {
+          if (ruleOn('skill-short')) score += (need - have) * (P.skillSoftShortage || 1500); // 目標には届かない（弱）
+        }
+      });
+    }
 
     // 責任者ヒエラルキー違反（pref フィルタ済み allowedShifts で判定）
     if (respEarlyPerson && staff.some(s =>
@@ -1198,14 +2543,14 @@ function calculateScore(shifts, allowedShifts, days, P) {
           isWork(shifts[s.id][d]) && isEarlyCategory(shifts[s.id][d]) && !isTraining(shifts[s.id][d]) &&
           (allowedShifts[s.id] || s.allowedShifts || []).includes('早責') &&
           getStaffPriority(s) < getStaffPriority(respEarlyPerson))) {
-      score += P.hierarchyViolation;
+      if (ruleOn('hierarchy')) score += P.hierarchyViolation;
     }
     if (respLatePerson && staff.some(s =>
           s.id !== respLatePerson.id &&
           isWork(shifts[s.id][d]) && isLate(shifts[s.id][d]) &&
           (allowedShifts[s.id] || s.allowedShifts || []).includes('遅責') &&
           getStaffPriority(s) < getStaffPriority(respLatePerson))) {
-      score += P.hierarchyViolation;
+      if (ruleOn('hierarchy')) score += P.hierarchyViolation;
     }
   }
 
@@ -1214,17 +2559,29 @@ function calculateScore(shifts, allowedShifts, days, P) {
     if (!ev || !ev.day || ev.day < 1 || ev.day > days) return;
     (ev.staffIds || []).forEach(sid => {
       if (!shifts[sid]) return; // 他部門のスタッフは対象外
-      if (!isWork(shifts[sid][ev.day])) score += (P.eventAbsent || 20000);
+      if (!isWork(shifts[sid][ev.day]) && ruleOn('event-absent')) score += (P.eventAbsent || 20000);
     });
   });
 
+  // 曜日を事前計算（個人希望: 土日休み判定用）
+  const _wd = [0];
+  for (let d = 1; d <= days; d++) _wd[d] = getWeekday(AppState.settings.targetMonth, d);
+
   // 横: 各スタッフのルール
   staff.forEach(s => {
-    let consWork  = s.prevConsecutive || 0;
-    let prevShift = (consWork > 0 && s.prevLastShift) ? s.prevLastShift : '';
+    const _pme    = getPrevMonthEnd(s);   // 前月末シフト単独でも有効にする
+    let consWork  = _pme.cons;
+    let prevShift = _pme.lastShift;
+    const prevWorked = _pme.cons > 0;     // 前月末が出勤で終わっていたか（バンド不明でも真）
     let offCount  = 0, earlyCount = 0, lateCount = 0;
     let lockedOff = 0, unlockedOff = 0; // viceManager 用（既存ループ内で同時集計）
     let offRun    = 0, pairRestRuns = 0; // 連休（2連休以上）の検出用
+    let pubRun    = 0; // 公休のみの連続数（連休最大3日ルール用。余・有給は数えない）
+    // 個人希望（土日休み・休み方）の重み: 定数(6000)・公休(4000)より下に置き優先順位を守る
+    const wkW = s.weekendPref === 'hard' ? 3500 : (s.weekendPref === 'soft' ? 600 : 0);
+    const styleSpread = (s.restStyle || '').startsWith('spread');
+    const stylePair   = (s.restStyle || '').startsWith('pair');
+    const styleW = (s.restStyle || '').endsWith('hard') ? 3000 : 500;
 
     for (let d = 1; d <= days; d++) {
       const cur = shifts[s.id][d];
@@ -1232,6 +2589,7 @@ function calculateScore(shifts, allowedShifts, days, P) {
       if (isWork(cur)) {
         if (offRun >= 2) pairRestRuns++;
         offRun = 0;
+        pubRun = 0;
 
         if (!isTraining(cur)) {
           // 担当外シフト
@@ -1239,33 +2597,45 @@ function calculateScore(shifts, allowedShifts, days, P) {
         }
 
         consWork++;
-        if (consWork > maxCons) {
-          const over = consWork - maxCons;
+        const myMaxCons = getMaxConsFor(s); // 個人の連勤上限（超えたら絶対NG）
+        if (consWork > myMaxCons) {
+          // 連勤上限超過は🔴（絶対NG）。個人設定で5勤OKにした人だけ5まで許容。
+          const over = consWork - myMaxCons;
           score += P.consBase * over + P.consSq * over * over;
         }
 
+        // 個人希望: 土日休み（土日に出勤したら減点）
+        if (wkW && (_wd[d] === 0 || _wd[d] === 6) && ruleOn('weekend-pref')) score += wkW;
+        // 個人希望: 分散派（勤務は3連勤前後まで。4日目以降に減点）
+        if (styleSpread && consWork > 3 && ruleOn('rest-style')) score += styleW;
+
         // 遅→早禁止
-        if (AppState.settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
+        if (AppState.settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur) && ruleOn('late-early')) {
           score += P.lateEarly;
         }
 
         // prefs（早遅希望）違反: checkViolations と整合させてスコアに反映
-        if (s.prefs && s.prefs.length > 0) {
+        if (s.prefs && s.prefs.length > 0 && ruleOn('pref-mismatch')) {
           if (isEarlyCategory(cur) && !s.prefs.includes('早可')) score += (P.prefMismatch || 12000);
           if (isLate(cur)          && !s.prefs.includes('遅可')) score += (P.prefMismatch || 12000);
         }
 
         // 夜勤翌日は必ず休み
-        if (isNight(prevShift)) score += (P.nightAfterWork || 8000);
+        if (isNight(prevShift) && ruleOn('night-after-work')) score += (P.nightAfterWork || 8000);
 
         // 連勤中の時間帯切替
         if (consWork >= 2 && isWork(prevShift)) {
           const pc = getShiftCategory(prevShift), cc = getShiftCategory(cur);
-          if (pc && cc && pc !== cc) score += P.categorySwitch;
+          if (pc && cc && pc !== cc && ruleOn('category-switch')) score += P.categorySwitch;
         }
 
         if (isEarly(cur)) earlyCount++;
         else if (isLate(cur)) lateCount++;
+
+        // 翌日が固定の早番系（研修含む）の日に遅番はほぼ禁止（遅→研/遅→早が確定するため）
+        if (isLate(cur) && _noLateDayMap[s.id] && _noLateDayMap[s.id].has(d)) {
+          score += (P.prefMismatch || 12000);
+        }
         prevShift = cur;
 
       } else {
@@ -1282,33 +2652,71 @@ function calculateScore(shifts, allowedShifts, days, P) {
             }
           }
           offRun++;
+          // 連休は設定した上限日数まで（有給も連休に数える。「余」は人員余りの都合なので除外）
+          if (cur !== '余') {
+            pubRun++;
+            if (pubRun > getMaxOffRun()) {
+              const restLocked =
+                isOff((AppState.requests[s.id]    || {})[d]) ||
+                isOff((AppState.fixedShifts[s.id] || {})[d]);
+              if (!restLocked && ruleOn('long-rest')) score += (P.longRest || 2000);
+            }
+          } else {
+            pubRun = 0; // 「余」は連休を分断
+          }
         }
         consWork = 0;
+
+        // 個人希望: 連休派（ポツンと1日だけの休みに減点 → 連休にまとまる方向へ）
+        if (stylePair && cur !== '余' && d > 1 && d < days) {
+          const pvP = shifts[s.id][d - 1], nxP = shifts[s.id][d + 1];
+          if (isWork(pvP) && isWork(nxP) && ruleOn('rest-style')) score += styleW;
+        }
+
+        // 個人ルール: 遅→早の切替時は2連休以上必須（遅→休1日→早 を強く禁止）
+        if (s.needPairRest && d > 1 && d < days) {
+          const pv2 = shifts[s.id][d - 1], nx2 = shifts[s.id][d + 1];
+          if (isWork(pv2) && isWork(nx2) && isLate(pv2) && isEarlyCategory(nx2) && ruleOn('pair-rest')) {
+            score += (P.lateEarly || 2500) * 2;
+          }
+        }
 
         // 単発休みペナルティ
         if (AppState.settings.penaltySingleOff && d > 1 && d < days) {
           const pv = shifts[s.id][d - 1], nx = shifts[s.id][d + 1];
           if (isWork(pv) && isWork(nx)) {
-            score += (isLate(pv) && isEarlyCategory(nx)) ? P.badRest : P.singleOff;
+            if (isLate(pv) && isEarlyCategory(nx)) { if (ruleOn('bad-rest')) score += P.badRest; }
+            else score += P.singleOff;
           }
         }
         prevShift = cur;
       }
     }
 
-    // 早遅バランス
-    const balance   = SHIFT_BALANCE[s.balance || 'balanced'];
+    // 早遅バランス（「均等」の人は自動チーム分けで決めた軸の比率に置き換える。
+    // 均等目標のままだと「片寄せ」ペナルティと綱引きになり切替が残るため）
+    const balKey  = s.balance || 'balanced';
+    let balance   = SHIFT_BALANCE[balKey];
+    if (balKey === 'balanced' && _autoBandMap[s.id]) {
+      balance = _autoBandMap[s.id] === 'early' ? SHIFT_BALANCE.earlyHeavy : SHIFT_BALANCE.lateHeavy;
+    }
     const totalWork = earlyCount + lateCount;
     if (balance && totalWork > 0) {
       score += (Math.abs(earlyCount - totalWork * balance.earlyRatio) +
                 Math.abs(lateCount  - totalWork * balance.lateRatio)) * P.balanceDiff;
     }
 
+    // 早番・遅番の片寄せ: 1人がどちらかの時間帯に集中するほど「連勤中の切替」「遅→休→早」が
+    // 起きにくくなる。少ない方の時間帯の日数にペナルティを与え、自動的にチーム分けへ寄せる。
+    if (earlyCount > 0 && lateCount > 0) {
+      score += Math.min(earlyCount, lateCount) * (P.bandConcentration || 700);
+    }
+
     // 単発出勤
     if (AppState.settings.penaltySingleOff) {
       for (let d = 2; d < days; d++) {
         if (!isWork(shifts[s.id][d])) continue;
-        if (!isWork(shifts[s.id][d - 1]) && !isWork(shifts[s.id][d + 1])) score += P.singleWork;
+        if (!isWork(shifts[s.id][d - 1]) && !isWork(shifts[s.id][d + 1]) && ruleOn('single-work')) score += P.singleWork;
       }
     }
 
@@ -1316,9 +2724,22 @@ function calculateScore(shifts, allowedShifts, days, P) {
     if (offRun >= 2) pairRestRuns++;
     score -= pairRestRuns * (P.restPairBonus || 0);
 
-    // 公休不足のみペナルティ（余剰は余力として許容、targetedムーブで自然に削減）
+    // 連休回数の目標: 個人設定 > 全体設定 の優先で、足りない回数分を回避（なるべく）
+    const pairTarget = (s.pairRestTarget > 0)
+      ? s.pairRestTarget
+      : (AppState.settings.pairRestTarget || 0);
+    if (pairTarget > 0 && pairRestRuns < pairTarget) {
+      score += (pairTarget - pairRestRuns) * 800;
+    }
+
+    // 公休不足のみペナルティ（余剰は余力として許容、targetedムーブで自然に削減）。
+    // 二次項を足して「一人に不足が集中」を強く罰する＝負担を全員に分散させる
+    // （例: 1人が-5 は、5人が-1 よりずっと高コストになる）。
     const offDiff = offCount - (s.maxOff || 0);
-    if (offDiff < 0) score += (-offDiff) * P.offShortage;
+    if (offDiff < 0) {
+      const short = -offDiff;
+      score += short * P.offShortage + short * short * (P.offShortageSq || 1500);
+    }
 
     // 副店長: 目標を超えた unlocked 休日にのみペナルティ（offShortage との矛盾を排除）
     // lockedOff / unlockedOff は上のループ内で既に集計済み
@@ -1335,6 +2756,7 @@ function calculateScore(shifts, allowedShifts, days, P) {
 // ===== 違反チェック =====
 
 function checkViolations(shifts) {
+  _shiftKeysCache = null; // キャッシュを毎回リセットして最新の shiftTypes を使う
   const violations = [];
   const staff      = AppState.staff;
   const settings   = AppState.settings;
@@ -1342,28 +2764,69 @@ function checkViolations(shifts) {
   const maxCons    = settings.maxConsecutive;
   const shiftKeys  = getWorkShiftKeys();
 
+  // 曜日を事前計算（個人希望: 土日休み判定用）
+  const _wdv = [0];
+  for (let d = 1; d <= days; d++) _wdv[d] = getWeekday(settings.targetMonth, d);
+
   staff.forEach(s => {
-    let consWork  = s.prevConsecutive || 0;
-    let prevShift = (consWork > 0 && s.prevLastShift) ? s.prevLastShift : '';
+    const _pme    = getPrevMonthEnd(s);   // 前月末シフト単独でも有効にする
+    let consWork  = _pme.cons;
+    let prevShift = _pme.lastShift;
+    const prevWorked = _pme.cons > 0;     // 前月末が出勤で終わっていたか（バンド不明でも真）
     let offCount  = 0;
+    let offRun    = 0;
+    let earlyBand = 0, lateBand = 0;   // 早遅バランス判定用（研修は早番帯として数える）
+    let surplusN  = 0;                 // 「余」の日数（余剰休みの希望どおりか見るため）
+    // キャスト（パート的な少日数勤務）は、単発出勤・長期連休・切替などの
+    // リズム系ルールを適用しない（部分勤務では自然に起きるためノイズになる）。
+    // 人員不足・スキル・担当外などの構造ルールは通常どおり適用される。
+    const isCast = getStaffDepartment(s) === 'cast';
     const effectiveAllowed = (s.allowedShifts || []).concat(['研']); // 研は全員許容
     const reportedDays = new Set();
+    const wkHard     = s.weekendPref === 'hard';
+    const wkSoft     = s.weekendPref === 'soft';
+    const pairHard   = s.restStyle === 'pair-hard';
+    const pairSoft   = s.restStyle === 'pair-soft';
+    const spreadHard = s.restStyle === 'spread-hard';
+    const spreadSoft = s.restStyle === 'spread-soft';
+    let pairRestBlocks = 0;   // 2連休以上のかたまりの数（連休の目安回数の判定用）
 
     for (let d = 1; d <= days; d++) {
       const cur = (shifts[s.id] || {})[d] || '';
 
       if (isWork(cur)) {
         consWork++;
-        if (consWork > maxCons && !reportedDays.has(d)) {
+        if (isLate(cur)) lateBand++; else if (isEarlyCategory(cur)) earlyBand++;
+        const myMaxCons = getMaxConsFor(s); // 連勤上限（4 or 個人設定。超えたら🔴絶対NG）
+        if (consWork > myMaxCons && !reportedDays.has('cons')) {
           violations.push({
             staffId: s.id, day: d, type: 'consecutive',
-            message: `🚨 ${consWork}連勤（上限${maxCons}）`,
+            message: `🚨 ${consWork}連勤（上限${myMaxCons}日を超過${s.personalMaxCons > 0 ? '・個人設定' : ''}）`,
             action:  '他の日と入れ替えて休みを挟んでください',
           });
-          reportedDays.add(d);
+          reportedDays.add('cons');
+        }
+        if (!isWork((shifts[s.id] || {})[d + 1] || '')) reportedDays.delete('cons'); // 連勤が切れたらリセット
+
+        // 個人希望: 土日休み（絶対＝🚨 / なるべく＝⚠️）
+        if ((wkHard || wkSoft) && (_wdv[d] === 0 || _wdv[d] === 6) && ruleOn('weekend-pref')) {
+          violations.push({
+            staffId: s.id, day: d, type: 'weekend-pref',
+            message: `${wkHard ? '🚨' : '⚠️'} ${_wdv[d] === 0 ? '日曜' : '土曜'}に出勤（個人希望: 土日休み・${wkHard ? '絶対' : 'なるべく'}）`,
+            action:  'この日を休みにして平日の休みと入れ替えてください',
+          });
+        }
+        // 個人希望: 分散派（勤務は3連勤まで）
+        if ((spreadHard || spreadSoft) && consWork === 4 && !reportedDays.has('sp' + d) && ruleOn('rest-style')) {
+          violations.push({
+            staffId: s.id, day: d, type: 'rest-style',
+            message: `${spreadHard ? '🚨' : '⚠️'} 4連勤以上（個人希望: こまめに分散・${spreadHard ? '絶対' : 'なるべく'}）`,
+            action:  '3連勤以内になるよう休みを挟んでください',
+          });
+          reportedDays.add('sp' + d);
         }
 
-        if (settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
+        if (!isCast && settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
           violations.push({
             staffId: s.id, day: d, type: 'late-early',
             message: `🚨 ${isTraining(cur) ? '遅→研' : '遅→早'}（インターバル不足）`,
@@ -1380,7 +2843,7 @@ function checkViolations(shifts) {
           });
         }
 
-        if (consWork >= 2 && isWork(prevShift)) {
+        if (!isCast && consWork >= 2 && isWork(prevShift)) {
           const pc = getShiftCategory(prevShift), cc = getShiftCategory(cur);
           if (pc && cc && pc !== cc) {
             violations.push({
@@ -1412,9 +2875,11 @@ function checkViolations(shifts) {
         }
 
         // 単発出勤チェック（前後が両方とも非出勤）
-        if (settings.penaltySingleOff && d > 1 && d < days) {
+        // 1日目は前月末の状態で判定する（前月末が休みなら1日目の孤立出勤も単発）
+        if (!isCast && settings.penaltySingleOff && d < days) {
           const nx = (shifts[s.id] || {})[d + 1] || '';
-          if (!isWork(prevShift) && !isWork(nx)) {
+          const prevIsWork = (d === 1) ? prevWorked : isWork(prevShift);
+          if (!prevIsWork && !isWork(nx)) {
             violations.push({
               staffId: s.id, day: d, type: 'single-work',
               message: `⚠️ 単発出勤（${cur}）`,
@@ -1424,17 +2889,70 @@ function checkViolations(shifts) {
         }
 
         prevShift = cur;
+        offRun = 0;
       } else {
+        if (cur === '余') surplusN++;
         if (isPublicOff(cur)) offCount++; // 公休のみカウント（有給・季節休暇は別枠）
+        // 2連休以上のかたまりの数（前日が出勤で、当日と翌日が休みなら1回）
+        if (cur !== '余' && !isWork((shifts[s.id] || {})[d + 1] || '') && d < days) {
+          const _pv = (d > 1) ? ((shifts[s.id] || {})[d - 1] || '') : prevShift;
+          const _nx = (shifts[s.id] || {})[d + 1] || '';
+          if (_nx && _nx !== '余' && (d === 1 ? !prevWorked : isWork(_pv))) pairRestBlocks++;
+        }
         consWork = 0;
 
-        if (settings.penaltySingleOff && d > 1 && d < days) {
-          const pv = (shifts[s.id] || {})[d - 1] || '';
+        // 連休は設定した上限日数まで（有給も連休に数える。「余」は除外）
+        if (isOff(cur) && cur !== '余') {
+          offRun++;
+          const restLocked =
+            isOff((AppState.requests[s.id]    || {})[d]) ||
+            isOff((AppState.fixedShifts[s.id] || {})[d]);
+          const _maxRun = getMaxOffRun();
+          if (!isCast && offRun === _maxRun + 1 && !restLocked && !reportedDays.has('rest' + d)) {
+            violations.push({
+              staffId: s.id, day: d, type: 'long-rest',
+              message: `⚠️ ${offRun}連休以上（連休は最大${_maxRun}日まで）`,
+              action:  `${_maxRun + 1}日以上の連休は、必要なら希望休として手動で入れてください`,
+            });
+            reportedDays.add('rest' + d);
+          }
+        } else {
+          offRun = 0;
+        }
+
+        // 個人希望: 連休派（ポツンと1日だけの休みはNG）
+        if ((pairHard || pairSoft) && ruleOn('rest-style') && cur !== '余' && d > 1 && d < days) {
+          const pvP = (shifts[s.id] || {})[d - 1] || '';
+          const nxP = (shifts[s.id] || {})[d + 1] || '';
+          if (isWork(pvP) && isWork(nxP)) {
+            violations.push({
+              staffId: s.id, day: d, type: 'rest-style',
+              message: `${pairHard ? '🚨' : '⚠️'} 単独の1日休み（個人希望: 連休・${pairHard ? '絶対' : 'なるべく'}）`,
+              action:  '前後どちらかの日も休みにして連休にしてください',
+            });
+          }
+        }
+
+        // 1日目は前月末シフトを「前日」として judge する（月をまたぐ孤立休みを検出するため）
+        const prevOf = (dd) => (dd > 1) ? ((shifts[s.id] || {})[dd - 1] || '') : prevShift;
+        // 個人ルール: 遅→早の切替時は2連休以上必須
+        if (s.needPairRest && d >= 1 && d < days) {
+          const pv = prevOf(d);
+          const nx = (shifts[s.id] || {})[d + 1] || '';
+          if (isWork(pv) && isWork(nx) && isLate(pv) && isEarlyCategory(nx)) {
+            violations.push({
+              staffId: s.id, day: d, type: 'pair-rest',
+              message: `🚨 遅→休1日→早（個人ルール: 切替時は2連休以上）${d === 1 ? '・前月末から継続' : ''}`,
+              action:  '休みを2連休以上にするか、時間帯を揃えてください',
+            });
+          }
+        } else if (!isCast && settings.penaltySingleOff && d >= 1 && d < days) {
+          const pv = prevOf(d);
           const nx = (shifts[s.id] || {})[d + 1] || '';
           if (isLate(pv) && isEarlyCategory(nx)) {
             violations.push({
               staffId: s.id, day: d, type: 'bad-rest',
-              message: `⚠️ ${isTraining(nx) ? '遅→休→研' : '遅→休→早'}（リズムが悪い）`,
+              message: `⚠️ ${isTraining(nx) ? '遅→休→研' : '遅→休→早'}（リズムが悪い）${d === 1 ? '・前月末から継続' : ''}`,
               action:  '時間帯を揃えてください',
             });
           }
@@ -1443,31 +2961,130 @@ function checkViolations(shifts) {
       }
     }
 
-    // 公休不足のみ報告（超過は余剰人員のため許容）
+    // 公休不足のみ報告（超過は余剰人員のため許容）。
+    // キャストは勤務が固定契約ベースのため公休数は目安扱い（エラーにしない）。
     const diff = offCount - (s.maxOff || 0);
-    if (diff < 0) {
+    if (!isCast && diff < 0) {
       violations.push({
         staffId: s.id, day: 0, type: 'off-count',
         message: `🚨 公休数 ${offCount}日（目標${s.maxOff}日, 差${diff}）`,
         action:  '公休数を増やしてください',
       });
     }
+
+    // 連休（2連休以上）の回数が目安に届いているか
+    if (!isCast && ruleOn('pair-rest-count')) {
+      const prTarget = (parseInt(s.pairRestTarget) > 0)
+        ? parseInt(s.pairRestTarget)
+        : (parseInt(settings.pairRestTarget) || 0);
+      if (prTarget > 0 && pairRestBlocks < prTarget) {
+        violations.push({
+          staffId: s.id, day: 0, type: 'pair-rest-count',
+          message: `⚠️ 連休（2連休以上）が ${pairRestBlocks}回（目安 ${prTarget}回）`,
+          action:  '休みをまとめて2連休にすると回数が増えます',
+        });
+      }
+    }
+
+    // 早遅バランス（早番多め/遅番多め など）のずれ。
+    // 早番帯・遅番帯の両方に入れる人だけが対象（片方しか入れない人は判定しない）。
+    if (ruleOn('balance-diff')) {
+      const ratio = getBalanceRatio(s);   // 「指定なし(OFF)」の人は null → 判定しない
+      // 研は全員が入れるので判定から除く（担当シフトで早遅どちらも選べる人だけが対象）
+      const myShifts = (s.allowedShifts || []);
+      const canE  = myShifts.some(sh => isEarlyCategory(sh));
+      const canL  = myShifts.some(sh => isLate(sh));
+      const total = earlyBand + lateBand;
+      if (ratio && canE && canL && total > 0) {
+        const tol  = Math.max(0, parseInt(settings.balanceTolerance) || 0);
+        const want = total * ratio.earlyRatio;
+        const gap  = earlyBand - want;                 // ＋なら早番が多すぎ
+        if (Math.abs(gap) > tol + 1e-9) {
+          const over = gap > 0 ? '早番' : '遅番';
+          violations.push({
+            staffId: s.id, day: 0, type: 'balance-diff',
+            message: `⚠️ 早遅バランスのずれ（${ratio.label}: 早${earlyBand}/遅${lateBand}、目標 早${want.toFixed(1)}）`,
+            action:  `${over}を${Math.abs(gap).toFixed(1)}日ぶん減らすと目標比率に近づきます`,
+          });
+        }
+      }
+    }
   });
 
-  // 毎日、副店長が1人以上出勤していること
+  // 特別日（入れ替え日＝副店長が遅責 / 新装日＝副店長が早責）に入っているか
+  if (ruleOn('special-day')) {
+    const vmsAll = staff.filter(s => s.positionType === 'viceManager');
+    Object.keys(AppState.specialDays || {}).forEach(k => {
+      const d = parseInt(k); if (!(d >= 1 && d <= days)) return;
+      const kind = AppState.specialDays[k];
+      if (kind !== 'replacement' && kind !== 'renewal') return;
+      const role = (kind === 'replacement') ? '遅責' : '早責';
+      const ok = vmsAll.some(vm => ((shifts[vm.id] || {})[d] || '') === role);
+      if (!ok && vmsAll.length) {
+        violations.push({
+          staffId: (vmsAll[0] || {}).id || '', day: d, type: 'special-day',
+          message: `⚠️ ${kind === 'replacement' ? '入れ替え日' : '新装日'}に副店長が「${role}」に入っていません`,
+          action:  `副店長のいずれかをこの日の${role}にしてください`,
+        });
+      }
+    });
+  }
+
+  // 毎日、次の①②のどちらかを満たすこと（副店長2人以上のときのみ有効）
+  //  ① 副店長が早番か遅番に出勤している
+  //  ② 早責と遅責の両方が「チーフ以上（チーフ or 副店長）」で埋まっている
+  // 1人の場合は公休目標と数学的に矛盾するためチェックしない
   const viceManagers = staff.filter(s => s.positionType === 'viceManager');
-  if (viceManagers.length > 0) {
+  if (viceManagers.length >= 2) {
     for (let d = 1; d <= days; d++) {
       const working = viceManagers.some(vm => isWork((shifts[vm.id] || {})[d] || ''));
-      if (!working) {
+      const respEarly = staff.find(s => (shifts[s.id] || {})[d] === '早責');
+      const respLate  = staff.find(s => (shifts[s.id] || {})[d] === '遅責');
+      const chiefCovered = respEarly && respLate &&
+        getStaffPriority(respEarly) <= 2 && getStaffPriority(respLate) <= 2;
+      if (!working && !chiefCovered) {
         violations.push({
           staffId: null, day: d, type: 'vicemanager-absent',
-          message: `🚨 ${d}日 副店長が誰も出勤していない`,
-          action:  '副店長のいずれかをこの日に出勤させてください',
+          message: `🚨 ${d}日 副店長が不在で、早責・遅責もチーフ以上で揃っていない`,
+          action:  '副店長を出勤させるか、早責・遅責の両方をチーフ以上にしてください',
         });
       }
     }
   }
+
+  // スキル別: 指定の時間帯（早番/遅番）に必要なスキル保有者が足りているか。
+  // 最低ライン min を下回る＝🔴(skill-late)、min〜目標未満＝🟡(skill-short)。
+  (AppState.skills || []).forEach(sk => {
+    const baseNeed = (sk.req != null ? sk.req : (sk.lateReq || 0));
+    // 既定が0でも日別上書きがあれば判定する
+    if (!baseNeed && !hasDailySkillOverride(sk.name)) return;
+    const target = sk.target || 'late';
+    const label  = target === 'early' ? '早番' : '遅番';
+    const inTarget = (sh) => target === 'early' ? isEarlyCategory(sh) : isLate(sh);
+    for (let d = 1; d <= days; d++) {
+      // 目標人数・最低ラインは日別上書きを反映
+      const { need, min } = getDaySkillReq(sk, d);
+      if (!need && !min) continue;
+      let have = 0;
+      staff.forEach(s => {
+        const sh = (shifts[s.id] || {})[d] || '';
+        if (isWork(sh) && inTarget(sh) && (s.skills || []).includes(sk.name)) have++;
+      });
+      if (have < min) {
+        violations.push({
+          staffId: null, day: d, type: 'skill-late',
+          message: `🚨 ${d}日 ${label}に「${sk.name}」できる人が${have}人（最低${min}人必要）`,
+          action:  `「${sk.name}」スキルのある人を${label}に配置してください`,
+        });
+      } else if (have < need) {
+        violations.push({
+          staffId: null, day: d, type: 'skill-short',
+          message: `⚠️ ${d}日 ${label}に「${sk.name}」できる人が${have}人（目標${need}人・最低${min}人はOK）`,
+          action:  `可能なら「${sk.name}」スキルのある人をもう1人${label}に配置してください`,
+        });
+      }
+    }
+  });
 
   // イベント日: 対象スタッフが休んでいないか
   (AppState.events || []).forEach(ev => {
@@ -1557,7 +3174,8 @@ function checkViolations(shifts) {
     }
   });
 
-  return violations;
+  // ルール設定が off の違反タイプは報告しない（既定では off は無いので従来どおり）
+  return violations.filter(v => getRuleLevel(v.type) !== 'off');
 }
 
 // ===== 特別日ロジック =====
@@ -1581,6 +3199,119 @@ function applySpecialDaysLogic(shifts, locked, staff, days) {
  * スタッフ構成・制約・違反を分析して診断レポートを返す
  * @returns {Array<{level:'error'|'warning'|'info'|'ok', title:string, detail:string, suggestion:string|null}>}
  */
+/**
+ * 「その担当ができる人が少なく、負担が偏っている」ボトルネックを検出する。
+ * 例: 早責・遅責をできる人が2人しかいない → その人が休めず公休不足、他の人が余になる。
+ * @returns {Array<{dept,key,capable:string[],needPerDay,surplusCandidates:string[]}>}
+ */
+function findCapabilityBottlenecks() {
+  const staff  = AppState.staff || [];
+  const days   = getDaysInMonth(AppState.settings.targetMonth);
+  const groups = getDepartmentGroups(staff);
+  const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
+
+  // 現在「余」がついている人（＝担当を広げれば戦力になる候補）
+  const surplusNames = [];
+  staff.forEach(s => {
+    let yo = 0;
+    for (let d = 1; d <= days; d++) if ((AppState.shifts[s.id] || {})[d] === '余') yo++;
+    if (yo > 0) surplusNames.push({ name: s.name, id: s.id, yo });
+  });
+
+  const out = [];
+  groups.forEach(g => {
+    workKeys.forEach(key => {
+      const baseReq = g.reqs[key] || 0;
+      if (!baseReq) return;
+      const capable = g.staff.filter(s => (s.allowedShifts || []).includes(key));
+      // できる人が「必要人数+1」以下しかいない → 休みを回しにくいボトルネック
+      if (capable.length > 0 && capable.length <= baseReq + 1) {
+        // その担当を今できない余剰スタッフ＝広げる候補
+        const cands = surplusNames
+          .filter(sn => {
+            const s = g.staff.find(m => m.id === sn.id);
+            return s && !(s.allowedShifts || []).includes(key);
+          })
+          .map(sn => sn.name);
+        out.push({
+          dept: g.label, key, needPerDay: baseReq,
+          capable: capable.map(s => s.name),
+          surplusCandidates: cands,
+        });
+      }
+    });
+  });
+  return out;
+}
+
+/**
+ * 症状（個々の違反）の裏にある「根本原因」を推定してランキングで返す。
+ * @returns {Array<{title,detail,fix}>}
+ */
+function analyzeRootCauses() {
+  const vios  = AppState.violations || [];
+  const staff = AppState.staff || [];
+  const days  = getDaysInMonth(AppState.settings.targetMonth);
+  const causes = [];
+
+  // (1) 担当できる人が少ない（公休不足・時間帯切替・順位違反・余 の根本原因）
+  const bn = findCapabilityBottlenecks();
+  const relatedTypes = ['off-count', 'understaff', 'hierarchy', 'category-switch', 'skill-late', 'resp-duplicate'];
+  const relatedCount = vios.filter(v => relatedTypes.includes(v.type)).length;
+  if (bn.length > 0 && (relatedCount > 0 || bn.some(b => b.surplusCandidates.length))) {
+    const keys  = [...new Set(bn.map(b => b.key))].join('・');
+    const cands = [...new Set(bn.flatMap(b => b.surplusCandidates))].slice(0, 5);
+    causes.push({
+      weight: relatedCount + 10,
+      title: `「${keys}」を担当できる人が少なすぎる`,
+      detail: `${keys} をこなせる人が限られているため、その人に仕事が集中して「公休不足」「連勤中の時間帯切替」「責任者の順位」などが発生し、担当できない人は「余」になります。これが多くのエラーの共通原因です。`,
+      fix: cands.length
+        ? `③スタッフ管理で ${cands.join('・')} に「${keys}」の担当チェックを追加して再生成`
+        : `「${keys}」を担当できる人を増やす（育成・役職追加）`,
+    });
+  }
+
+  // (2) 早番と遅番を両方こなす人に、切替・リズム崩れが集中
+  const switchVios = vios.filter(v => ['category-switch', 'bad-rest'].includes(v.type));
+  if (switchVios.length > 0) {
+    const both = [...new Set(switchVios.map(v => v.staffId))]
+      .map(id => staff.find(s => s.id === id)).filter(Boolean)
+      .filter(s => {
+        const a = s.allowedShifts || [];
+        return a.some(k => isEarlyCategory(k)) && a.some(k => isLate(k));
+      }).map(s => s.name);
+    if (both.length) {
+      causes.push({
+        weight: switchVios.length + 3,
+        title: `早番と遅番を両方こなす人に切替が集中`,
+        detail: `${both.slice(0, 5).join('・')} は早番・遅番の両方を担当できるため、日によって時間帯が変わり「連勤中の切替」「遅→休→早」が起きやすくなります。`,
+        fix: `③スタッフ管理で対象者の「早遅バランス」を早寄り/遅寄りにする、または担当を片方の時間帯に絞ると切替が減ります。`,
+      });
+    }
+  }
+
+  // (3) 人手の過不足（必要コマ vs 出せるコマ）
+  const groups   = getDepartmentGroups(staff);
+  const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
+  let requiredWork = 0, availableWork = 0;
+  staff.forEach(s => { availableWork += Math.max(0, days - (s.maxOff || 0) - (s.paidLeave || 0)); });
+  groups.forEach(g => workKeys.forEach(key => {
+    if (!(g.reqs[key] > 0)) return;
+    for (let d = 1; d <= days; d++) requiredWork += getDayReq(g.reqs, g.dailyReqs || {}, key, d);
+  }));
+  if (requiredWork > availableWork) {
+    causes.push({
+      weight: (requiredWork - availableWork) + 8,
+      title: `そもそも人手が足りない（${requiredWork - availableWork}コマ不足）`,
+      detail: `必要コマ合計 ${requiredWork} に対して、出せるコマ合計は ${availableWork} です。物理的に足りないため、公休不足や人員不足が必ず発生します。`,
+      fix: `必要人数（定数）を下げる／公休・有給を減らす／スタッフを増やす のいずれかが必要です。`,
+    });
+  }
+
+  causes.sort((a, b) => b.weight - a.weight);
+  return causes;
+}
+
 function runAIDiagnosis() {
   const days      = getDaysInMonth(AppState.settings.targetMonth);
   const staff     = AppState.staff;
@@ -1589,6 +3320,44 @@ function runAIDiagnosis() {
 
   if (!staff.length || !days) {
     return [{ level: 'info', title: 'データ未入力', detail: 'スタッフまたは対象月が設定されていません。', suggestion: null }];
+  }
+
+  // ── 0. 根本原因（症状の裏にある本当の原因）を最優先で表示 ─────────
+  if (AppState.generated && (AppState.violations || []).length > 0) {
+    const roots = analyzeRootCauses();
+    roots.slice(0, 3).forEach((r, i) => {
+      results.push({
+        level: i === 0 ? 'error' : 'warning',
+        title: `🔍 根本原因${roots.length > 1 ? ` ${i + 1}` : ''}：${r.title}`,
+        detail: r.detail,
+        suggestion: r.fix,
+      });
+    });
+  }
+
+  // ── 入力チェック: 希望休（公休系のロック）が公休目標を超えている人 ──
+  // 希望休は必ず尊重（動かさない）ため、目標より多く入れると公休が目標を超える。
+  // これは「公休不足」エラーにはならないが、入力しすぎの可能性が高いので注意を出す。
+  const overReq = [];
+  staff.forEach(s => {
+    const quota = s.maxOff || 0;
+    let lockedPub = 0;
+    for (let d = 1; d <= days; d++) {
+      const rq = (AppState.requests[s.id]    || {})[d];
+      const fx = (AppState.fixedShifts[s.id] || {})[d];
+      if (isPublicOff(rq) || isPublicOff(fx)) lockedPub++;
+    }
+    if (lockedPub > quota) overReq.push({ name: s.name, lockedPub, quota });
+  });
+  if (overReq.length) {
+    results.push({
+      level: 'warning',
+      title: `⚠️ 希望休が公休目標より多い ${overReq.length}件（入力しすぎの可能性）`,
+      detail:
+        overReq.map(o => `${o.name}: 希望休(公休系) ${o.lockedPub}日 ＞ 公休目標 ${o.quota}日（+${o.lockedPub - o.quota}）`).join('\n') +
+        `\n希望休は必ず尊重して動かさないため、公休が目標を超えます。「公休不足」エラーにはなりませんが、入力ミスの可能性があります。`,
+      suggestion: `意図的でなければ、④希望休入力で対象スタッフの「休」を目標日数まで減らしてください（意図的に多く休ませる場合はそのままでOK）。`,
+    });
   }
 
   // ── 1〜3. 部門ごとの実現可能性・カバレッジ・個別制約 ─────────
@@ -1600,41 +3369,84 @@ function runAIDiagnosis() {
     const gStaff = g.staff;
 
     // ── 1. 公休数の数学的実現可能性 ──
-    const dailyRequired   = shiftKeys.reduce((sum, k) => sum + (g.reqs[k] || 0), 0);
-    const totalRequired   = dailyRequired * days;
+    // 必要人日は「日別必要人数の上書き」も含めて日ごとに合計する
+    let totalRequired = 0;
+    for (let d = 1; d <= days; d++) {
+      shiftKeys.forEach(k => { totalRequired += getDayReq(g.reqs, g.dailyReqs || {}, k, d); });
+    }
+    const dailyRequired   = Math.round((totalRequired / days) * 10) / 10; // 1日平均
+    const baseDaily       = shiftKeys.reduce((sum, k) => sum + (g.reqs[k] || 0), 0);
     const totalPersonDays = gStaff.length * days;
     const totalMaxOff     = gStaff.reduce((sum, s) => sum + (s.maxOff || 0), 0);
-    const availWork       = totalPersonDays - totalMaxOff;
-    const gSurplus        = availWork - totalRequired;
+    // 出勤できない日は公休だけではない。有給（設定分は必ず消化）・研修・
+    // 季節休暇などの公休以外の休みも差し引かないと余力を過大評価してしまう。
+    let totalPaid = 0, totalTrain = 0, totalOtherOff = 0;
+    gStaff.forEach(s => {
+      let reqPaid = 0, trainN = 0, otherOff = 0;
+      for (let d = 1; d <= days; d++) {
+        const rq = (AppState.requests[s.id]    || {})[d];
+        const fx = (AppState.fixedShifts[s.id] || {})[d];
+        if (rq === '有' || fx === '有') { reqPaid++; continue; }
+        if ((rq && isTraining(rq)) || (fx && isTraining(fx))) { trainN++; continue; }
+        // 公休以外の休み（季/慶/引/半 など）は maxOff に含まれないので別途差し引く
+        const off = (rq && isOff(rq)) ? rq : ((fx && isOff(fx)) ? fx : '');
+        if (off && !isPublicOff(off)) otherOff++;
+      }
+      totalPaid     += Math.max(reqPaid, parseInt(s.paidLeave) || 0); // 設定分は必ず消化
+      totalTrain    += trainN;
+      totalOtherOff += otherOff;
+    });
+    const availWork = totalPersonDays - totalMaxOff - totalPaid - totalTrain - totalOtherOff;
+    const gSurplus  = availWork - totalRequired;
     surplus = Math.min(surplus, gSurplus);
+    // 内訳の説明文（過大評価を防ぐため必ず明示する）
+    const capLines =
+      `スタッフ数: ${gStaff.length}人 × ${days}日 = ${totalPersonDays}人日\n` +
+      `− 公休目標 ${totalMaxOff}日` +
+      (totalPaid ? ` − 有給 ${totalPaid}日` : '') +
+      (totalTrain ? ` − 研修 ${totalTrain}日` : '') +
+      (totalOtherOff ? ` − その他の休み ${totalOtherOff}日` : '') +
+      `\n＝ 出勤できる合計: ${availWork}人日\n` +
+      `必要出勤: ${totalRequired}人日（1日平均 ${dailyRequired}人` +
+      (dailyRequired !== baseDaily ? `・日別上書きを反映済み` : '') + `）`;
 
     if (gSurplus < 0) {
-      const avgMaxOff      = (totalMaxOff / gStaff.length).toFixed(1);
-      const feasibleMaxOff = Math.max(0, Math.floor((totalPersonDays - totalRequired) / gStaff.length));
-      const neededStaff    = Math.ceil(totalRequired / Math.max(1, days - totalMaxOff / gStaff.length));
-      const feasibleDaily  = Math.floor(availWork / days);
+      const shortage    = -gSurplus;
+      const cutOffDays  = Math.ceil(shortage / gStaff.length);   // 1人あたり公休を何日減らせば足りるか
+      const feasibleDaily = Math.floor(availWork / days);
       results.push({
         level: 'error',
-        title: `${pfx}公休数が数学的に実現不可能`,
+        title: `${pfx}🚨 人手が ${shortage}人日 足りません（このままではエラーが必ず出ます）`,
         detail:
-          `スタッフ数: ${gStaff.length}人 × ${days}日 = ${totalPersonDays}人日\n` +
-          `公休目標合計: ${totalMaxOff}日（平均 ${avgMaxOff}日/人）\n` +
-          `出勤余力: ${totalPersonDays} − ${totalMaxOff} = ${availWork}人日\n` +
-          `必要出勤: ${dailyRequired}人/日 × ${days}日 = ${totalRequired}人日\n` +
-          `不足: ${-gSurplus}人日 → 全員が目標公休を取ることは不可能です`,
+          capLines + `\n` +
+          `不足: ${shortage}人日 → 全員に目標どおり休みを与えつつ必要人数を満たすことは数学的に不可能です。\n` +
+          `※ 公休不足・連勤超過・リズム違反（遅→早など）は、この不足が原因で必ず発生します。`,
         suggestion:
-          `①スタッフを ${neededStaff} 人以上に増やす` +
-          `　②1日の必要出勤人数を ${feasibleDaily} 人以下に下げる` +
-          `　③各スタッフの最大公休を ${feasibleMaxOff} 日以下に設定する` +
-          `　のいずれかが必要です。`,
+          `次のいずれかで解消できます（数字は必要量の目安）：` +
+          `　①有給日数を合計 ${shortage}日ぶん減らす（設定した有給は必ず消化されます）` +
+          `　②「日別必要人数」の上書きを ${shortage}コマぶん減らす（土日の増員を戻す）` +
+          `　③公休数を1人あたり ${cutOffDays}日 減らす` +
+          `　④1日の必要人数を平均 ${feasibleDaily}人以下にする` +
+          `　⑤スタッフを ${Math.ceil(shortage / Math.max(1, days - Math.round(totalMaxOff / gStaff.length)))}人以上増やす`,
+      });
+    } else if (dailyRequired > 0 && gSurplus < gStaff.length) {
+      // 足りてはいるが余裕が薄い（1人日/人 未満）→ エラーが出やすい
+      results.push({
+        level: 'warning',
+        title: `${pfx}⚠️ 人手の余裕がわずかです（余裕 +${gSurplus}人日）`,
+        detail:
+          capLines + `\n` +
+          `余裕: +${gSurplus}人日 → 足りてはいますが、休みの並べ方の自由度がほとんどありません。\n` +
+          `連勤超過・遅→早・単発出勤などのエラーが残りやすい状態です。`,
+        suggestion: `エラーを0に近づけたい場合は、有給日数・日別必要人数の上書き・公休数のいずれかを少し緩めてください。`,
       });
     } else if (dailyRequired > 0) {
       results.push({
         level: 'ok',
         title: `${pfx}公休数は数学的に実現可能`,
         detail:
-          `出勤余力 ${availWork}人日 ≥ 必要 ${totalRequired}人日（余裕 +${gSurplus}人日/月）\n` +
-          `スタッフ ${gStaff.length}人 で目標公休を全員に与えられます。`,
+          capLines + `\n` +
+          `余裕: +${gSurplus}人日/月 → スタッフ ${gStaff.length}人 で目標どおりの休みを全員に与えられます。`,
         suggestion: null,
       });
     } else if (g.key === 'cast') {
@@ -1729,6 +3541,64 @@ function runAIDiagnosis() {
   });
   if (surplus === Infinity) surplus = 0;
 
+  // ── 3.6. スキル（営業など）の日別“物理的”実現可能性（避けられる/避けられない判定）──
+  //   各日、そのスキルを持ち対象帯（早/遅）で働ける人が何人いるか（希望休・有給・固定・早遅可を考慮）。
+  //   利用可能人数が最低ラインを割る日=🔴、目標を割る日=🟡は、どう配置しても避けられない（人員構成の限界）。
+  (AppState.skills || []).forEach(sk => {
+    const need = (sk.req != null ? sk.req : (sk.lateReq || 0));
+    if (!need) return;
+    const min   = (sk.min != null && sk.min >= 0 && sk.min <= need) ? sk.min : need;
+    const early = (sk.target || 'late') === 'early';
+    const bandLabel = early ? '早番' : '遅番';
+    const holders = staff.filter(s => (s.skills || []).includes(sk.name));
+    const inBand = k => early ? isEarlyCategory(k) : isLate(k);
+    const belowMin = [], belowTarget = [];
+    for (let d = 1; d <= days; d++) {
+      let avail = 0;
+      holders.forEach(s => {
+        const rq = (AppState.requests[s.id] || {})[d];
+        if (rq && isOff(rq)) return;                                   // 希望休・有給などで不在
+        const fx = (AppState.fixedShifts[s.id] || {})[d];
+        if (fx) { if (isWork(fx) && inBand(fx) && !isTraining(fx)) avail++; return; } // 固定シフト
+        const canBand = (s.allowedShifts || []).some(k => inBand(k) && !isTraining(k));
+        const prefOk  = early ? (!s.prefs || s.prefs.includes('早可')) : (!s.prefs || s.prefs.includes('遅可'));
+        if (canBand && prefOk) avail++;
+      });
+      if (avail < min) belowMin.push(d);
+      else if (avail < need) belowTarget.push(d);
+    }
+    const daysStr = arr => (arr.length > 12 ? arr.slice(0, 12).join('・') + `…（計${arr.length}日）` : arr.join('・')) + '日';
+    if (belowMin.length) {
+      results.push({
+        level: 'error',
+        title: `🔴【避けられない】${sk.name}が最低${min}人に届かない日 ${belowMin.length}日`,
+        detail: `${bandLabel}に「${sk.name}」できる人が最低${min}人必要ですが、次の日は出られる保有者が${min}人未満です` +
+          `（希望休・有給・固定を除いた実数／保有者は全${holders.length}人）:\n${daysStr(belowMin)}\n` +
+          `→ これらの日はどう配置しても不足します（生成では消せません）。`,
+        suggestion: `該当日の希望休・有給をずらす、または「${sk.name}」ができる人を増やすと解消します。`,
+      });
+    }
+    if (belowTarget.length) {
+      results.push({
+        level: 'warning',
+        title: `🟡【避けられない】${sk.name}が目標${need}人に届かない日 ${belowTarget.length}日`,
+        detail: `${bandLabel}に「${sk.name}」を${need}人置きたい日のうち、出られる保有者が${need}人未満なのは:\n${daysStr(belowTarget)}\n` +
+          `→ 最低ライン（${min}人）は満たせるので🟡。人員的な限界なので、この🟡は残っても問題ありません。`,
+        suggestion: `完全に無くすには保有者を増やすか、該当日だけ「日別必要人数」で目標を${Math.max(min, need - 1)}人に下げてください。`,
+      });
+    }
+    if (!belowMin.length && !belowTarget.length && holders.length) {
+      results.push({
+        level: 'ok',
+        title: `✅ ${sk.name} は人員的には毎日 目標${need}人を出せます`,
+        detail: `全${days}日で、${bandLabel}に出られる「${sk.name}」保有者は常に${need}人以上います（＝${sk.name}だけを見れば可能）。\n` +
+          `→ それでもスキル不足が出る場合は、保有者が同じ日に他の役割（早責など）や公休と取り合いになるのが原因で、\n` +
+          `　“避けられる”タイプです。案数を増やす・再生成・🛠自動修正で減らせる可能性が高いです。`,
+        suggestion: null,
+      });
+    }
+  });
+
   // ── 3.5. イベント整合性（希望休との衝突） ──────────────────
   (AppState.events || []).forEach(ev => {
     if (!ev || !ev.day) return;
@@ -1769,6 +3639,11 @@ function runAIDiagnosis() {
       'hierarchy':       '責任者ヒエラルキー違反',
       'event-absent':    '行事日の休み',
       'vicemanager-absent': '副店長不在の日',
+      'balance-diff':    '早遅バランスのずれ',
+      'pair-rest-count': '連休回数が目安に不足',
+      'special-day':     '特別日に副店長が責任者不在',
+      'weekend-pref':    '土日休み希望',
+      'rest-style':      '休み方の希望',
     };
 
     // 遅→休→早
@@ -1834,9 +3709,9 @@ function runAIDiagnosis() {
       const days   = vmVios.map(v => `${v.day}日`).join('、');
       results.push({
         level: 'error',
-        title: `副店長が誰も出勤していない日 ${cnt['vicemanager-absent']} 件`,
-        detail: `次の日は副店長が全員休みです: ${days}\n毎日少なくとも1人の副店長が出勤している必要があります。`,
-        suggestion: '副店長の公休日が重ならないよう調整するか、「シフト作成」を再実行してください。副店長が1人しかいない場合は増員が必要です。',
+        title: `副店長不在で早責・遅責もチーフ以上で揃っていない日 ${cnt['vicemanager-absent']} 件`,
+        detail: `次の日が該当します: ${days}\n毎日、副店長が出勤しているか、早責・遅責の両方がチーフ以上（チーフ or 副店長）で埋まっている必要があります。`,
+        suggestion: '副店長を出勤させるか、早責・遅責の両方をチーフ以上に配置してください。「シフト作成」の再実行でも改善します。',
       });
     }
 
@@ -1888,49 +3763,474 @@ function runAIDiagnosis() {
     }
   }
 
-  // ── 5. 公休余剰の可視化（生成済みシフトがある場合） ──────────
+  // ── 5. 余剰コマ（余）の可視化（生成済みシフトがある場合） ──────────
+  // 公休(maxOff)・有給は満額消化済み。それでも余った人員は「余」として表示。
   if (AppState.generated && AppState.shifts) {
     const surplusItems = [];
     let totalSurplus = 0;
     staff.forEach(s => {
-      const offCount = countOff(AppState.shifts, s, days);
-      const target   = s.maxOff || 0;
-      const excess   = offCount - target;
+      let publicOff = 0, yo = 0;
+      for (let d = 1; d <= days; d++) {
+        const sh = (AppState.shifts[s.id] || {})[d] || '';
+        if (isPublicOff(sh)) publicOff++;
+        else if (sh === '余') yo++;
+      }
+      const excess = Math.max(0, publicOff - (s.maxOff || 0)) + yo;
       if (excess > 0) {
-        surplusItems.push({ name: s.name, offCount, target, excess });
+        surplusItems.push({ name: s.name, yo: excess });
         totalSurplus += excess;
       }
     });
 
     if (surplusItems.length > 0) {
-      // 公休不足スタッフを suggestion 文に反映
-      const shortNames = (AppState.violations || [])
-        .filter(v => v.type === 'off-count')
-        .map(v => { const m = staff.find(s => s.id === v.staffId); return m ? m.name : null; })
-        .filter(Boolean);
-      const shortHint = shortNames.length
-        ? `（特に ${shortNames.join('・')} の公休不足と合わせて解消できます）`
-        : '';
       results.push({
         level: 'warning',
-        title: `公休余剰 合計 +${totalSurplus}コマ（${surplusItems.length}名、約${totalSurplus * 8}時間分の労働減）`,
-        detail: surplusItems
-          .sort((a, b) => b.excess - a.excess)
-          .map(r => `${r.name}: 公休 ${r.offCount}日（目標 ${r.target}日、余剰 +${r.excess}日 ≒ ${r.excess * 8}時間）`)
-          .join('\n'),
+        title: `余剰コマ 合計 ${totalSurplus}コマ（${surplusItems.length}名）— 誰がどれだけ余っているか`,
+        detail:
+          '公休・有給は満額消化済み。それでも人員が余っている分を「余」で表示しています。\n' +
+          '忙しい日の必要人数を増やすか、有給を追加すると、この「余」を出勤・有給に回せます。\n\n' +
+          surplusItems
+            .sort((a, b) => b.yo - a.yo)
+            .map(r => `${r.name}: 余 ${r.yo}コマ`)
+            .join('\n'),
         suggestion:
-          `余剰スタッフの休みを減らして公休不足スタッフの休みを増やすと全体バランスが改善します${shortHint}。` +
-          `「シフト作成」を再実行すると自動的に再配分されます。`,
+          '「日別必要人数（上書き設定）」で忙しい日の人数を増やす、または有給を増やしてから' +
+          '「シフト作成」を再実行すると、余（オレンジ）が減っていきます。',
       });
     } else {
       results.push({
         level: 'ok',
-        title: '公休余剰なし',
-        detail: 'すべてのスタッフが目標公休日数ちょうど（または不足）に収まっています。',
+        title: '余剰コマなし',
+        detail: 'すべてのスタッフが出勤・公休・有給でちょうど埋まっています（余りなし）。',
         suggestion: null,
       });
     }
   }
 
+  // ── 6. 担当できる人が少ない偏り（公休不足↔余の根本原因）──────────
+  const bottlenecks = findCapabilityBottlenecks();
+  if (bottlenecks.length > 0) {
+    const lines = bottlenecks.map(b => {
+      const cand = b.surplusCandidates.length
+        ? `　→ 余っている ${b.surplusCandidates.slice(0, 4).join('・')} に「${b.key}」を任せられると分散できます`
+        : '';
+      return `・「${b.key}」ができるのは ${b.capable.length}人だけ（${b.capable.slice(0, 5).join('・')}）${cand}`;
+    }).join('\n');
+    results.push({
+      level: 'warning',
+      title: `⚖️ 担当できる人の偏り（公休不足・余の原因）`,
+      detail:
+        '次の担当は「できる人」が少なく、その人に負担が集中して公休不足になりやすく、\n' +
+        '一方でその担当ができない人は「余」になりがちです。\n\n' + lines,
+      suggestion:
+        '③スタッフ管理で、余っている人に上記シフト（早責・遅責など）の担当チェックを追加して再生成すると、' +
+        '公休不足と余の両方が減ります。',
+    });
+  }
+
   return results;
+}
+
+/* ===========================================
+   エラー解消プラン（緩和の提案）
+   「どの設定をいくつ動かせば、どのエラーが消えるか」を人日で計算して
+   実行可能な案を並べる。UI側は id と params を見て設定を書き換える。
+   =========================================== */
+
+// 痛み（現場への影響）の小さい順。同じ痛みなら効果の大きい順に並べる。
+const RELAX_PAIN_ORDER = { small: 0, mid: 1, large: 2 };
+
+/**
+ * 1部門ぶんの人日収支を計算する。
+ * @returns {{required:number, avail:number, surplus:number, days:number,
+ *            totalMaxOff:number, totalPaid:number, excessDaily:number}}
+ */
+function calcCapacity(g, days) {
+  const shiftKeys = getWorkShiftKeys();
+  let required = 0, excessDaily = 0;
+  for (let d = 1; d <= days; d++) {
+    shiftKeys.forEach(k => {
+      const need = getDayReq(g.reqs, g.dailyReqs || {}, k, d);
+      required += need;
+      // 日別上書きが既定値より多い分＝「上乗せ」。戻せば取り返せる人日。
+      const base = (g.reqs || {})[k] || 0;
+      if (need > base) excessDaily += (need - base);
+    });
+  }
+  let totalPaid = 0, totalTrain = 0, totalOtherOff = 0;
+  g.staff.forEach(s => {
+    for (let d = 1; d <= days; d++) {
+      const rq = (AppState.requests[s.id]    || {})[d];
+      const fx = (AppState.fixedShifts[s.id] || {})[d];
+      if (rq === '有' || fx === '有') { totalPaid++; continue; }
+      if ((rq && isTraining(rq)) || (fx && isTraining(fx))) { totalTrain++; continue; }
+      const off = (rq && isOff(rq)) ? rq : ((fx && isOff(fx)) ? fx : '');
+      if (off && !isPublicOff(off)) totalOtherOff++;
+    }
+    totalPaid += Math.max(0, (parseInt(s.paidLeave) || 0) - countPaidRequests(s, days));
+  });
+  const totalMaxOff = g.staff.reduce((sum, s) => sum + (s.maxOff || 0), 0);
+  const avail = g.staff.length * days - totalMaxOff - totalPaid - totalTrain - totalOtherOff;
+  return { required, avail, surplus: avail - required, days,
+           totalMaxOff, totalPaid, excessDaily };
+}
+
+// その人がカレンダーで既に指定している'有'の日数（設定値との二重計上を防ぐ）
+function countPaidRequests(s, days) {
+  let n = 0;
+  for (let d = 1; d <= days; d++) if ((AppState.requests[s.id] || {})[d] === '有') n++;
+  return n;
+}
+
+/**
+ * エラー解消プランを組み立てる。
+ * @param {Array} violations 直近の生成結果の違反（無ければ人日の話だけになる）
+ * @returns {Array} プラン配列（痛みの小さい順）
+ */
+function buildRelaxPlans(violations) {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const vios = violations || AppState.violations || [];
+  const plans = [];
+  if (!AppState.staff.length || !days) return plans;
+
+  const cnt = {};
+  vios.forEach(v => { cnt[v.type] = (cnt[v.type] || 0) + 1; });
+
+  // ── A. 人日が足りない場合の案（人員不足・公休不足の根本原因） ──
+  getDepartmentGroups(AppState.staff).forEach(g => {
+    const cap = calcCapacity(g, days);
+    if (cap.surplus >= 0) return;
+    const shortage = -cap.surplus;
+    const pfx = (getDepartmentGroups(AppState.staff).length > 1) ? `【${g.label}】` : '';
+
+    // A-1 日別必要人数の上乗せを戻す（いちばん効きやすく、痛みも中程度）
+    if (cap.excessDaily > 0) {
+      const gain = Math.min(cap.excessDaily, shortage);
+      plans.push({
+        id: 'daily-req-reset', group: 'capacity', pain: 'mid', gain, shortage, dept: g.key,
+        title: `${pfx}「日別必要人数」の上乗せを戻す`,
+        effect: `＋${cap.excessDaily}人日`,
+        detail: `土日などで既定より増やしている分が合計 ${cap.excessDaily}人日 あります。これを既定値に戻すと、不足 ${shortage}人日 のうち ${gain}人日 が解消します。`,
+        after: cap.excessDaily >= shortage ? 'これだけで不足は解消します。' : `まだ ${shortage - cap.excessDaily}人日 足りません。他の案と組み合わせてください。`,
+        params: { dept: g.key },
+      });
+    }
+
+    // A-2 有給の当月消化を減らす（翌月に回すだけなので痛みは小さい）
+    const paidTotal = g.staff.reduce((n, s) => n + (parseInt(s.paidLeave) || 0), 0);
+    if (paidTotal > 0) {
+      const cut = Math.min(paidTotal, shortage);
+      plans.push({
+        id: 'paid-reduce', group: 'capacity', pain: 'small', gain: cut, shortage, dept: g.key,
+        title: `${pfx}有給の当月消化を ${cut}日 減らす（翌月へ回す）`,
+        effect: `＋${cut}人日`,
+        detail: `設定した有給は必ず消化されるため、その分だけ出勤できる人が減ります。当月の消化目標を合計 ${cut}日 減らすと ${cut}人日 取り返せます（有給日数の多い人から減らします）。`,
+        after: cut >= shortage ? 'これだけで不足は解消します。' : `まだ ${shortage - cut}人日 足りません。`,
+        params: { dept: g.key, reduce: cut },
+      });
+    }
+
+    // A-3 公休目標を減らす（痛みが大きいので下に置く）
+    const cutDays = Math.ceil(shortage / Math.max(1, g.staff.length));
+    plans.push({
+      id: 'maxoff-reduce', group: 'capacity', pain: 'large', gain: cutDays * g.staff.length, shortage, dept: g.key,
+      title: `${pfx}公休目標を全員 ${cutDays}日 減らす`,
+      effect: `＋${cutDays * g.staff.length}人日`,
+      detail: `${g.staff.length}人 × ${cutDays}日 ＝ ${cutDays * g.staff.length}人日 ぶん出勤できるようになります。休みが減るため、実施前に必ず現場と確認してください。`,
+      after: '不足は解消しますが、スタッフの休みが減ります。',
+      params: { dept: g.key, days: cutDays },
+    });
+
+    // A-4 必要人数（定数）そのものを1人減らす（影響が最大なので最後）
+    const keys = getWorkShiftKeys().filter(k => ((g.reqs || {})[k] || 0) > 0);
+    const solo = (typeof SOLO_SHIFT_KEYS !== 'undefined') ? new Set(SOLO_SHIFT_KEYS) : new Set();
+    const target = keys.filter(k => !solo.has(k)).sort((a, b) => (g.reqs[b] || 0) - (g.reqs[a] || 0))[0];
+    if (target) {
+      plans.push({
+        id: 'req-reduce', group: 'capacity', pain: 'large', gain: days, shortage, dept: g.key,
+        title: `${pfx}「${target}」の必要人数を1人減らす（${g.reqs[target]}人 → ${g.reqs[target] - 1}人）`,
+        effect: `＋${days}人日`,
+        detail: `毎日1人ずつ減るので ${days}人日 ぶん余裕ができます。営業に直結するため、他の案で足りないときの最後の手段です。`,
+        after: '不足は解消しますが、日々の配置人数が減ります。',
+        params: { dept: g.key, key: target },
+      });
+    }
+  });
+
+  // ── B. 人日は足りているのに残るエラーへの案 ──
+  // リズム系・希望系は「ルールの強弱」を下げれば消える（人手は増減しない）。
+  const softenable = [
+    { type: 'category-switch', label: '連勤中の時間帯切替' },
+    { type: 'bad-rest',        label: '遅→休→早' },
+    { type: 'long-rest',       label: '連休が長すぎる' },
+    { type: 'single-work',     label: '単発出勤' },
+    { type: 'weekend-pref',    label: '土日休み希望' },
+    { type: 'rest-style',      label: '休み方（連休/分散）' },
+    { type: 'pair-rest',       label: '遅→早は2連休（個人）' },
+    { type: 'skill-short',     label: 'スキル目標人数に不足' },
+  ];
+  softenable.forEach(r => {
+    const n = cnt[r.type] || 0;
+    if (!n) return;
+    const lv = getRuleLevel(r.type);
+    if (lv === 'off') return;
+    plans.push({
+      id: 'rule-soften', group: 'rule', pain: 'small', gain: n, count: n,
+      title: `「${r.label}」のルールを ${lv === 'must' ? '🟡できれば に下げる' : 'OFF にする'}`,
+      effect: `${n}件が対象`,
+      detail: lv === 'must'
+        ? `${n}件出ています。🔴絶対 → 🟡できれば に下げると、他の重要なルールを優先できるようになり、件数が減るか警告扱いになります。人手は増減しません。`
+        : `${n}件出ています。OFF にすると、このルールは一切チェックしなくなります。人手は増減しません。`,
+      after: '生成し直すと結果に反映されます。',
+      params: { type: r.type, to: lv === 'must' ? 'should' : 'off' },
+    });
+  });
+
+  // 早遅バランス: 許容幅を広げれば消える
+  if (cnt['balance-diff']) {
+    const tol = parseInt(AppState.settings.balanceTolerance) || 0;
+    plans.push({
+      id: 'balance-tol', group: 'rule', pain: 'small', gain: cnt['balance-diff'], count: cnt['balance-diff'],
+      title: `早遅バランスの許容幅を ${tol}日 → ${tol + 1}日 に広げる`,
+      effect: `${cnt['balance-diff']}件が対象`,
+      detail: `目標比率からのずれを ${tol + 1}日 まで許すようにします。出勤日数によっては比率がぴったりにならないため、1日広げるだけで消えることがよくあります。`,
+      after: '生成し直すと結果に反映されます。',
+      params: { to: tol + 1 },
+    });
+  }
+
+  // 連休が長すぎる: 上限日数を1日延ばす
+  if (cnt['long-rest']) {
+    const cur = getMaxOffRun();
+    plans.push({
+      id: 'maxoffrun', group: 'rule', pain: 'small', gain: cnt['long-rest'], count: cnt['long-rest'],
+      title: `連休の上限を ${cur}日 → ${cur + 1}日 に延ばす`,
+      effect: `${cnt['long-rest']}件が対象`,
+      detail: `${cur + 1}連休までは許すようにします。人手が足りない月は連休が伸びやすいため、1日延ばすと消えることがあります。`,
+      after: '生成し直すと結果に反映されます。',
+      params: { to: cur + 1 },
+    });
+  }
+
+  // スキル最低人数割れ: 最低ラインを1人下げる
+  if (cnt['skill-late']) {
+    (AppState.skills || []).forEach((sk, i) => {
+      const base = (sk.req != null ? sk.req : sk.lateReq) || 0;
+      const min  = (sk.min != null && sk.min >= 0) ? sk.min : base;
+      if (min <= 0) return;
+      plans.push({
+        id: 'skill-min', group: 'rule', pain: 'mid', gain: cnt['skill-late'], count: cnt['skill-late'],
+        title: `スキル「${sk.name}」の最低人数を ${min}人 → ${min - 1}人 に下げる`,
+        effect: `${cnt['skill-late']}件が対象`,
+        detail: `そのスキルを持つ人が足りない日があります。最低ラインを1人下げるか、③スタッフ管理でこのスキルを持つ人を増やしてください。`,
+        after: '生成し直すと結果に反映されます。',
+        params: { index: i, to: min - 1 },
+      });
+    });
+  }
+
+  // 希望休が公休目標より多い人 → その分だけ人日が減っている
+  const over = [];
+  AppState.staff.forEach(s => {
+    let lockedPub = 0;
+    for (let d = 1; d <= days; d++) {
+      const rq = (AppState.requests[s.id]    || {})[d];
+      const fx = (AppState.fixedShifts[s.id] || {})[d];
+      if (isPublicOff(rq) || isPublicOff(fx)) lockedPub++;
+    }
+    if (lockedPub > (s.maxOff || 0)) over.push({ name: s.name, over: lockedPub - (s.maxOff || 0) });
+  });
+  if (over.length) {
+    const total = over.reduce((n, o) => n + o.over, 0);
+    plans.push({
+      id: 'info-overreq', group: 'capacity', pain: 'mid', gain: total, manual: true,
+      title: `希望休を入れすぎている人が ${over.length}人（合計 ${total}日ぶん）`,
+      effect: `＋${total}人日`,
+      detail: over.map(o => `${o.name}: 目標より +${o.over}日`).join(' / ') +
+              `\n希望休は必ず尊重されるため、目標より多い分だけ出勤できる人が減ります。`,
+      after: '④希望休入力で、該当スタッフの「休」を減らしてください（自動では変更しません）。',
+      params: {},
+    });
+  }
+
+  // 人日（人手）の案を先に出す。効果の単位が「人日」と「件」で違うため、
+  // グループをまたいで効果の数字を比べない。
+  const gOrder = { capacity: 0, rule: 1 };
+  plans.sort((a, b) =>
+    (gOrder[a.group] - gOrder[b.group]) ||
+    (RELAX_PAIN_ORDER[a.pain] - RELAX_PAIN_ORDER[b.pain]) ||
+    (b.gain - a.gain));
+  return plans;
+}
+
+/* ===========================================
+   理論下限の判定（ステップ1）
+   「エラー0件が数学的に可能か」を生成する前に判定する。
+   人日の総量だけでなく、日ごと・役割ごと・スキルごとに
+   「その日、担当できる人が足りているか」まで調べるため、
+   「日曜に責任者ができる人が全員休み希望」のような穴も見つかる。
+   ここで挙がるものは配置をどう変えても消せない＝避けられないエラー。
+   =========================================== */
+
+// その日、そのスタッフが取れる状態を返す
+//   'off'      … 休みで確定（希望休・固定の休み）
+//   'training' … 研修で確定（出勤だが定数には数えない）
+//   'fixed:キー' … その役割で確定
+//   'free'     … 自由（担当シフトの中から選べる）
+function staffDayState(s, d) {
+  const rq = (AppState.requests[s.id] || {})[d];
+  if (rq && isOff(rq)) return 'off';
+  const fx = (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(s.id, d) : null;
+  if (fx && isOff(fx))      return 'off';
+  if (fx && isTraining(fx)) return 'training';
+  if (fx)                   return 'fixed:' + fx;
+  return 'free';
+}
+
+/**
+ * 避けられないエラーの下限を求める。
+ * @returns {{ possible:boolean, minErrors:number, reasons:Array, capacity:Array }}
+ */
+function analyzeLowerBound() {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const res = { possible: true, minErrors: 0, reasons: [], capacity: [] };
+  if (!AppState.staff.length || !days) return res;
+
+  const shiftKeys = getWorkShiftKeys().filter(k => {
+    const t = AppState.shiftTypes.find(x => x.key === k);
+    return t && !t.isTraining;
+  });
+  const groups = getDepartmentGroups(AppState.staff);
+  const multi  = groups.length > 1;
+
+  groups.forEach(g => {
+    const pfx = multi ? `【${g.label}】` : '';
+    let dayShort = 0;    // 日別に確定する不足の合計（＝避けられない人員不足の下限）
+    let consShort = 0;   // 連勤上限と休み日数の矛盾（連勤超過か公休不足が必ず起きる）
+
+    for (let d = 1; d <= days; d++) {
+      // その日、各役割に入れる人を数える
+      const cap = {};    // 役割 → 入れる人数（固定で入っている人も含む）
+      const fixedIn = {};
+      let freeCount = 0;
+      shiftKeys.forEach(k => { cap[k] = 0; fixedIn[k] = 0; });
+      g.staff.forEach(s => {
+        const st = staffDayState(s, d);
+        if (st === 'off' || st === 'training') return;
+        if (st.indexOf('fixed:') === 0) {
+          const k = st.slice(6);
+          if (cap[k] != null) { cap[k]++; fixedIn[k]++; }
+          return;
+        }
+        let any = false;
+        (s.allowedShifts || []).forEach(k => { if (cap[k] != null) { cap[k]++; any = true; } });
+        if (any) freeCount++;
+      });
+
+      // ① 役割ごとの不足（その役割を担当できる人がその日足りない）
+      let roleShort = 0;
+      shiftKeys.forEach(k => {
+        const need = getDayReq(g.reqs, g.dailyReqs || {}, k, d);
+        if (need > 0 && cap[k] < need) {
+          roleShort += (need - cap[k]);
+          res.reasons.push({
+            kind: 'role', day: d, role: k, need, have: cap[k],
+            text: `${pfx}${d}日: 「${k}」が ${need}人 必要ですが、その日入れる人は ${cap[k]}人 しかいません（不足 ${need - cap[k]}人）`,
+          });
+        }
+      });
+
+      // ② その日の総人数（役割ごとには足りていても、合計で足りないことがある）
+      let needAll = 0, fixedAll = 0;
+      shiftKeys.forEach(k => { needAll += getDayReq(g.reqs, g.dailyReqs || {}, k, d); fixedAll += fixedIn[k]; });
+      const availAll = freeCount + fixedAll;
+      let totalShort = 0;
+      if (needAll > availAll) {
+        totalShort = needAll - availAll;
+        res.reasons.push({
+          kind: 'day', day: d, need: needAll, have: availAll,
+          text: `${pfx}${d}日: 合計 ${needAll}人 必要ですが、その日出勤できる人は ${availAll}人 しかいません（不足 ${totalShort}人）`,
+        });
+      }
+      dayShort += Math.max(roleShort, totalShort);
+
+      // ③ スキルの最低ライン
+      (AppState.skills || []).forEach(sk => {
+        const { min } = getDaySkillReq(sk, d);
+        if (!(min > 0)) return;
+        const early = (sk.target || 'late') === 'early';
+        let have = 0;
+        g.staff.forEach(s => {
+          if (!(s.skills || []).includes(sk.name)) return;
+          const st = staffDayState(s, d);
+          if (st === 'off' || st === 'training') return;
+          const ks = (st.indexOf('fixed:') === 0) ? [st.slice(6)] : (s.allowedShifts || []);
+          if (ks.some(k => shiftKeys.includes(k) && (early ? isEarlyCategory(k) : isLate(k)))) have++;
+        });
+        if (have < min) {
+          res.reasons.push({
+            kind: 'skill', day: d, skill: sk.name, need: min, have,
+            text: `${pfx}${d}日: スキル「${sk.name}」は最低 ${min}人 必要ですが、その日入れる保有者は ${have}人 です`,
+          });
+        }
+      });
+
+      // ④ 副店長カバレッジ（2人以上いる場合のみのルール）
+      const vms = g.staff.filter(s => s.positionType === 'viceManager');
+      if (vms.length >= 2) {
+        const can = vms.filter(s => { const st = staffDayState(s, d); return st !== 'off' && st !== 'training'; }).length;
+        if (can === 0) {
+          res.reasons.push({
+            kind: 'vice', day: d,
+            text: `${pfx}${d}日: 副店長が全員休み（希望休・固定）のため、副店長不在が避けられません`,
+          });
+        }
+      }
+    }
+
+    // ⑤ 連勤上限との矛盾（休みが少なすぎて、連勤上限を守れない人）
+    //    連勤上限 c のとき、1人が働ける最大日数は days - floor(days / (c+1))。
+    //    これを超える出勤日数が必要な人は、連勤超過か公休不足が必ず起きる。
+    g.staff.forEach(s => {
+      if (getStaffDepartment(s) === 'cast') return;
+      const c = getMaxConsFor(s);
+      if (!(c >= 1)) return;
+      const maxWork = days - Math.floor(days / (c + 1));
+      let paidN = 0, otherOffN = 0;
+      for (let d = 1; d <= days; d++) {
+        const st = staffDayState(s, d);
+        if (st !== 'off') continue;
+        const rq = (AppState.requests[s.id] || {})[d];
+        const fx = (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(s.id, d) : null;
+        const off = (rq && isOff(rq)) ? rq : (fx || '');
+        if (off === '有') paidN++; else if (off && !isPublicOff(off)) otherOffN++;
+      }
+      const needPaid  = Math.max(paidN, parseInt(s.paidLeave) || 0);
+      const workNeed  = days - (s.maxOff || 0) - needPaid - otherOffN;
+      if (workNeed > maxWork) {
+        res.reasons.push({
+          kind: 'cons', staffId: s.id, need: workNeed, have: maxWork,
+          text: `${pfx}${s.name}: 出勤 ${workNeed}日 が必要ですが、連勤上限${c}日を守ると最大 ${maxWork}日 までしか働けません（${workNeed - maxWork}日ぶん矛盾）`,
+        });
+        consShort += (workNeed - maxWork);
+      }
+    });
+
+    // ⑥ 月全体の人日収支（従来のチェック。日別で見つからない不足を拾う）
+    const cap = calcCapacity(g, days);
+    res.capacity.push({ label: g.label, required: cap.required, avail: cap.avail, surplus: cap.surplus });
+    let monthShort = 0;
+    if (cap.surplus < 0) {
+      monthShort = -cap.surplus;
+      res.reasons.push({
+        kind: 'month', need: cap.required, have: cap.avail,
+        text: `${pfx}月全体: 必要 ${cap.required}人日 に対し、出せるのは ${cap.avail}人日 です（不足 ${monthShort}人日）`,
+      });
+    }
+    // 日別の不足と月全体の不足は重なりうるので、大きいほうを下限として採用する
+    res.minErrors += Math.max(dayShort, monthShort) + consShort;
+  });
+
+  res.possible = res.reasons.length === 0;
+  return res;
 }
