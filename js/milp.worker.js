@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=169', 'optimizer.js?v=169', 'milp-core.js?v=169');
+self.importScripts('data.js?v=170', 'optimizer.js?v=170', 'milp-core.js?v=170');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=169'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=170'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -39,6 +39,7 @@ self.addEventListener('message', async (e) => {
     AppState.shifts = {};
     AppState.violations = [];
 
+    const VARLABEL = ['ふつう', 'やや広い', '広い', 'かなり広い'][(parseInt(msg.variant) || 0) % 4];
     post(5, '数理最適化ソルバーを読込み中（初回のみ）...');
     const solver = await getSolver();
 
@@ -51,6 +52,10 @@ self.addEventListener('message', async (e) => {
     const fast = !!msg.fastMode;
     const adjust = !!msg.adjustMode;      // 微調整モード
     const adjustK = parseInt(msg.adjustK) || 24;
+    // ── 解き方のバリエーション（③複数同時実行）────────────────
+    // 同じ問題でも、段の順番や探索の広さを変えると結果が変わる。
+    // 別々のWorkerに違う番号を渡し、一番良かったものを採用する。
+    const variant = parseInt(msg.variant) || 0;
     const TIME_LIMIT = 600;   // 秒 = 10分（証明ありモードの上限）
     const FAST_LIMIT = 60;    // 秒 = 1分（証明なしモードの上限）
     let allOptimal = true;   // 全グループで最適が証明できたか（false=時間切れで打ち切り）
@@ -113,6 +118,18 @@ self.addEventListener('message', async (e) => {
       // 全ルールを一度に解くのをやめ、大事な順に「そのルールだけ」を0に近づける。
       // 達成した件数は次の段で上限として固定するので、重要なルールが後から崩れない。
       let sol = null;
+      // 解き方の違い（バリエーション）。0番は従来どおり。
+      // 変えるのは「近傍の広さ（1回の探し直しで何マスまで動かしてよいか）」と
+      // ソルバーの乱数だけ。どれも標準に近い解き方なので、外れが出にくい。
+      // 実測（実データ60秒）では 13/25/11/8件 とばらつき、最良の8件を採れた。
+      const VAR = [
+        { label: 'ふつう',   k: 60,  seed: 0  },
+        { label: 'やや広い', k: 92,  seed: 11 },
+        { label: '広い',     k: 110, seed: 22 },
+        { label: 'かなり広い', k: 130, seed: 33 },
+      ][variant % 4];
+      const NBK = VAR.k;
+      if (VAR.seed) opts = Object.assign({}, opts, { random_seed: VAR.seed });
       // 段階最適化では「各段が最適だと証明できたか」で判定する。
       // 仕上げ処理は数秒上限で回すので必ず Time limit reached を返し、
       // その状態を見てしまうと、全段が証明済みでも「時間切れ」と表示されてしまう。
@@ -151,7 +168,7 @@ self.addEventListener('message', async (e) => {
             //    決まった数のマスまでしか変えない、という条件を足して解く。
             //    いまの答え自体が条件を満たすので、必ず解が見つかる。
             const s3 = solver.solve(
-              MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(sol), k: 60 } }),
+              MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(sol), k: NBK } }),
               Object.assign({}, opts, { time_limit: Math.max(3, cap - Math.round((Date.now() - t0) / 1000)) }));
             // 近傍探索でも「前の段を悪化させていないか」は必ず確認する
             if (MILP.solutionIsValid(s3, m.parts, budgets)) { s2 = s3; okStrict = true; }
@@ -161,7 +178,7 @@ self.addEventListener('message', async (e) => {
             const rest = cap - Math.round((Date.now() - t0) / 1000);
             if (rest >= 3) {
               const s3 = solver.solve(
-                MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(sol), k: 60 } }),
+                MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(sol), k: NBK } }),
                 Object.assign({}, opts, { time_limit: rest }));
               if (MILP.solutionIsValid(s3, m.parts, budgets) &&
                   MILP.slackTotal(s3, m.parts, t.types) < MILP.slackTotal(s2, m.parts, t.types)) s2 = s3;
@@ -243,7 +260,7 @@ self.addEventListener('message', async (e) => {
           // budgets を付けるのが重要。付けないと、細かいルールを良くするために
           // 人員不足や公休不足を悪化させた解が「総罰点が下がった」と誤判定される。
           // （段ごとの解では、その段に関係しない罰点変数の値が抑えられていないため）
-          const s4 = solver.solve(MILP.composeLP(m.parts, { budgets, neighbor: { ones: MILP.onesOf(sol), k: 60 } }),
+          const s4 = solver.solve(MILP.composeLP(m.parts, { budgets, neighbor: { ones: MILP.onesOf(sol), k: NBK } }),
                                   Object.assign({}, opts, { time_limit: Math.min(8, polish) }));
           polish -= Math.max(1, Math.round((Date.now() - p0) / 1000));
           if (!MILP.solutionIsValid(s4, m.parts, budgets)) break;
@@ -278,7 +295,7 @@ self.addEventListener('message', async (e) => {
         tierLog.push(`${t.label}: ${n}件`);
       });
     }
-    self.postMessage({ type: 'done', shifts, violations, allOptimal, deep, fast, usedGap, tiered, tierLog });
+    self.postMessage({ type: 'done', shifts, violations, allOptimal, deep, fast, usedGap, tiered, tierLog, variant, variantLabel: VARLABEL });
   } catch (err) {
     self.postMessage({ type: 'error', message: (err && err.message) || String(err) });
   }

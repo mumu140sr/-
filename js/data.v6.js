@@ -129,6 +129,7 @@ const AppState = {
     // 段階最適化: 大事なルールから順に0を目指し、達成した件数を以後固定する。
     // false にすると従来どおり全ルールを一度に解く。
     tieredOptimize: true,
+    parallelSolve: true,     // 複数パターンを同時に試して最良を採る
     penalties: { ...DEFAULT_PENALTIES },
   },
   // ユーザーが自由に定義・編集できるシフト種別
@@ -443,6 +444,7 @@ function loadFromStorage() {
     if (!AppState.settings.ruleLevels || typeof AppState.settings.ruleLevels !== 'object') AppState.settings.ruleLevels = {}; // 旧データ補完
     if (AppState.settings.balanceTolerance == null) AppState.settings.balanceTolerance = 2;      // 旧データ補完
     if (AppState.settings.tieredOptimize == null) AppState.settings.tieredOptimize = true;      // 旧データ補完
+    if (AppState.settings.parallelSolve  == null) AppState.settings.parallelSolve  = true;      // 旧データ補完
     if (!(AppState.settings.maxConsecutiveOff >= 1)) AppState.settings.maxConsecutiveOff = 3;    // 旧データ補完
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完

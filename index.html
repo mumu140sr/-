@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=169" />
+<link rel="stylesheet" href="css/style.css?v=170" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -70,6 +70,11 @@
         <label>段階的に仕上げる</label>
         <label class="switch"><input type="checkbox" id="tieredOptimize" checked /><span></span></label>
         <span class="hint">大事なルール（人員→公休→連勤→単発出勤→…）の順に1つずつ0を目指し、達成した分は以後崩しません。OFFにすると全ルールを一度に解きます（従来方式）</span>
+      </div>
+      <div class="form-row">
+        <label>複数パターンを同時に試す</label>
+        <label class="switch"><input type="checkbox" id="parallelSolve" checked /><span></span></label>
+        <span class="hint">解き方の違う計算を最大4通り同時に走らせ、いちばんエラーが少ない結果を採用します。同じ時間でも結果が良く・安定します。OFFにすると従来どおり1通りだけで解きます</span>
       </div>
       <div class="form-row">
         <label>連休の目安回数（月・全体）</label>
@@ -330,12 +335,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=169"></script>
-<script src="js/optimizer.v6.js?v=169"></script>
-<script src="js/worker-client.v6.js?v=169"></script>
-<script src="js/ai-explain.v6.js?v=169"></script>
-<script src="js/ui.v6.js?v=169"></script>
-<script src="js/milp.v6.js?v=169"></script>
-<script src="js/app.v6.js?v=169"></script>
+<script src="js/data.v6.js?v=170"></script>
+<script src="js/optimizer.v6.js?v=170"></script>
+<script src="js/worker-client.v6.js?v=170"></script>
+<script src="js/ai-explain.v6.js?v=170"></script>
+<script src="js/ui.v6.js?v=170"></script>
+<script src="js/milp.v6.js?v=170"></script>
+<script src="js/app.v6.js?v=170"></script>
 </body>
 </html>

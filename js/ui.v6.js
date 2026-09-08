@@ -44,6 +44,8 @@ function refreshAllUI() {
   if ($penaltySO) $penaltySO.checked = AppState.settings.penaltySingleOff;
   const $tiered0 = document.getElementById('tieredOptimize');
   if ($tiered0) $tiered0.checked = AppState.settings.tieredOptimize !== false;
+  const $par0 = document.getElementById('parallelSolve');
+  if ($par0) $par0.checked = AppState.settings.parallelSolve !== false;
   if ($maxAtt)    $maxAtt.value      = AppState.settings.maxAttempts;
   const $pairRestR = document.getElementById('pairRestTarget');
   if ($pairRestR) $pairRestR.value   = AppState.settings.pairRestTarget || 0;
@@ -158,6 +160,14 @@ function setupSettingsPanel() {
     AppState.settings.penaltySingleOff = $penaltySO.checked;
     autoSave();
   });
+  const $par = document.getElementById('parallelSolve');
+  if ($par) {
+    $par.checked = AppState.settings.parallelSolve !== false;
+    $par.addEventListener('change', () => {
+      AppState.settings.parallelSolve = $par.checked;
+      autoSave();
+    });
+  }
   const $tiered = document.getElementById('tieredOptimize');
   if ($tiered) {
     $tiered.checked = AppState.settings.tieredOptimize !== false;
