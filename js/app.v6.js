@@ -955,7 +955,7 @@ function setupResultPanel() {
         const res = await optimizeScheduleMILP((pct, msg) => {
           if ($bar)  $bar.style.width = pct + '%';
           if ($text) $text.textContent = '数理最適化で修復中: ' + msg;
-        });
+        }, { improveOver: beforeSc });
         const after = res.violations.length;
         const afterSc = scoreViolations(res.violations);
         // 基本の判定（scoreBetter: どの🚨も増えず、どれかが減る）で採否を決める。

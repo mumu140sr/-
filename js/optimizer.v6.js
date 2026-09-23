@@ -2825,9 +2825,11 @@ function checkViolations(shifts) {
     // ように見えていた。表示は実際の日数にし、答えを比べるときの重み(weight)は
     // 上限を超えた日数にする（早遅バランスと同じ考え方）。
     let openCons = null;
+    let consHalf = false;   // いまの連勤に半休が入っているか（注記を連勤の最後まで残すため）
     // 1回の連勤につき1件。len=実際の日数、over=上限を超えた日数、
     // compliance=6連勤以上（上限の設定に関係なくコンプラ違反）。
-    const noteCons = (d, lim, extra) => {
+    const noteCons = (d, lim) => {
+      const extra = consHalf ? '　※半休も出勤に数えます' : '';
       const over = Math.max(0, consWork - lim);
       const comp = consWork >= COMPLIANCE_CONS_DAYS;
       const pers = s.personalMaxCons > 0 ? '・個人設定' : '';
@@ -2869,8 +2871,9 @@ function checkViolations(shifts) {
           });
         }
         const myMaxConsH = getMaxConsFor(s);
-        if (consWork > myMaxConsH || consWork >= COMPLIANCE_CONS_DAYS) noteCons(d, myMaxConsH, '　※半休も出勤に数えます');
-        if (!workedOn((shifts[s.id] || {})[d + 1] || '')) openCons = null;
+        consHalf = true;
+        if (consWork > myMaxConsH || consWork >= COMPLIANCE_CONS_DAYS) noteCons(d, myMaxConsH);
+        if (!workedOn((shifts[s.id] || {})[d + 1] || '')) { openCons = null; consHalf = false; }
         offRun = 0;          // 休みの連続を切る
         prevShift = '';      // 時間帯は引き継がない（遅→早の誤判定を防ぐ）
         continue;
@@ -2880,8 +2883,8 @@ function checkViolations(shifts) {
         consWork++;
         if (isLate(cur)) lateBand++; else if (isEarlyCategory(cur)) earlyBand++;
         const myMaxCons = getMaxConsFor(s); // 連勤上限（4 or 個人設定。超えたら🔴絶対NG）
-        if (consWork > myMaxCons || consWork >= COMPLIANCE_CONS_DAYS) noteCons(d, myMaxCons, '');
-        if (!workedOn((shifts[s.id] || {})[d + 1] || '')) openCons = null; // 連勤が切れたら次は別の1件
+        if (consWork > myMaxCons || consWork >= COMPLIANCE_CONS_DAYS) noteCons(d, myMaxCons);
+        if (!workedOn((shifts[s.id] || {})[d + 1] || '')) { openCons = null; consHalf = false; } // 連勤が切れたら次は別の1件
 
         // 個人希望: 土日休み（絶対＝🚨 / なるべく＝⚠️）
         if ((wkHard || wkSoft) && (_wdv[d] === 0 || _wdv[d] === 6) && ruleOn('weekend-pref')) {
@@ -3301,9 +3304,12 @@ function checkViolations(shifts) {
   // ルール設定が off の違反タイプは報告しない（既定では off は無いので従来どおり）
   // 「途中から作り直す」で確定済みにした前半は、もう直せないのでエラーに数えない。
   // ただし月単位の違反（公休数・早遅バランスなど・day=0）は後半で調整できるため残す。
+  // 連勤は、終わった日（to）で前半か後半かを決める。上限を超えた日（day）で決めると、
+  // 確定した前半から後半へ続いて6連勤以上になった連勤が数えられなかった。
   const cut = parseInt(AppState.settings.ignoreVioBeforeDay) || 0;
+  const dayOf = (v) => (v.type === 'consecutive' && v.to) ? v.to : v.day;
   return violations.filter(v => getRuleLevel(v.type) !== 'off')
-                   .filter(v => !(cut > 1 && v.day > 0 && v.day < cut));
+                   .filter(v => !(cut > 1 && dayOf(v) > 0 && dayOf(v) < cut));
 }
 
 // ===== 特別日ロジック =====
@@ -3459,10 +3465,11 @@ function scoreCompare(a, b) {
   return (a.comp - b.comp) || (a.under - b.under) || (a.must - b.must) || (a.over - b.over) || (a.soft - b.soft);
 }
 // 画面に出す要約（件数と超過日数を分けて出す）
+// ⛔（6連勤以上）は🚨と別に数えて出す（結果の一覧と同じ数え方）。
 function scoreSummary(r) {
   const parts = [];
   if (r.comp) parts.push(`⛔コンプラ違反 ${r.comp}件`);
-  parts.push(`🚨${r.must}件`);
+  parts.push(`🚨${r.must - r.comp}件`);
   if (r.over) parts.push(`連勤の超過 ${r.over}日`);
   parts.push(`🟡${r.soft}件`);
   return parts.join('・');
@@ -3480,12 +3487,12 @@ function findConcreteFixes(opt) {
   const isMust = (t) => (typeof getRuleLevel === 'function')
     ? (getRuleLevel(t) === 'must' || MUST_TYPES_OPT.has(t))
     : MUST_TYPES_OPT.has(t);
-  // 比べるのは重み付き（scoreViolations）。画面に出す件数は count / mustCount。
+  // 改善かどうかは scoreBetter（どの🚨も増えず、どれかが減る）、並べ方は scoreCompare。
   const score = (vs) => scoreViolations(vs);
   const baseScore = score(checkViolations(AppState.shifts));
   const base = baseScore.count;
   if (!base) return [];
-  // 採用してよいか: 🚨を1件も増やさず、かつ 🚨が減るか 合計が減ること
+  // 採用してよいか: scoreBetter（どの🚨の種類・連勤の超過日数・6連勤以上も増えず、どれかが減る）
   const better = (n) => scoreBetter(n, baseScore);
 
   const locked = (id, d) =>
@@ -3584,8 +3591,10 @@ function findConcreteFixes(opt) {
  *  ・たすき掛け:   Aが d1=X・d2=Y、Bが d1=Y・d2=X のとき、両方を入れ替える
  *                  （連勤・単発出勤・遅→休→早など、並びのエラーに効く）
  *
- * 採用するのは「🚨が減る」か「🚨が同じで合計が減る」手だけ。🚨を増やす手は
- * 合計が大きく減っても使わない。希望・固定のマスは動かさない。
+ * 採用するのは scoreBetter で「改善」になる手だけ（どの🚨の種類も、連勤の超過日数も、
+ * 6連勤以上の回数も増えず、どれかが減る。🚨が同じなら🟡が減る）。改善になる手のうち、
+ * scoreCompare でいちばん良い手を選ぶ。6連勤以上を新しく作る手は使わない。
+ * 希望・固定のマスは動かさない。
  *
  * @param {Object} shifts  直接書き換える
  * @param {Object} [opt]   {timeMs: 持ち時間(既定8000)}
@@ -3596,8 +3605,8 @@ function polishShifts(shifts, opt) {
   const limit = Date.now() + (o.timeMs || 8000);
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const staff = AppState.staff || [];
-  // 比べるのは重み付き（連勤は超過日数）。件数で比べると、5連勤2回を
-  // 10連勤1回にまとめる手を「🚨が1件減った」と選んでしまっていた。
+  // 改善かどうかは scoreBetter で決める。件数だけで比べると、5連勤2回を10連勤1回に
+  // まとめる手を「🚨が1件減った」と選んでしまっていた（連勤は回数と超過日数の両方で見る）。
   const evalS = () => {
     const vs = checkViolations(shifts);
     return Object.assign(scoreViolations(vs), { vs });
@@ -4375,7 +4384,7 @@ function measureRelaxEffect(mut) {
     AppState.skills = snapSkills;
   }
   // 件数が同じでも、連勤の上限を1日上げると超過日数は減る。件数だけ見ると
-  // 「減りません」になってしまうので、重み付きで軽くなったかも返す。
+  // 「減りません」になってしまうので、scoreBetter で軽くなったかも返す。
   const lighter = after === before && scoreBetter(aSc, bSc);
   return { before, after, gain: before - after, lighter };
 }
@@ -4555,7 +4564,8 @@ function buildRelaxPlans(violations) {
   // 連勤の上限を1日延ばす（連勤超過だけでなく、連休や時間帯切替にも効くことがある）
   if (cnt['consecutive'] || cnt['long-rest'] || cnt['category-switch']) {
     const curC = parseInt(AppState.settings.maxConsecutive) || 0;
-    if (curC >= 1 && curC < 7) {
+    // 6連勤以上はコンプライアンス違反なので、上限を6日以上にする案は出さない（5日まで）
+    if (curC >= 1 && curC + 1 < COMPLIANCE_CONS_DAYS) {
       const ec = measureRelaxEffect(A => { A.settings.maxConsecutive = curC + 1; });
       if (!ec || ec.gain > 0 || ec.lighter) {
         plans.push({

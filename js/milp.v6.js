@@ -100,7 +100,11 @@ function optimizeScheduleMILP(onProgress, opts) {
           if (pickBySurplus) results.sort((a, b) => countRest(a._shifts) - countRest(b._shifts) || better(a, b));
           else results.sort((a, b) => better(a, b) ||
                                  (a.allOptimal === b.allOptimal ? 0 : (a.allOptimal ? -1 : 1)));
-          const best = results[0];
+          // エラー自動修正など「いまより改善する答え」だけが欲しいときは、先に改善になる答えへ
+          // 絞ってから選ぶ（1位だけを確かめると、2位以下に改善する答えがあっても見逃す）。
+          const pool = (opts && opts.improveOver)
+            ? results.filter(r => scoreBetter(r.sc, opts.improveOver)) : results;
+          const best = pool.length ? pool[0] : results[0];
           // 採用した解の表を、あらためて画面へ反映する
           AppState.shifts = best._shifts || AppState.shifts;
           AppState.violations = best.violations;

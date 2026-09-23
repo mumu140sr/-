@@ -601,8 +601,10 @@ function loadFromStorage() {
     // 表の中身があれば作成済みとみなす。
     AppState.generated   = data.generated === true
                            || !!(data.shifts && Object.keys(data.shifts).length);
-    // 違反の記録が無い（または古い）場合は、いまの表から数え直す
-    if (AppState.generated && !AppState.violations.length && typeof checkViolations === 'function') {
+    // 違反の一覧は、保存されていたものを使わず、いまの表から必ず数え直す。
+    // 保存されていた一覧は古い検査で作られていることがあり、それと比べると、
+    // 開いた直後の最初の手直しで「悪くなった」と誤って警告していた。
+    if (AppState.generated && typeof checkViolations === 'function') {
       try { AppState.violations = checkViolations(AppState.shifts); } catch (e) { AppState.violations = []; }
     }
     _staffIdCounter = data._staffIdCounter || (AppState.staff.length + 1);

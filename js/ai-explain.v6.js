@@ -26,12 +26,18 @@ function buildAIExplanation() {
 
   // 全体サマリー
   const total = violations.length;
-  const critical = violations.filter(v => /🚨/.test(v.message || '')).length;
+  // 6連勤以上（コンプラ違反・⛔）はいちばん重い。🚨とは別に数える。
+  const isComp = (v) => v.type === 'consecutive' && v.compliance;
+  const compliance = violations.filter(isComp).length;
+  const critical = violations.filter(v => !isComp(v) && /🚨/.test(v.message || '')).length;
   const warning = violations.filter(v => /⚠️/.test(v.message || '')).length;
   const info = violations.filter(v => /ℹ️/.test(v.message || '')).length;
 
   let summary;
-  if (total === 0) {
+  if (compliance > 0) {
+    summary = `⛔ コンプラ違反（6連勤以上）が${compliance}件あります。このままでは使えません。必ず直してください。`
+            + (critical ? `ほかに致命的な違反が${critical}件、` : '') + (warning ? `警告が${warning}件あります。` : '');
+  } else if (total === 0) {
     summary = '🎉 違反は0件です。すべてのルールをクリアした完璧なシフトが生成されました！';
   } else if (critical === 0 && warning === 0) {
     summary = `情報レベルの注意点が${info}件ありますが、致命的な問題はありません。実運用上は問題なく使えるシフトです。`;
@@ -75,7 +81,21 @@ function buildAIExplanation() {
 
   // === 2. 連勤超過 ===
   if (byType['consecutive']) {
-    const items = byType['consecutive'];
+    // 6連勤以上（コンプラ違反）は別の見出しにし、「上限を緩める」助言は出さない
+    const comps = byType['consecutive'].filter(isComp);
+    if (comps.length) {
+      const lines = comps.map(v => `${staffName(v.staffId)}（${v.from >= 1 ? v.from + '日' : '前月'}〜${v.to}日・${v.len}連勤）`);
+      let bodyC = `6連勤以上はコンプライアンス違反です（5連勤まで可）。${comps.length}件あります。`;
+      bodyC += `\n• ${lines.join('\n• ')}`;
+      bodyC += `\n\n【解決のヒント】`;
+      bodyC += `\n✅ 連勤の途中に休みを入れる（ほかの人と休みを入れ替える）`;
+      bodyC += `\n✅ スタッフ管理タブの「前月末連勤数」が正しいか確かめる（前月から続く連勤も数えます）`;
+      bodyC += `\n⛔ 連勤上限を6日以上に上げても違反は消えません`;
+      sections.push({ title: '⛔ コンプラ違反（6連勤以上）', body: bodyC, severity: 'critical' });
+    }
+  }
+  if (byType['consecutive'] && byType['consecutive'].some(v => !isComp(v))) {
+    const items = byType['consecutive'].filter(v => !isComp(v));
     const byStaff = {};
     items.forEach(v => {
       const name = staffName(v.staffId);
@@ -94,7 +114,7 @@ function buildAIExplanation() {
     body += `\n\n【解決のヒント】`;
     body += `\n✅ 連勤超過のスタッフの公休を、連勤を分断する位置に手動で移動`;
     body += `\n✅ スタッフ管理タブで「前月末連勤数」を正しく入力`;
-    body += `\n✅ 全体設定の「連勤上限」を実情に合わせる（4日→5日など）`;
+    body += `\n✅ 全体設定の「連勤上限」を実情に合わせる（4日→5日など。6連勤以上はコンプラ違反なので5日まで）`;
     sections.push({ title: '🚨 連勤上限の超過', body, severity: 'critical' });
   }
 
@@ -239,8 +259,10 @@ function buildAIExplanation() {
   if (byType['understaff']) {
     suggestions.push('💡 必要人数不足が多い場合、役職マスタで「必要人数」を実情に合わせて減らすか、スタッフを増員してください。');
   }
-  if (byType['consecutive']) {
-    suggestions.push('💡 連勤超過が多い場合、「公休数」をスタッフごとに増やすか、「連勤上限」を緩める検討を。');
+  if (compliance) {
+    suggestions.push('⛔ 6連勤以上（コンプラ違反）は、連勤の途中に休みを入れて必ず直してください。連勤上限を上げても消えません。');
+  } else if (byType['consecutive']) {
+    suggestions.push('💡 連勤超過が多い場合、「公休数」をスタッフごとに増やすか、「連勤上限」を緩める検討を（5日まで。6連勤以上はコンプラ違反）。');
   }
   if (byType['off-count']) {
     suggestions.push('💡 公休不足が出るのは、必要人数の合計に対してスタッフ数が足りていない兆候です。');
@@ -248,11 +270,11 @@ function buildAIExplanation() {
   if (total === 0) {
     suggestions.push('✨ 完璧な状態です！必要であれば、シフト表で更に細かい調整（特定の人を特定の日に配置するなど）を行ってください。');
   }
-  if (critical === 0 && warning > 0) {
+  if (compliance === 0 && critical === 0 && warning > 0) {
     suggestions.push('⚙️ 設定タブで「単発休みにペナルティ」をON/OFFしたり、各スタッフの「早遅バランス」を見直すと警告が減らせます。');
   }
 
-  return { summary, sections, suggestions, total, critical, warning, info };
+  return { summary, sections, suggestions, total, compliance, critical, warning, info };
 }
 
 /**
@@ -277,6 +299,7 @@ function showAIExplanationModal() {
       <div class="modal-body" style="padding:16px">
         <div class="ai-summary">
           <div class="ai-stats">
+            ${expl.compliance ? `<span class="ai-stat ai-stat-critical">⛔ コンプラ違反 ${expl.compliance}件</span>` : ''}
             <span class="ai-stat ai-stat-critical">🚨 致命的 ${expl.critical}件</span>
             <span class="ai-stat ai-stat-warning">⚠️ 警告 ${expl.warning}件</span>
             <span class="ai-stat ai-stat-info">ℹ️ 情報 ${expl.info}件</span>

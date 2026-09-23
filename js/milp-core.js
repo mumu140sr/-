@@ -23,6 +23,10 @@
   // リズム〜休み方は5〜10秒必要なので大きく、最後の3段は時間を食う割に
   // 効果が小さいので小さくしている。
   const TIERS = [
+    // 6連勤以上（コンプライアンス違反）。利用者と決めた並べ方の ① なので、人員より先に解く。
+    // 連勤上限4日の人の「6連勤」と「5連勤×2」は、上限の窓だけで数えると同じ重さに
+    // なってしまうため、別の段・別の罰として持つ。
+    { label: 'コンプラ(6連勤以上)', w: 1, types: ['comp-cons'] },
     { label: '人員・役職',     w: 2, types: ['understaff', 'resp-duplicate', 'skill-late', 'vicemanager-absent', 'special-day'] },
     { label: '公休・有給',     w: 2, types: ['off-count', 'paid'] },
     { label: '連勤・遅→早',    w: 2, types: ['consecutive', 'late-early'] },
@@ -334,6 +338,24 @@
           let cc = 0, t = [];
           for (let dd = 1; dd <= lastDay; dd++) { const o = cellTerms(s, dd); cc += o.c; t = t.concat(realT(o.w)); }
           if (t.length) { const cv = `cb_${si}_${j}`; addSlack(cv, null, wc, 'consecutive'); cons.push(`conb_${si}_${j}: ${t.join(' + ')} - ${cv} <= ${(maxCons - j) - cc}`); }
+        }
+      }
+      // 6連勤以上（コンプラ違反）: どの6日間も出勤は5日まで。連勤上限の設定・ルールの強弱に
+      // 関係なく必ず入れ、ほかよりずっと重い罰にする。前月末からの連勤と半休も数える。
+      {
+        const CD = (typeof COMPLIANCE_CONS_DAYS !== 'undefined') ? COMPLIANCE_CONS_DAYS : 6;
+        const wcc = P.complianceCons || 200000;
+        for (let d = 1; d + CD - 1 <= days; d++) {
+          let cc = 0, t = [];
+          for (let dd = d; dd < d + CD; dd++) { const o = cellTerms(s, dd); cc += o.c; t = t.concat(realT(o.w)); }
+          if (t.length) { const cv = `cc_${si}_${d}`; addSlack(cv, null, wcc, 'comp-cons'); cons.push(`ccw_${si}_${d}: ${t.join(' + ')} - ${cv} <= ${(CD - 1) - cc}`); }
+        }
+        const pcc = Math.min(CD - 1, getPrevMonthEnd(s).cons || 0);
+        for (let j = 1; j <= pcc; j++) {
+          const lastDay = Math.min(CD - j, days);
+          let cc = 0, t = [];
+          for (let dd = 1; dd <= lastDay; dd++) { const o = cellTerms(s, dd); cc += o.c; t = t.concat(realT(o.w)); }
+          if (t.length) { const cv = `ccb_${si}_${j}`; addSlack(cv, null, wcc, 'comp-cons'); cons.push(`ccbw_${si}_${j}: ${t.join(' + ')} - ${cv} <= ${(CD - 1 - j) - cc}`); }
         }
       }
       // 公休不足（キャストは対象外）
@@ -863,15 +885,15 @@
   // （長い休み・早遅バランスなど）でも、元の下のほうの段で解かれていた。
   // その段に来るころには、上の段の🟡のルール（早遅の切替など）が上限として
   // 固定されており、「絶対」のほうが後回しになる逆転が起きていた。
-  // 上の4段（人員・公休・連勤・単発/定数）はもともと🚨の段なのでそのまま。
-  // 5段目以降の段から「絶対」のルールだけを抜き出し、4段目の直後へ、元の
+  // 上の5段（コンプラ・人員・公休・連勤・単発/定数）はもともと🚨の段なのでそのまま。
+  // 6段目以降の段から「絶対」のルールだけを抜き出し、5段目の直後へ、元の
   // 順番のまま並べる。1段にまとめると重くて解けなくなるため、段は分けたまま。
   // 実データ7件で、入れない場合 103件/🚨18 → 入れると 84件/🚨10。
   function promoteMustTiers(tiers) {
     // getRuleLevel は、利用者の設定が無ければ既定（🚨の一覧）を返す。
     // 利用者が「なし」「なるべく」に下げたルールは上げない。
     const isM = ty => getRuleLevel(ty) === 'must';
-    const CORE = 4;
+    const CORE = 5;   // コンプラ・人員・公休・連勤・単発/定数
     const head = tiers.slice(0, CORE), up = [], rest = [];
     tiers.slice(CORE).forEach(t => {
       const mv = (t.types || []).filter(isM), keep = (t.types || []).filter(ty => !isM(ty));
