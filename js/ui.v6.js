@@ -1645,7 +1645,8 @@ function setupDragAndDrop() {
       const sid2 = td.dataset.sid,         d2 = parseInt(td.dataset.day);
       const v1 = (AppState.shifts[sid1] || {})[d1] || '';
       const v2 = (AppState.shifts[sid2] || {})[d2] || '';
-      const beforeEdit = JSON.parse(JSON.stringify(AppState.shifts));   // 警告の比べる元
+      const beforeEdit = { shifts: JSON.parse(JSON.stringify(AppState.shifts)),        // 警告の比べる元
+                           fixed:  JSON.parse(JSON.stringify(AppState.fixedShifts || {})) };
       if (!AppState.shifts[sid1]) AppState.shifts[sid1] = {};
       if (!AppState.shifts[sid2]) AppState.shifts[sid2] = {};
       AppState.shifts[sid1][d1] = v2;
@@ -1742,7 +1743,8 @@ function setupManualEdit() {
     const sid      = editingCell.dataset.sid;
     const d        = parseInt(editingCell.dataset.day);
     const newShift = btn.dataset.shift;
-    const beforeEdit = JSON.parse(JSON.stringify(AppState.shifts));   // 警告の比べる元
+    const beforeEdit = { shifts: JSON.parse(JSON.stringify(AppState.shifts)),          // 警告の比べる元
+                         fixed:  JSON.parse(JSON.stringify(AppState.fixedShifts || {})) };
     if (!AppState.shifts[sid]) AppState.shifts[sid] = {};
     AppState.shifts[sid][d] = newShift;
     // 手動編集は fixedShifts にも保存 → 再最適化でも固定される
@@ -1852,10 +1854,17 @@ function updateHistoryButtons() {
 // 手で直した後の数え直し。悪くなったときの警告は、呼び出し側の「交換しました」
 // などの知らせと1つにまとめて出す（別々に出すと、後の知らせで警告が上書きされて
 // 見えなかった）。doneMsg を渡すとまとめて表示し、渡さなければ警告だけを出す。
-// beforeShifts: 手直しの直前の表。これをいまの設定で数え直して比べる。
+// before: 手直しの直前の {shifts, fixed}。これをいまの設定で数え直して比べる。
 // 保存されていた一覧や、設定を変える前の一覧と比べると、誤って警告が出ていた。
-function refreshAfterManualEdit(doneMsg, beforeShifts) {
-  const prevV = beforeShifts ? checkViolations(beforeShifts) : (AppState.violations || []);
+// 固定マス（🔒）も手直し前のものを使う（入れ替えで🔒も動くため、手直し後の🔒で
+// 数えると、良くなったのに「悪くなりました」と出ることがあった）。
+function refreshAfterManualEdit(doneMsg, before) {
+  let prevV = AppState.violations || [];
+  if (before && before.shifts) {
+    const nowFixed = AppState.fixedShifts;
+    try { AppState.fixedShifts = before.fixed || nowFixed; prevV = checkViolations(before.shifts); }
+    finally { AppState.fixedShifts = nowFixed; }
+  }
   const prevSc = scoreViolations(prevV);
   AppState.violations = checkViolations(AppState.shifts);
   const nowSc = scoreViolations(AppState.violations);
@@ -2551,7 +2560,8 @@ function showSurplusResolveModal() {
     // 有給は日数に限りがあるので、同じ結果なら「研修 → 出勤 → 有給」の順にすすめる
     const rank = { train: 0, work: 1, paid: 2 };
     out.sort((a, b) => _diffCmp(a.sd, b.sd) || (rank[a.kind] - rank[b.kind]));
-    return out;
+    // 6連勤以上ができる・伸びる案は、実行しても必ず止められるので、おすすめに出さない
+    return out.filter(x => !(x.sd && x.sd.compUp));
   };
 
   const recoHtml = () => {
@@ -3210,7 +3220,8 @@ function showSurplusResolveModal() {
         await optimizeScheduleMILP(null, { fastMode: true });
         AppState.violations = checkViolations(AppState.shifts);
         const aSc = scoreViolations(AppState.violations);
-        if (compWorsened(bV0, AppState.violations).length) {
+        // ほかの所と同じ判定（新しくできた・伸びた・つながった、または本数が増えた）
+        if (_diffOfLists(bV0, AppState.violations).compUp) {
           AppState.shifts = bkAll.shifts; AppState.fixedShifts = bkAll.fixed;
           AppState.dailyRequirements = bkAll.daily; AppState.dailyRequirementsCast = bkAll.dailyC;
           AppState.violations = checkViolations(AppState.shifts);
@@ -3896,7 +3907,8 @@ function _diffSign(d) {
 // 並べ替え用（良い順）。測れなかったもの(null)は最後
 function _diffCmp(x, y) {
   if (!x || !y) return (x ? -1 : 0) + (y ? 1 : 0);
-  return scoreCompare(x.a, y.a);
+  // 6連勤以上ができる・伸びる案（必ず止められる案）は、いつも一番後ろ
+  return ((x.compUp ? 1 : 0) - (y.compUp ? 1 : 0)) || scoreCompare(x.a, y.a);
 }
 // 画面に出す言い方。件数と連勤の超過日数を分けて出し、判定と食い違わないようにする
 function _diffWords(d) {

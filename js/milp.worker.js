@@ -177,22 +177,10 @@ self.addEventListener('message', async (e) => {
         const polishBudget = Math.max(8, Math.floor(opts.time_limit * (deep ? 0.55 : PROF.polish)));
         let remain = opts.time_limit - polishBudget;
         const bIdx = [];           // 段ごとの上限（budgets の何番目か）
-        // 段ごとの止めどころ。速いモードは「最良との差が2000点以内・2%以内なら
-        //     止める」設定だが、段ごとに解くと、目的には前の段を守る重み(1,000,000)
-        //     も入っているため、避けられない🚨が1件あるだけで2%＝2万点の差を許し、
-        //     遅→休→早（1件1000点）が20件残っていても「最適」と言って止まっていた。
-        //     早遅バランスは1日ぶん8点なので、2000点＝250日ぶんのずれを許していた。
-        //     その段のルールの一番小さい重みの半分より近づくまでは止めない。
-        //     実データ7件で 82件/🚨10 → 78件/🚨10、どの月も🚨は増えなかった。
-        //     （時間切れの🚨段に仕上げの時間を貸す案も試したが、後ろの段が
-        //       時間不足になり 78件 → 98件 と悪化したので入れていない。）
-        const tierOpts = (t) => {
-          if (msg.noGapScale) return opts;
-          let minW = Infinity;
-          m.parts.objEntries.forEach(e => { if (t.types.indexOf(e.type) >= 0 && e.w < minW) minW = e.w; });
-          if (!(minW < Infinity)) return opts;
-          return Object.assign({}, opts, { mip_rel_gap: 0, mip_abs_gap: Math.min(opts.mip_abs_gap || 0, minW * 0.5) });
-        };
+        // 段ごとの止めどころ（「2000点・2%以内なら止める」を段ごとに細かくする案）は、
+        // 実データ3件＋固定なし・人手不足のデータ1件を各5回測って、差がぶれの中だったので
+        // 入れていない（v214 以前と同じ止めどころのまま）。
+        const tierOpts = () => opts;
         for (let ti = 0; ti < tiers.length; ti++) {
           const t = tiers[ti];
           const left = tiers.length - ti - 1;     // この段より後に残っている段数
@@ -227,13 +215,29 @@ self.addEventListener('message', async (e) => {
           }
           // ① まず「前の段は上限を超えない」という条件付きで解く。速くて確実だが、
           //    条件が積み上がると、成立する組合せを一から見つけられないことがある。
+          // 前の答えが無い段（コンプラの次の人員の段など）は、時間切れでも近傍探索に逃げられない。
+          // 持ち時間の6割（速い生成では3秒）だけで打ち切ると、途中の答え（人員不足44件など）が
+          // そのまま上限として固定されていた。前の答えが無いときは持ち時間を全部使う。
           let s2 = solver.solve(MILP.composeLP(m.parts, { types: t.types, budgets }),
-                                Object.assign({}, topts, { time_limit: Math.max(3, Math.floor(cap * 0.6)) }));
+                                Object.assign({}, topts, { time_limit: sol ? Math.max(3, Math.floor(cap * 0.6)) : Math.max(3, cap) }));
           let okStrict = MILP.solutionIsValid(s2, m.parts, budgets);
           // 「最後まで計算できた」と言えるのは、この段を条件付きで一から解いて Optimal に
           // なったときだけ。近くだけを探し直した答え（近傍探索）の Optimal は「近くの中で
           // 一番良い」という意味で全体の最良ではない。前の答えを使い回したときも同じ。
           let provenHere = okStrict && String(s2.Status) === 'Optimal';
+          // 前の答えが無く、持ち時間を使い切っても途中の答えのままなら、その答えを出発点に
+          // 続けて解く（全体の残り時間から、この段の持ち時間ぶんまで）。
+          if (!sol && okStrict && !provenHere && MILP.slackTotal(s2, m.parts, t.types) > 0) {
+            const more = Math.min(cap, Math.max(0, remain - cap));
+            if (more >= 3) {
+              // 使った時間は、この段の最後にまとめて remain から引かれる
+              const s3 = solver.solve(
+                MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(s2), k: NBK * 2 } }),
+                Object.assign({}, topts, { time_limit: more }));
+              if (MILP.solutionIsValid(s3, m.parts, budgets) &&
+                  MILP.slackTotal(s3, m.parts, t.types) < MILP.slackTotal(s2, m.parts, t.types)) s2 = s3;
+            }
+          }
           if (!okStrict && sol) {
             // ② 見つからなければ「近傍探索」に切り替える。いまの答えから
             //    決まった数のマスまでしか変えない、という条件を足して解く。
