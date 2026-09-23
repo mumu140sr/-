@@ -306,6 +306,7 @@ const VIOLATION_LABEL = {
   'off-count':         '公休数不足',
   'paid':              '有給が消化できない',
   'consecutive':       '連勤超過',
+  'band-switch':       '早遅の切り替え回数',
   'late-early':        '遅→早（インターバル不足）',
   'category-switch':   '連勤中の時間帯切替',
   'bad-rest':          '遅→休→早（リズム）',
@@ -3039,6 +3040,35 @@ function checkViolations(shifts) {
       }
     }
 
+    // 早番⇔遅番の切り替え回数（1人・月 maxBandSwitch 回まで）。生成の計算（'band-switch'）と
+    // 同じ数え方にする: 休みの日は直前の時間帯を引き継ぐ、半休は早番扱い、研修もその時間帯で数える。
+    // 対象も生成と同じく、早番・遅番の両方を担当でき、「早番のみ／遅番のみ」でない人だけ。
+    // これまで生成の中だけで数えていて、検査・画面・4通りから選ぶ所では見ていなかった。
+    if (ruleOn('band-switch')) {
+      const keys = s.allowedShifts || [];
+      const both = keys.some(k => isEarlyCategory(k)) && keys.some(k => isLate(k));
+      const rOnly = (typeof getBalanceRatio === 'function') ? getBalanceRatio(s) : null;
+      if (both && !(rOnly && rOnly.only)) {
+        const cap = Math.max(0, parseInt(settings.maxBandSwitch != null ? settings.maxBandSwitch : 2, 10) || 0);
+        let prevB = null, n = 0; const swDays = [];
+        for (let d = 1; d <= days; d++) {
+          const v = (shifts[s.id] || {})[d] || '';
+          const b = isHalfWork(v) ? 'e' : (isWork(v) ? (isEarlyCategory(v) ? 'e' : (isLate(v) ? 'l' : null)) : null);
+          if (!b) continue;
+          if (prevB && b !== prevB) { n++; swDays.push(d); }
+          prevB = b;
+        }
+        if (n > cap) {
+          const must = getRuleLevel('band-switch') === 'must';
+          violations.push({
+            staffId: s.id, day: swDays[cap], type: 'band-switch', over: n - cap, weight: n - cap, count: n,
+            message: `${must ? '🚨' : '⚠️'} 早遅の切り替え ${n}回（月${cap}回まで・${n - cap}回超過）　切り替えた日: ${swDays.join('・')}日`,
+            action: '早番・遅番の時間帯をまとめてください（切り替える日を減らす）',
+          });
+        }
+      }
+    }
+
     // 公休不足のみ報告（超過は余剰人員のため許容）。
     // キャストは勤務が固定契約ベースのため公休数は目安扱い（エラーにしない）。
     const diff = offCount - (s.maxOff || 0);
@@ -3415,7 +3445,7 @@ function findCapabilityBottlenecks() {
  *   count / total … 全部の件数（表示用） / mustCount … must と同じ（表示用）
  */
 function scoreViolations(vs) {
-  const r = { comp: 0, under: 0, must: 0, over: 0, soft: 0, count: 0, byMust: {} };
+  const r = { comp: 0, under: 0, must: 0, over: 0, bsOver: 0, soft: 0, count: 0, byMust: {} };
   (vs || []).forEach(v => {
     if (!v) return;
     r.count++;
@@ -3427,6 +3457,8 @@ function scoreViolations(vs) {
     }
     if (v.type === 'consecutive') { r.over += (v.over || 0); if (v.compliance) r.comp++; }
     if (v.type === 'understaff') r.under++;
+    // 早遅の切り替えを「絶対」にしているときは、超えた回数も連勤の超過日数と同じように見る
+    if (v.type === 'band-switch' && getRuleLevel('band-switch') === 'must') r.bsOver += (v.over || 0);
   });
   r.total = r.count;
   r.mustCount = r.must;
@@ -3444,8 +3476,8 @@ function scoreBetter(a, b) {
     if (x > y) return false;
     if (x < y) less = true;
   }
-  if (a.over > b.over || a.comp > b.comp) return false;
-  if (a.over < b.over || a.comp < b.comp) less = true;
+  if (a.over > b.over || a.comp > b.comp || (a.bsOver || 0) > (b.bsOver || 0)) return false;
+  if (a.over < b.over || a.comp < b.comp || (a.bsOver || 0) < (b.bsOver || 0)) less = true;
   if (less) return true;
   return a.soft < b.soft;
 }
@@ -3456,6 +3488,7 @@ function scoreWorsened(a, b) {
   const keys = new Set(Object.keys(a.byMust).concat(Object.keys(b.byMust)));
   keys.forEach(k => { const x = a.byMust[k] || 0, y = b.byMust[k] || 0; if (x > y) out.push({ key: k, from: y, to: x }); });
   if (a.over > b.over) out.push({ key: 'over', from: b.over, to: a.over });
+  if ((a.bsOver || 0) > (b.bsOver || 0)) out.push({ key: 'bsOver', from: b.bsOver || 0, to: a.bsOver });
   if (a.soft > b.soft) out.push({ key: 'soft', from: b.soft, to: a.soft });
   return out;
 }
@@ -3471,9 +3504,11 @@ function compWorsened(beforeVs, afterVs) {
 }
 
 // 順番を付ける必要がある所（4通りから選ぶ、候補を並べる）の並べ方。小さいほど良い。
-//   ① 6連勤以上の回数 ② 人員不足 ③ 🚨の件数（連勤は回数） ④ 連勤の超過日数 ⑤ 🟡の件数
+//   ① 6連勤以上の回数 ② 人員不足 ③ 🚨の件数（連勤は回数） ④ 連勤の超過日数
+//   ④' 早遅の切り替えの超過回数（「絶対」のときだけ。「なるべく」なら⑤の🟡に1人1件で入る） ⑤ 🟡の件数
 function scoreCompare(a, b) {
-  return (a.comp - b.comp) || (a.under - b.under) || (a.must - b.must) || (a.over - b.over) || (a.soft - b.soft);
+  return (a.comp - b.comp) || (a.under - b.under) || (a.must - b.must) || (a.over - b.over)
+      || ((a.bsOver || 0) - (b.bsOver || 0)) || (a.soft - b.soft);
 }
 // 画面に出す要約（件数と超過日数を分けて出す）
 // ⛔（6連勤以上）は🚨と別に数えて出す（結果の一覧と同じ数え方）。
@@ -3482,6 +3517,7 @@ function scoreSummary(r) {
   if (r.comp) parts.push(`⛔コンプラ違反 ${r.comp}件`);
   parts.push(`🚨${r.must - r.comp}件`);
   if (r.over) parts.push(`連勤の超過 ${r.over}日`);
+  if (r.bsOver) parts.push(`切り替えの超過 ${r.bsOver}回`);
   parts.push(`🟡${r.soft}件`);
   return parts.join('・');
 }

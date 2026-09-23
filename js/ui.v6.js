@@ -343,6 +343,7 @@ const RULE_LEVEL_META = [
   { g: 'リズム',     t: 'night-after-work',  l: '夜勤明けの出勤',        def: 'must' },
   { g: 'リズム',     t: 'single-work',       l: '単発出勤',              def: 'must' },
   { g: 'リズム',     t: 'category-switch',   l: '連勤中の時間帯切替',    def: 'should' },
+  { g: 'リズム',     t: 'band-switch',       l: '早遅の切り替え回数（1人・月の上限を超える）', def: 'should' },
   { g: 'リズム',     t: 'bad-rest',          l: '遅→休→早',             def: 'should' },
   { g: 'リズム',     t: 'long-rest',         l: '連休が長すぎる',        def: 'should',
     num: { key: 'maxConsecutiveOff', min: 1, max: 14, def: 3,
@@ -1878,9 +1879,9 @@ function refreshAfterManualEdit(doneMsg, before) {
   // そのほか悪くなったもの（件数と連勤の超過日数を分けて出す）
   const up = scoreWorsened(nowSc, prevSc).filter(x => x.key !== 'comp');
   if (up.length) {
-    const lab = (k) => k === 'over' ? '連勤の超過' : k === 'soft' ? '🟡'
+    const lab = (k) => k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過（回）' : k === 'soft' ? '🟡'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
-    warns.push('⚠ 悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${x.key === 'over' ? '日' : '件'}`).join('・'));
+    warns.push('⚠ 悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${x.key === 'over' ? '日' : x.key === 'bsOver' ? '' : '件'}`).join('・'));
   }
   if (warns.length) {
     toast((doneMsg ? doneMsg + '。' : '') + warns.join(' ／ '), warns.some(w => w.startsWith('⛔')) ? 'error' : 'warning', 8000);
@@ -2442,7 +2443,7 @@ function showSurplusResolveModal() {
     const $m = modal.querySelector('#resolveMsg');
     const words = _diffWords(sd);
     if (!$m) return resolve(confirm(`${words}。実行しますか？`));
-    const lab = (k) => k === 'over' ? '連勤の超過（日）' : k === 'soft' ? '🟡 注意'
+    const lab = (k) => k === 'over' ? '連勤の超過（日）' : k === 'bsOver' ? '切り替えの超過（回）' : k === 'soft' ? '🟡 注意'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
     const crit = up.filter(x => x.key !== 'soft'), soft = up.filter(x => x.key === 'soft');
     const danger = crit.length > 0;
@@ -2992,7 +2993,7 @@ function showSurplusResolveModal() {
     const sd = r && r.sd; if (!sd) return '';
     const up = scoreWorsened(sd.a, sd.b);
     if (!up.length) return '';
-    const lab = (k) => k === 'comp' ? '⛔コンプラ違反' : k === 'over' ? '連勤の超過' : k === 'soft' ? '🟡'
+    const lab = (k) => k === 'comp' ? '⛔コンプラ違反' : k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? '🟡'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
     return `<br><span class="hint">増えたもの：${up.map(x => escapeHtml(lab(x.key)) + ` ${x.from}→${x.to}${x.key === 'over' ? '日' : '件'}`).join('、')}</span>`;
   };
@@ -3918,13 +3919,14 @@ function _diffWords(d) {
   // 🚨は⛔（6連勤以上）を除いた件数で出す（⛔は別に出す）
   if (a.must - a.comp !== b.must - b.comp) ch.push(`🚨 ${b.must - b.comp}→${a.must - a.comp}件`);
   if (a.over !== b.over) ch.push(`連勤の超過 ${b.over}→${a.over}日`);
+  if ((a.bsOver || 0) !== (b.bsOver || 0)) ch.push(`切り替えの超過 ${b.bsOver || 0}→${a.bsOver || 0}回`);
   if (a.soft !== b.soft) ch.push(`🟡 ${b.soft}→${a.soft}件`);
   const sg = _diffSign(d);
   const head = d.compUp ? '⛔ コンプラ違反（6連勤以上）になります・伸びます'
              : sg < 0 ? '良くなります' : sg === 0 ? '変わりません'
              : sg === 1 ? '悪くなります' : '減るものと増えるものがあります';
   // 🚨の種類が入れ替わっただけ（件数は同じ）のときも分かるように、増えた種類を出す
-  const up = scoreWorsened(a, b).filter(x => x.key !== 'comp' && x.key !== 'over' && x.key !== 'soft')
+  const up = scoreWorsened(a, b).filter(x => x.key !== 'comp' && x.key !== 'over' && x.key !== 'bsOver' && x.key !== 'soft')
     .map(x => `${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[x.key]) || x.key} +${x.to - x.from}`);
   if (sg === 2 && up.length) ch.push('増える🚨: ' + up.join('・'));
   return ch.length ? `${head}（${ch.join('・')}）` : head;
