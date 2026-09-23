@@ -721,7 +721,10 @@ function renderReport(result) {
   }
 
   // ── 違反を2段階（🔴絶対NG / 🟡注意）に分類 ───────────────────
-  const must  = result.violations.filter(v => isMustViolation(v.type));
+  // 6連勤以上（コンプラ違反）は、通常の🚨とは別に一番上に出す。
+  // 件数としては🚨にも含む（比べるときの ③ と同じ）。
+  const comp  = result.violations.filter(v => v.type === 'consecutive' && v.compliance);
+  const must  = result.violations.filter(v => isMustViolation(v.type) && !(v.type === 'consecutive' && v.compliance));
   const should = result.violations.filter(v => !isMustViolation(v.type));
 
   // クリックでシフト表の該当コマへジャンプできるようにする
@@ -740,7 +743,11 @@ function renderReport(result) {
 
   // サマリー: 絶対NGが0なら実質クリア扱いのメッセージ
   let html = diagHtml;
-  if (must.length === 0) {
+  if (comp.length) {
+    html += `<div class="report-warning" style="border-color:var(--danger);font-weight:700">⛔ コンプラ違反（6連勤以上）: ${comp.length}件 ／ 🔴 絶対NG: ${must.length}件 ／ 🟡 注意: ${should.length}件</div>
+      <div class="violation-group-title" style="color:#9b2335;font-weight:700;margin:12px 0 6px">⛔ コンプラ違反（6連勤以上・必ず直す）— ${comp.length}件</div>
+      <div class="violation-list must">${renderItems(comp)}</div>`;
+  } else if (must.length === 0) {
     html += `<div class="report-success">✅ 絶対NG（人員不足・スキル・連勤超過・単発出勤など）は 0件！ 残り ${should.length}件 は「できれば避けたい」調整項目です。</div>`;
   } else {
     html += `<div class="report-warning">🔴 絶対NG: ${must.length}件 ／ 🟡 注意: ${should.length}件</div>`;
@@ -822,8 +829,8 @@ function renderFixPlans(root) {
             押すまで表は変わりません。押したあとは「元に戻す」で取り消せます。
           </div>
           ${plans.map((p, i) => `<div style="margin-top:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface)">
-            <div style="font-weight:700">${i === 0 ? '👑 ' : ''}${p.before}件 → ${p.after}件（${p.gain}件減ります）</div>
-            <div class="hint">🚨 絶対NG: ${p.mustBefore}件 → ${p.mustAfter}件${p.mustAfter > p.mustBefore ? '' : '（増えません）'}</div>
+            <div style="font-weight:700">${i === 0 ? '👑 ' : ''}${escapeHtml(_diffWords(_scoreDiff(p._base, p._sc)))}</div>
+            <div class="hint">${escapeHtml(scoreSummary(p._base))} → ${escapeHtml(scoreSummary(p._sc))}（どの🚨も増えません）</div>
             <div style="margin:4px 0 6px">${p.steps.map((m, j) =>
               (p.steps.length > 1 ? `<div class="hint" style="margin-top:4px">${j + 1}つ目</div>` : '') + line(m)).join('')}</div>
             <div class="hint" style="margin-bottom:6px">この2つを入れ替えるだけです。その日の人数は変わりません。</div>
@@ -950,21 +957,23 @@ function setupResultPanel() {
           if ($text) $text.textContent = '数理最適化で修復中: ' + msg;
         });
         const after = res.violations.length;
-        // 件数ではなく「🚨 → 合計」（重み付き）で比べる。件数だけだと、🚨が
-        // 増えても合計が減れば「修復した」と採用してしまっていた。
-        if (scoreBetter(scoreViolations(res.violations), beforeSc)) {
+        const afterSc = scoreViolations(res.violations);
+        // 基本の判定（scoreBetter: どの🚨も増えず、どれかが減る）で採否を決める。
+        // 件数だけだと、🚨が増えても合計が減れば「修復した」と採用してしまっていた。
+        if (scoreBetter(afterSc, beforeSc)) {
+          const words = _diffWords(_scoreDiff(beforeSc, afterSc));
           if ($bar) $bar.style.width = '100%';
           renderResultTable();
           document.getElementById('reportCard').style.display = 'block';
           renderReport({ success: res.success, score: after, violations: res.violations });
-          if ($text) $text.textContent = `修復完了: 違反 ${before}件 → ${after}件`;
-          toast(`✅ 数理最適化でエラーを ${before - after}件 減らしました（🔒は保持）`, 'success', 5000);
+          if ($text) $text.textContent = `修復完了: ${scoreSummary(beforeSc)} → ${scoreSummary(afterSc)}`;
+          toast(`✅ 数理最適化で${words}（🔒は保持）`, 'success', 6000);
         } else {
           // 改善なし → 完全に元へ戻す（悪化させない）
           AppState.shifts = backup; AppState.violations = checkViolations(backup);
           if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
           renderResultTable();
-          if ($text) $text.textContent = `これ以上は改善できませんでした（違反 ${before}件）`;
+          if ($text) $text.textContent = `これ以上は改善できませんでした（${scoreSummary(beforeSc)}）`;
           toast('これ以上は数理最適化でも減らせませんでした。関係する🔒を解除すると改善する場合があります', 'info', 6000);
         }
         saveToStorage();

@@ -276,6 +276,10 @@ function _polishMovable(shifts, sid, d) {
  * @returns {Array} 掃除後の violations
  */
 // 🔴絶対NG扱いの違反タイプ（表示側の分類と揃える）。単発出勤も含む。
+// 6連勤以上はコンプライアンス違反（5連勤までは可）。連勤上限の設定とは関係なく、
+// 6日以上続いたら必ず違反として扱う。前月末からの連勤と、半休の日も出勤に数える。
+const COMPLIANCE_CONS_DAYS = 6;
+
 const MUST_TYPES_OPT = new Set([
   'understaff', 'skill-late', 'consecutive', 'resp-duplicate', 'hierarchy',
   'vicemanager-absent', 'single-work', 'pref-mismatch', 'role-mismatch',
@@ -2821,13 +2825,21 @@ function checkViolations(shifts) {
     // ように見えていた。表示は実際の日数にし、答えを比べるときの重み(weight)は
     // 上限を超えた日数にする（早遅バランスと同じ考え方）。
     let openCons = null;
+    // 1回の連勤につき1件。len=実際の日数、over=上限を超えた日数、
+    // compliance=6連勤以上（上限の設定に関係なくコンプラ違反）。
     const noteCons = (d, lim, extra) => {
-      const over = consWork - lim;
-      const msg = `🚨 ${consWork}連勤（上限${lim}日を${over}日超過${s.personalMaxCons > 0 ? '・個人設定' : ''}）${extra}`;
-      if (openCons) { openCons.message = msg; openCons.weight = over; return; }
-      openCons = { staffId: s.id, day: d, type: 'consecutive', weight: over, message: msg,
-                   action: '他の日と入れ替えて休みを挟んでください' };
-      violations.push(openCons);
+      const over = Math.max(0, consWork - lim);
+      const comp = consWork >= COMPLIANCE_CONS_DAYS;
+      const pers = s.personalMaxCons > 0 ? '・個人設定' : '';
+      const msg = comp
+        ? `⛔ コンプラ違反：${consWork}連勤（6連勤以上は不可。上限${lim}日${over > 0 ? `を${over}日超過` : ''}${pers}）${extra}`
+        : `🚨 ${consWork}連勤（上限${lim}日を${over}日超過${pers}）${extra}`;
+      const o = openCons || { staffId: s.id, day: d, type: 'consecutive',
+                              action: '他の日と入れ替えて休みを挟んでください' };
+      // from が 1 より小さいときは前月から続いている
+      Object.assign(o, { len: consWork, over, compliance: comp, weight: over, message: msg,
+                         from: d - consWork + 1, to: d });
+      if (!openCons) { openCons = o; violations.push(o); }
     };
     const wkHard     = s.weekendPref === 'hard';
     const wkSoft     = s.weekendPref === 'soft';
@@ -2857,7 +2869,7 @@ function checkViolations(shifts) {
           });
         }
         const myMaxConsH = getMaxConsFor(s);
-        if (consWork > myMaxConsH) noteCons(d, myMaxConsH, '　※半休も出勤に数えます');
+        if (consWork > myMaxConsH || consWork >= COMPLIANCE_CONS_DAYS) noteCons(d, myMaxConsH, '　※半休も出勤に数えます');
         if (!workedOn((shifts[s.id] || {})[d + 1] || '')) openCons = null;
         offRun = 0;          // 休みの連続を切る
         prevShift = '';      // 時間帯は引き継がない（遅→早の誤判定を防ぐ）
@@ -2868,7 +2880,7 @@ function checkViolations(shifts) {
         consWork++;
         if (isLate(cur)) lateBand++; else if (isEarlyCategory(cur)) earlyBand++;
         const myMaxCons = getMaxConsFor(s); // 連勤上限（4 or 個人設定。超えたら🔴絶対NG）
-        if (consWork > myMaxCons) noteCons(d, myMaxCons, '');
+        if (consWork > myMaxCons || consWork >= COMPLIANCE_CONS_DAYS) noteCons(d, myMaxCons, '');
         if (!workedOn((shifts[s.id] || {})[d + 1] || '')) openCons = null; // 連勤が切れたら次は別の1件
 
         // 個人希望: 土日休み（絶対＝🚨 / なるべく＝⚠️）
@@ -3379,28 +3391,82 @@ function findCapabilityBottlenecks() {
  */
 /**
  * 答えの良し悪しを比べる共通の物差し。どこで比べるときも必ずこれを使う
- * （4通りから選ぶ所・仕上げ・入れ替え案・エラー自動修正・余の解消の比較）。
- *   must  … 🚨の重み付き合計
- *   total … 全エラーの重み付き合計
- *   count / mustCount … 画面に出る件数（表示用。比べるのには使わない）
- * 重みは、連勤超過なら上限を超えた日数、早遅バランスならずれの大きさ。
- * 件数だけで比べると、5連勤2回を10連勤1回にまとめた答えが「1件減った」と
- * 良く見えてしまう（実際に仕上げの入れ替えがそれをしていた）。
+ * （4通りから選ぶ所・仕上げ・入れ替え案・エラー自動修正・余の解消・手で直したときの警告）。
+ *
+ * 考え方（利用者と決めたこと）:
+ *  ・🚨は種類をまたいで交換しない。どの種類の🚨も増やさない。
+ *  ・連勤は「回数」と「上限を超えた日数」の両方で見る。10連勤1回と5連勤2回は
+ *    同じくらい悪いので、どちらかへ組み替えることを改善とみなさない。
+ *  ・6連勤以上はコンプライアンス違反（上限の設定に関係なく）。
+ *
+ * 返す値:
+ *   comp  … 6連勤以上の回数（コンプラ違反）
+ *   under … 人員不足の件数
+ *   must  … 🚨の件数（連勤は回数で数える。6連勤以上も含む）
+ *   over  … 連勤の、上限を超えた日数の合計
+ *   soft  … 🟡の件数
+ *   byMust… 🚨の種類ごとの件数
+ *   count / total … 全部の件数（表示用） / mustCount … must と同じ（表示用）
  */
 function scoreViolations(vs) {
-  let must = 0, total = 0, mustCount = 0;
+  const r = { comp: 0, under: 0, must: 0, over: 0, soft: 0, count: 0, byMust: {} };
   (vs || []).forEach(v => {
     if (!v) return;
-    const w = v.weight > 1 ? v.weight : 1;
-    total += w;
-    if (getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type)) { must += w; mustCount++; }
+    r.count++;
+    if (getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type)) {
+      r.must++;
+      r.byMust[v.type] = (r.byMust[v.type] || 0) + 1;
+    } else {
+      r.soft++;
+    }
+    if (v.type === 'consecutive') { r.over += (v.over || 0); if (v.compliance) r.comp++; }
+    if (v.type === 'understaff') r.under++;
   });
-  return { must, total, count: (vs || []).length, mustCount };
+  r.total = r.count;
+  r.mustCount = r.must;
+  return r;
 }
-// a が b より良いか（🚨 → 合計 の順）
-function scoreBetter(a, b) { return a.must < b.must || (a.must === b.must && a.total < b.total); }
-// 並べ替え用（小さいほど良い）
-function scoreCompare(a, b) { return (a.must - b.must) || (a.total - b.total); }
+// a は b より「改善」か（基本の判定）。
+//   どの🚨の種類の件数も、連勤の超過日数も、6連勤以上の回数も増えず、
+//   そのどれかが減ること。🚨がすべて同じときだけ、🟡の件数が減れば改善。
+//   どこかが減ってどこかが増えた（交換した）ものは改善ではない。
+function scoreBetter(a, b) {
+  let less = false;
+  const keys = new Set(Object.keys(a.byMust).concat(Object.keys(b.byMust)));
+  for (const k of keys) {
+    const x = a.byMust[k] || 0, y = b.byMust[k] || 0;
+    if (x > y) return false;
+    if (x < y) less = true;
+  }
+  if (a.over > b.over || a.comp > b.comp) return false;
+  if (a.over < b.over || a.comp < b.comp) less = true;
+  if (less) return true;
+  return a.soft < b.soft;
+}
+// b から a への変化で、増えたもの（悪くなったもの）の一覧。表示と警告に使う。
+function scoreWorsened(a, b) {
+  const out = [];
+  if (a.comp > b.comp) out.push({ key: 'comp', from: b.comp, to: a.comp });
+  const keys = new Set(Object.keys(a.byMust).concat(Object.keys(b.byMust)));
+  keys.forEach(k => { const x = a.byMust[k] || 0, y = b.byMust[k] || 0; if (x > y) out.push({ key: k, from: y, to: x }); });
+  if (a.over > b.over) out.push({ key: 'over', from: b.over, to: a.over });
+  if (a.soft > b.soft) out.push({ key: 'soft', from: b.soft, to: a.soft });
+  return out;
+}
+// 順番を付ける必要がある所（4通りから選ぶ、候補を並べる）の並べ方。小さいほど良い。
+//   ① 6連勤以上の回数 ② 人員不足 ③ 🚨の件数（連勤は回数） ④ 連勤の超過日数 ⑤ 🟡の件数
+function scoreCompare(a, b) {
+  return (a.comp - b.comp) || (a.under - b.under) || (a.must - b.must) || (a.over - b.over) || (a.soft - b.soft);
+}
+// 画面に出す要約（件数と超過日数を分けて出す）
+function scoreSummary(r) {
+  const parts = [];
+  if (r.comp) parts.push(`⛔コンプラ違反 ${r.comp}件`);
+  parts.push(`🚨${r.must}件`);
+  if (r.over) parts.push(`連勤の超過 ${r.over}日`);
+  parts.push(`🟡${r.soft}件`);
+  return parts.join('・');
+}
 
 function findConcreteFixes(opt) {
   const o = opt || {};
@@ -3465,14 +3531,14 @@ function findConcreteFixes(opt) {
     swap(m.aId, m.bId, m.day);
     if (better(n)) {
       found.push({ steps: [m], before: base, after: n.count, gain: baseScore.total - n.total,
-                   mustBefore: baseScore.mustCount, mustAfter: n.mustCount, _w: baseScore.must - n.must });
+                   mustBefore: baseScore.mustCount, mustAfter: n.mustCount, _sc: n, _base: baseScore });
     } else {
       // 悪くならない手だけを2手目の土台に使う（🚨を増やす手は土台にもしない）
       m._same = (n.must === baseScore.must && n.total === baseScore.total);
     }
   });
-  const rank = (x) => x._w * 100 + x.gain;
-  found.sort((a, b) => rank(b) - rank(a));
+  // 並べ方は scoreCompare（① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 🟡）
+  found.sort((a, b) => scoreCompare(a._sc, b._sc));
   if (found.length >= maxResults || !o.deep) return _dedupeFixes(found, maxResults);
 
   // ② 2手の組合せ（1手目は「悪くならない手」だけを土台にする）
@@ -3493,7 +3559,7 @@ function findConcreteFixes(opt) {
         if (better(n)) {
           found.push({ steps: [m1, JSON.parse(JSON.stringify(m2))], before: base, after: n.count,
                        gain: baseScore.total - n.total, mustBefore: baseScore.mustCount, mustAfter: n.mustCount,
-                       _w: baseScore.must - n.must });
+                       _sc: n, _base: baseScore });
           if (found.length >= maxResults) break;
         }
       }
@@ -3502,7 +3568,7 @@ function findConcreteFixes(opt) {
     swap(m1.aId, m1.bId, m1.day);
     if (o.onProgress && seen % 2000 === 0) o.onProgress(seen);
   }
-  found.sort((a, b) => rank(b) - rank(a) || a.steps.length - b.steps.length);
+  found.sort((a, b) => scoreCompare(a._sc, b._sc) || a.steps.length - b.steps.length);
   return _dedupeFixes(found, maxResults);
 }
 
@@ -3557,11 +3623,13 @@ function polishShifts(shifts, opt) {
       if (v.staffId) hotStaff.add(v.staffId); else if (v.day) openDays.add(v.day);
     });
     let best = null;
+    // いまの答えより「改善」になる手（どの🚨も増えない・6連勤以上を作らない）の
+    // うち、並べ方（scoreCompare）でいちばん良い手を選ぶ
     const tryMove = (apply, undo, desc) => {
       apply();
       const n = evalS();
       undo();
-      if (better(n, best ? best.n : cur)) best = { n, apply, desc };
+      if (better(n, cur) && (!best || scoreCompare(n, best.n) < 0)) best = { n, apply, desc };
     };
     // ① 同日入れ替え
     for (const d of hotDays) {
@@ -5121,7 +5189,7 @@ function analyzeLowerBound() {
     //     生成するまで気づけなかった。確定している出勤だけを並べて数える。
     g.staff.forEach(s => {
       if (getStaffDepartment(s) === 'cast') return;
-      const mc = getMaxConsFor(s);
+      const mc = Math.min(getMaxConsFor(s), COMPLIANCE_CONS_DAYS - 1);   // 6連勤以上はコンプラ違反
       if (!(mc >= 1)) return;
       const prev = (typeof getPrevMonthEnd === 'function') ? (getPrevMonthEnd(s).cons || 0) : 0;
       let run = 0, runStart = 0;
@@ -5167,7 +5235,7 @@ function analyzeLowerBound() {
     //    これを超える出勤日数が必要な人は、連勤超過か公休不足が必ず起きる。
     g.staff.forEach(s => {
       if (getStaffDepartment(s) === 'cast') return;
-      const c = getMaxConsFor(s);
+      const c = Math.min(getMaxConsFor(s), COMPLIANCE_CONS_DAYS - 1);
       if (!(c >= 1)) return;
       const maxWork = days - Math.floor(days / (c + 1));
       let paidN = 0, otherOffN = 0;
@@ -5199,7 +5267,7 @@ function analyzeLowerBound() {
     //    確定している休みで区切った空き期間ごとに、必要な休みの数を数える。
     g.staff.forEach(s => {
       if (getStaffDepartment(s) === 'cast') return;
-      const c = getMaxConsFor(s);
+      const c = Math.min(getMaxConsFor(s), COMPLIANCE_CONS_DAYS - 1);
       if (!(c >= 1)) return;
       const offAt = (d) => {
         const rq = (AppState.requests[s.id] || {})[d];

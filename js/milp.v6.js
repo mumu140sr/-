@@ -77,14 +77,15 @@ function optimizeScheduleMILP(onProgress, opts) {
     // 答えの方が点数が良いため、使い道の候補がほとんど出てこない。
     const pickBySurplus = !!(opts && opts.pickBy === 'surplus');
     const countRest = (sh) => { let n2 = 0; for (const id in (sh || {})) { const row = sh[id]; for (const d in row) if (row[d] === '余') n2++; } return n2; };
-    // 良し悪しは「🚨の重み付き合計 → 全体の重み付き合計」の順で比べる（scoreViolations）。合計だけで比べると、
-    // 🚨4件・合計11件の答えが 🚨3件・合計12件の答えに勝ってしまう。
-    const better = (a, b) => (a.must - b.must) || (a.score - b.score);
+    // 並べ方は scoreCompare（optimizer.js）: ① 6連勤以上（コンプラ違反）の回数
+    // ② 人員不足 ③ 🚨の件数（連勤は回数）④ 連勤の超過日数 ⑤ 🟡の件数。
+    // 合計件数だけで比べると、🚨4件・合計11件が 🚨3件・合計12件に勝ってしまう。
+    const better = (a, b) => scoreCompare(a.sc, b.sc);
     const say = () => {
       const best = results.length ? results.slice().sort(better)[0] : null;
       onProgress && onProgress(null,
         `${n}通りの解き方を同時に計算中…（完了 ${done}/${n}` +
-        (best ? ` ・ いまの最良 ${best.violations.length}件（うち🚨${best.mustCount}件）` : '') + '）');
+        (best ? ` ・ いまの最良 ${scoreSummary(best.sc)}` : '') + '）');
     };
     say();
     for (let i = 0; i < n; i++) {
@@ -104,7 +105,7 @@ function optimizeScheduleMILP(onProgress, opts) {
           AppState.shifts = best._shifts || AppState.shifts;
           AppState.violations = best.violations;
           AppState.generated = true;
-          best.parallel = { n, tried: results.map(r => ({ label: r._label, score: r.score, must: r.must })) };
+          best.parallel = { n, tried: results.map(r => ({ label: r._label, score: r.score, must: r.must, comp: r.sc.comp })) };
           resolve(best);
         });
     }
@@ -140,12 +141,10 @@ function _milpOnce(onProgress, opts, variant) {
       if (m.type === 'done') {
         cleanup(); worker.terminate();
         AppState.shifts = m.shifts || {}; AppState.violations = m.violations || []; AppState.generated = true;
-        // 比べるときの点数は「件数」ではなく「重み付きの合計」。
-        // 早遅バランスのように、1件でもずれが大きいものを正しく重く扱う。
-        // 🚨も重み付きで数える（連勤は上限を超えた日数。optimizer.js の scoreViolations）
+        // 比べるための数（optimizer.js の scoreViolations）
         const _sc = scoreViolations(m.violations || []);
         resolve({ _shifts: m.shifts || {}, violations: AppState.violations, score: _sc.total, must: _sc.must,
-                  mustCount: _sc.mustCount,
+                  mustCount: _sc.mustCount, sc: _sc,
                   success: (m.violations || []).length === 0,
                   allOptimal: m.allOptimal !== false, deep: !!m.deep, fast: !!m.fast, usedGap: !!m.usedGap,
                   tiered: !!m.tiered, tierLog: m.tierLog || [] });

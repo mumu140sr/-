@@ -3,11 +3,24 @@
    =========================================== */
 
 // ===== トースト表示 =====
+// 連勤の上限を6日以上にしたときの警告。6連勤以上はコンプライアンス違反なので、
+// 上限を上げても生成・検査では必ず違反として扱う（上限の設定とは関係ない）。
+function warnComplianceLimit(v, who) {
+  const lim = (typeof COMPLIANCE_CONS_DAYS !== 'undefined') ? COMPLIANCE_CONS_DAYS : 6;
+  if (!(parseInt(v) >= lim)) return;
+  toast(`⛔ ${who}の連勤上限が${v}日になっています。${lim}連勤以上はコンプライアンス違反です（5連勤まで）。`
+      + `上限を${lim}日以上にしても、${lim}連勤以上は違反として表示・回避します。`, 'error', 9000);
+}
+
+// 前の知らせの消えるタイマーが、後から出した知らせを途中で消してしまっていた
+// （手で直したときの警告が見えなかった原因の1つ）。タイマーは1つだけにする。
+let _toastTimer = null;
 function toast(message, type = 'info', duration = 3000) {
   const t = document.getElementById('toast');
   t.textContent = message;
   t.className = 'toast show ' + type;
-  setTimeout(() => { t.className = 'toast ' + type; }, duration);
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { t.className = 'toast ' + type; _toastTimer = null; }, duration);
 }
 
 // ===== 自動保存（デバウンス付き） =====
@@ -160,6 +173,7 @@ function setupSettingsPanel() {
   });
   $maxCons.addEventListener('change', () => {
     AppState.settings.maxConsecutive = parseInt($maxCons.value) || 4;
+    warnComplianceLimit(AppState.settings.maxConsecutive, '全体');
     autoSave();
   });
   $forbidLE.addEventListener('change', () => {
@@ -1141,6 +1155,7 @@ function renderStaffTable() {
       let val = e.target.value;
       if (['maxOff', 'prevConsecutive', 'paidLeave', 'personalMaxCons', 'personalMaxOff', 'pairRestTarget'].includes(field)) val = parseInt(val) || 0;
       staff[field] = val;
+      if (field === 'personalMaxCons') warnComplianceLimit(val, `${staff.name}さん（個人）`);
       // 「前月末連勤日数」と「前月末シフト」は必ず整合させる。
       // 矛盾していると月初の判定を誤り、単発出勤などを見逃す原因になる。
       if (field === 'prevConsecutive') {
@@ -1642,8 +1657,7 @@ function setupDragAndDrop() {
       if (f2 != null) AppState.fixedShifts[sid1][d1] = f2; else delete AppState.fixedShifts[sid1][d1];
       if (f1 != null) AppState.fixedShifts[sid2][d2] = f1; else delete AppState.fixedShifts[sid2][d2];
       dragSource = null;
-      refreshAfterManualEdit();
-      toast('シフトを交換しました', 'info', 1500);
+      refreshAfterManualEdit('シフトを交換しました');
     });
   });
 }
@@ -1739,9 +1753,8 @@ function setupManualEdit() {
     const staffName = (AppState.staff.find(s => s.id === sid) || {}).name || '';
     modal.classList.remove('show');
     editingCell = null;
-    refreshAfterManualEdit();
     const fixedMark = newShift ? ' 🔒' : '';
-    toast(`${staffName} ${d}日 →「${newShift || '空'}」に変更${fixedMark}`, 'info', 1500);
+    refreshAfterManualEdit(`${staffName} ${d}日 →「${newShift || '空'}」に変更${fixedMark}`);
   });
 
   // キャンセル
@@ -1834,16 +1847,33 @@ function updateHistoryButtons() {
  * - 診断レポートを更新
  * - localStorage に保存
  */
-function refreshAfterManualEdit() {
-  const prevCount = (AppState.violations || []).length;
-  const prevSc = scoreViolations(AppState.violations || []);
+// 手で直した後の数え直し。悪くなったときの警告は、呼び出し側の「交換しました」
+// などの知らせと1つにまとめて出す（別々に出すと、後の知らせで警告が上書きされて
+// 見えなかった）。doneMsg を渡すとまとめて表示し、渡さなければ警告だけを出す。
+function refreshAfterManualEdit(doneMsg) {
+  const prevV = AppState.violations || [];
+  const prevSc = scoreViolations(prevV);
   AppState.violations = checkViolations(AppState.shifts);
-  // 手動修正で玉突きの違反が増えた場合は知らせる。件数が同じでも、連勤が
-  // 伸びた（重みが増えた）ときは悪くなっているので知らせる。
-  if (AppState.violations.length > prevCount || scoreBetter(prevSc, scoreViolations(AppState.violations))) {
-    toast(AppState.violations.length > prevCount
-      ? `⚠ この変更で違反が ${prevCount}→${AppState.violations.length}件に増えました`
-      : `⚠ この変更で違反が重くなりました（件数は${prevCount}件のまま・連勤が伸びたなど）`, 'info', 4500);
+  const nowSc = scoreViolations(AppState.violations);
+  const warns = [];
+  // 6連勤以上（コンプラ違反）が新しくできたら、誰の何日かをはっきり出す
+  const key = v => `${v.staffId}:${v.to}`;
+  const had = new Set(prevV.filter(v => v.type === 'consecutive' && v.compliance).map(key));
+  AppState.violations.filter(v => v.type === 'consecutive' && v.compliance && !had.has(key(v))).forEach(v => {
+    const nm = (AppState.staff.find(s => s.id === v.staffId) || {}).name || '';
+    warns.push(`⛔ コンプラ違反：${nm}さん ${v.from >= 1 ? v.from + '日' : '前月'}〜${v.to}日が${v.len}連勤になりました`);
+  });
+  // そのほか悪くなったもの（件数と連勤の超過日数を分けて出す）
+  const up = scoreWorsened(nowSc, prevSc).filter(x => x.key !== 'comp');
+  if (up.length) {
+    const lab = (k) => k === 'over' ? '連勤の超過' : k === 'soft' ? '🟡'
+      : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
+    warns.push('⚠ 悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${x.key === 'over' ? '日' : '件'}`).join('・'));
+  }
+  if (warns.length) {
+    toast((doneMsg ? doneMsg + '。' : '') + warns.join(' ／ '), warns.some(w => w.startsWith('⛔')) ? 'error' : 'warning', 8000);
+  } else if (doneMsg) {
+    toast(doneMsg, 'info', 1500);
   }
   renderResultTable();
 
@@ -2591,11 +2621,8 @@ function showSurplusResolveModal() {
     const rows = planRows.rows;
     const tag = (x) => {
       const d = (x.sc && b.sc) ? _scoreDiff(b.sc, x.sc) : null;
-      const dn = x.n - b.n;
-      if (d && d.dm > 0) return `<b style="color:var(--danger)">エラー ${b.n}件 → ${x.n}件（🚨が${d.dn > 0 ? '増えます' : '重くなります'}）</b>`;
-      return dn < 0 ? `<b style="color:var(--success)">エラー ${b.n}件 → ${x.n}件（${dn}件）</b>`
-           : dn === 0 ? `<b style="color:var(${d && _diffSign(d) > 0 ? '--danger' : '--success'})">エラー ${x.n}件（${d && _diffSign(d) > 0 ? '件数は同じで重くなります' : '増えません'}）</b>`
-           : `<b style="color:var(--danger)">エラー ${b.n}件 → ${x.n}件（+${dn}件）</b>`;
+      const sg = _diffSign(d);
+      return `<b style="color:var(${sg !== null && sg <= 0 ? '--success' : '--danger'})">${_diffWords(d)}</b>`;
     };
     return `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">
       <div style="font-weight:700;margin-bottom:4px">🔁 組み直して比べた結果</div>
@@ -3852,37 +3879,45 @@ function _trainingCandidates(learnerId, band, tutorIds) {
 }
 
 // 「入れてみた前後」を比べる共通の物差し（optimizer.js の scoreViolations と同じ）。
-// 良し悪しと並べ替えは重み付き（🚨の重み → 全体の重み）で決め、画面に出す数は件数。
-// 件数だけで比べると、連勤が伸びても件数が同じなら「増えません」と出てしまう。
+// 良し悪しは scoreBetter（どの🚨も増えず、どれかが減る）、並べ替えは scoreCompare
+// （① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 🟡）。表示は件数と超過日数を分けて出す。
 function _scoreDiff(before, after) {
-  return { dn: after.count - before.count, dm: after.must - before.must, dt: after.total - before.total,
-           before: before.count, after: after.count };
+  return { b: before, a: after, dn: after.count - before.count, before: before.count, after: after.count };
 }
-// 良くなる: -1 / 変わらない: 0 / 悪くなる: 1（🚨が重くなるなら合計が減っても 1）
+// 良くなる: -1 / 変わらない: 0 / 悪くなる: 1 / 減るものと増えるものがある: 2
 function _diffSign(d) {
   if (!d) return null;
-  if (d.dm !== 0) return d.dm > 0 ? 1 : -1;
-  return d.dt > 0 ? 1 : (d.dt < 0 ? -1 : 0);
+  if (scoreBetter(d.a, d.b)) return -1;
+  const up = scoreWorsened(d.a, d.b);
+  if (!up.length) return 0;
+  return scoreBetter(d.b, d.a) ? 1 : 2;
 }
 // 並べ替え用（良い順）。測れなかったもの(null)は最後
-function _diffCmp(a, b) {
-  if (!a || !b) return (a ? -1 : 0) + (b ? 1 : 0);
-  return (a.dm - b.dm) || (a.dt - b.dt);
+function _diffCmp(x, y) {
+  if (!x || !y) return (x ? -1 : 0) + (y ? 1 : 0);
+  return scoreCompare(x.a, y.a);
 }
-// 画面に出す言い方。件数が変わらなくても🚨が重くなるときは、はっきり知らせる
+// 画面に出す言い方。件数と連勤の超過日数を分けて出し、判定と食い違わないようにする
 function _diffWords(d) {
   if (!d) return '';
-  if (d.dm > 0) return d.dn > 0 ? `🚨が増えます（${d.before}件 → ${d.after}件）`
-                                : `🚨が重くなります（件数は${d.after}件・連勤が伸びるなど）`;
-  if (_diffSign(d) < 0) return d.dn < 0 ? `エラーが ${-d.dn}件 減ります` : 'エラーが軽くなります';
-  if (_diffSign(d) === 0) return 'エラーは増えません';
-  return d.dn > 0 ? `エラーが ${d.dn}件 増えます` : 'エラーが重くなります';
+  const b = d.b, a = d.a, ch = [];
+  if (a.comp !== b.comp) ch.push(`⛔コンプラ違反 ${b.comp}→${a.comp}件`);
+  if (a.must !== b.must) ch.push(`🚨 ${b.must}→${a.must}件`);
+  if (a.over !== b.over) ch.push(`連勤の超過 ${b.over}→${a.over}日`);
+  if (a.soft !== b.soft) ch.push(`🟡 ${b.soft}→${a.soft}件`);
+  const sg = _diffSign(d);
+  const head = a.comp > b.comp ? '⛔ コンプラ違反（6連勤以上）になります'
+             : sg < 0 ? '良くなります' : sg === 0 ? '変わりません'
+             : sg === 1 ? '悪くなります' : '減るものと増えるものがあります';
+  // 🚨の種類が入れ替わっただけ（件数は同じ）のときも分かるように、増えた種類を出す
+  const up = scoreWorsened(a, b).filter(x => x.key !== 'comp' && x.key !== 'over' && x.key !== 'soft')
+    .map(x => `${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[x.key]) || x.key} +${x.to - x.from}`);
+  if (sg === 2 && up.length) ch.push('増える🚨: ' + up.join('・'));
+  return ch.length ? `${head}（${ch.join('・')}）` : head;
 }
 
-// その候補を実際に表へ入れてみて、エラーが何件増えるかを数える（数えたら元に戻す）。
-// 候補行の印と、実測したエラー増減の表示。警告文だけでは良し悪しが判断できない
-// という声があったため、「入れたら何件増えるか」を数字で出す。
 function _spMark(r) {
+  if (r.sd && r.sd.a.comp > r.sd.b.comp) return '⛔';   // 6連勤以上になる（コンプラ違反）
   const sg = _diffSign(r.sd);
   if (sg === 0) return '⭐';
   if (sg > 0)   return '⚠️';

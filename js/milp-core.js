@@ -312,7 +312,10 @@
     gStaff.forEach(s => {
       const isCast = getStaffDepartment(s) === 'cast';
       const si = sidOf[s.id];
-      const maxCons = getMaxConsFor(s);
+      // 6連勤以上はコンプライアンス違反なので、上限が6日以上に設定されていても
+      // 生成では5連勤までにする（検査でも6連勤以上は必ず違反として出る）。
+      const maxCons = Math.min(getMaxConsFor(s),
+        (typeof COMPLIANCE_CONS_DAYS !== 'undefined' ? COMPLIANCE_CONS_DAYS : 6) - 1);
       // 連勤上限（(maxCons+1)連続窓 ≤ maxCons）
       const wc = ruleW('consecutive', (P.consBase || 6000));
       if (wc > 0) {
