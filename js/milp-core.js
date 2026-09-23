@@ -797,11 +797,14 @@
    * 見つけられなかった場合、中身が全部0の「空の解」が返ることがあり、
    * そのまま採用すると全員が1日も出勤しないシフトになってしまう。
    */
-  function solutionIsValid(sol, parts, budgets) {
+  // allowEmpty: 出勤0件の答えも正しい答えとして受け入れる（コンプラの段だけで使う。
+  // 6連勤の罰だけを最小にすると「誰も出勤しない」が最適になるため）
+  function solutionIsValid(sol, parts, budgets, allowEmpty) {
     if (!sol || !sol.Columns) return false;
     // 出勤が1つも無い解は、解けなかった印とみなす
-    let anyWork = false;
+    let anyWork = !!allowEmpty;
     for (const name in sol.Columns) {
+      if (anyWork) break;
       if (name.charAt(0) === 'x' && sol.Columns[name].Primal > 0.5) { anyWork = true; break; }
     }
     if (!anyWork) return false;

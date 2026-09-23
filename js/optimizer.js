@@ -3459,6 +3459,17 @@ function scoreWorsened(a, b) {
   if (a.soft > b.soft) out.push({ key: 'soft', from: b.soft, to: a.soft });
   return out;
 }
+// 6連勤以上（コンプラ違反）が「新しくできた・伸びた・つながった」連勤の一覧。
+// 回数だけ見ると、6連勤を7連勤に伸ばす変更や、2本をつなぐ変更（回数は減る）を
+// 見逃すので、連勤ごとに比べる。手直し前の同じ人の6連勤以上と日が重なり、
+// その長さ以下なら（縮めた・変わらない）悪化とはしない。
+function compWorsened(beforeVs, afterVs) {
+  const isC = v => v && v.type === 'consecutive' && v.compliance;
+  const prev = (beforeVs || []).filter(isC);
+  return (afterVs || []).filter(isC).filter(v => !prev.some(p => p.staffId === v.staffId
+    && p.from <= v.to && v.from <= p.to && v.len <= p.len));
+}
+
 // 順番を付ける必要がある所（4通りから選ぶ、候補を並べる）の並べ方。小さいほど良い。
 //   ① 6連勤以上の回数 ② 人員不足 ③ 🚨の件数（連勤は回数） ④ 連勤の超過日数 ⑤ 🟡の件数
 function scoreCompare(a, b) {
@@ -4225,13 +4236,32 @@ function runAIDiagnosis() {
       });
     }
 
-    // 連勤超過
-    if (cnt['consecutive']) {
+    // 6連勤以上（コンプラ違反）は、連勤超過と分けて一番重いものとして出す
+    const compV = violations.filter(v => v.type === 'consecutive' && v.compliance);
+    if (compV.length) {
+      const who = compV.map(v => {
+        const s = staff.find(m => m.id === v.staffId);
+        return s ? `${s.name} ${v.from >= 1 ? v.from + '日' : '前月'}〜${v.to}日（${v.len}連勤）` : '';
+      }).filter(Boolean).join('、');
+      results.push({
+        level: 'error',
+        title: `⛔ コンプラ違反（6連勤以上） ${compV.length} 件`,
+        detail: `6連勤以上はコンプライアンス違反です（5連勤まで可・連勤上限の設定とは関係ありません）。\n対象: ${who}`,
+        suggestion: '連勤の途中に休みを入れて、必ず直してください。連勤の上限を上げても消えません。',
+      });
+    }
+    // 連勤超過（6連勤以上を除く）
+    const consOnly = violations.filter(v => v.type === 'consecutive' && !v.compliance);
+    if (consOnly.length) {
+      const who = consOnly.map(v => {
+        const s = staff.find(m => m.id === v.staffId);
+        return s ? `${s.name} ${v.from >= 1 ? v.from + '日' : '前月'}〜${v.to}日（${v.len}連勤）` : '';
+      }).filter(Boolean).join('、');
       results.push({
         level: 'warning',
-        title: `連勤超過 ${cnt['consecutive']} 件`,
+        title: `連勤超過 ${consOnly.length} 件`,
         detail: `設定上限（${AppState.settings.maxConsecutive}日）を超える連続勤務が残存しています。\n`
-              + `対象: ${whoWhen('consecutive')}`,
+              + `対象: ${who}`,
         suggestion: '上の「🔧 具体的な直し方を探す」を試してください。'
                   + '消せない場合は、希望休の置き方が原因のことが多いので、生成前チェックの指摘をご確認ください。',
       });

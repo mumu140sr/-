@@ -301,7 +301,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
           <thead><tr><th class="nw">項目</th><th>意味と決め方</th></tr></thead>
           <tbody>
             <tr><td class="nw"><b>対象年月</b></td><td>作りたい月。<b>毎月ここだけ変えます。</b>変更時に前月末の連勤を取り込むか聞かれます。</td></tr>
-            <tr><td class="nw"><b>連勤上限</b></td><td>何日続けて出勤してよいか。<b>4</b>にすると5連勤以上が禁止になります。</td></tr>
+            <tr><td class="nw"><b>連勤上限</b></td><td>何日続けて出勤してよいか。<b>4</b>にすると5連勤以上が禁止になります。<br><b>⛔ 6連勤以上は、この設定に関係なくコンプライアンス違反</b>として扱います（5連勤まで可）。上限を6以上にしても6連勤以上は違反と表示され、自動生成でも避けます。前月末からの連勤と半休の日も出勤に数えます。</td></tr>
             <tr><td class="nw"><b>遅→早の禁止</b></td><td>遅番の翌日に早番を入れないルール。ONを推奨します。</td></tr>
             <tr><td class="nw"><b>単発休みのペナルティ</b></td><td>出勤に挟まれた1日だけの休みを避けます。ONを推奨します。</td></tr>
             <tr><td class="nw"><b>連休の目安回数</b></td><td>全員に月何回2連休を入れたいか。<b>0＝指定なし</b>。個人設定があればそちらが優先されます。</td></tr>
@@ -370,7 +370,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <div class="tw"><table>
           <thead><tr><th class="nw">列</th><th>意味</th></tr></thead>
           <tbody>
-            <tr><td class="nw"><b>部門</b></td><td><b>社員</b>／<b>キャスト</b>。キャストは連勤やリズム系のルールが免除されます（部分勤務では自然に起きるため）。</td></tr>
+            <tr><td class="nw"><b>部門</b></td><td><b>社員</b>／<b>キャスト</b>。キャストはリズム系のルールが免除されます（部分勤務では自然に起きるため）。<b>連勤と6連勤以上（コンプライアンス違反）はキャストにも適用</b>されます。</td></tr>
             <tr><td class="nw"><b>役職</b></td><td>副店長／チーフ／リーダー／スタッフ。<b>副店長が2人以上いる場合、毎日必ず1人は出勤</b>するよう組まれます。</td></tr>
             <tr><td class="nw"><b>担当シフト</b></td><td><b>最重要。</b>この人が入れるシフトすべてにチェック。ここに無いシフトは絶対に割り当てられません。</td></tr>
             <tr><td class="nw"><b>スキル</b></td><td>下の「スキル設定」で登録した資格・技能。「早番に営業できる人が最低2人」のような条件に使います。</td></tr>
@@ -378,7 +378,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
             <tr><td class="nw"><b>有給</b></td><td>その月に消化させたい有給日数。指定すると自動で <span class="k">有</span> を配置します。</td></tr>
             <tr><td class="nw"><b>希望（早可/遅可）</b></td><td>本人が入れる時間帯。<b>片方のチェックを外すと、その時間帯を避けて組みます。</b></td></tr>
             <tr><td class="nw"><b>早遅バランス</b></td><td>出勤日のうち早番と遅番の割合。<b>指定なし（OFF）</b>を選ぶとその人は判定しません。</td></tr>
-            <tr><td class="nw"><b>連勤上限</b></td><td>この人だけの上限。空欄なら①の全体設定に従います。</td></tr>
+            <tr><td class="nw"><b>連勤上限</b></td><td>この人だけの上限。空欄なら①の全体設定に従います。6以上にしても、6連勤以上はコンプライアンス違反として扱います。</td></tr>
             <tr><td class="nw"><b>遅→早は連休必須</b></td><td>遅番から早番へ移るとき、休み1日ではなく2連休を挟みます。</td></tr>
             <tr><td class="nw"><b>土日休み希望</b></td><td>なるべく土日を休みにします。</td></tr>
             <tr><td class="nw"><b>休み方</b></td><td>休みをまとめる（連休）か、こまめに散らすか。</td></tr>

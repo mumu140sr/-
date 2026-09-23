@@ -1645,6 +1645,7 @@ function setupDragAndDrop() {
       const sid2 = td.dataset.sid,         d2 = parseInt(td.dataset.day);
       const v1 = (AppState.shifts[sid1] || {})[d1] || '';
       const v2 = (AppState.shifts[sid2] || {})[d2] || '';
+      const beforeEdit = JSON.parse(JSON.stringify(AppState.shifts));   // 警告の比べる元
       if (!AppState.shifts[sid1]) AppState.shifts[sid1] = {};
       if (!AppState.shifts[sid2]) AppState.shifts[sid2] = {};
       AppState.shifts[sid1][d1] = v2;
@@ -1657,7 +1658,7 @@ function setupDragAndDrop() {
       if (f2 != null) AppState.fixedShifts[sid1][d1] = f2; else delete AppState.fixedShifts[sid1][d1];
       if (f1 != null) AppState.fixedShifts[sid2][d2] = f1; else delete AppState.fixedShifts[sid2][d2];
       dragSource = null;
-      refreshAfterManualEdit('シフトを交換しました');
+      refreshAfterManualEdit('シフトを交換しました', beforeEdit);
     });
   });
 }
@@ -1741,6 +1742,7 @@ function setupManualEdit() {
     const sid      = editingCell.dataset.sid;
     const d        = parseInt(editingCell.dataset.day);
     const newShift = btn.dataset.shift;
+    const beforeEdit = JSON.parse(JSON.stringify(AppState.shifts));   // 警告の比べる元
     if (!AppState.shifts[sid]) AppState.shifts[sid] = {};
     AppState.shifts[sid][d] = newShift;
     // 手動編集は fixedShifts にも保存 → 再最適化でも固定される
@@ -1754,7 +1756,7 @@ function setupManualEdit() {
     modal.classList.remove('show');
     editingCell = null;
     const fixedMark = newShift ? ' 🔒' : '';
-    refreshAfterManualEdit(`${staffName} ${d}日 →「${newShift || '空'}」に変更${fixedMark}`);
+    refreshAfterManualEdit(`${staffName} ${d}日 →「${newShift || '空'}」に変更${fixedMark}`, beforeEdit);
   });
 
   // キャンセル
@@ -1850,18 +1852,17 @@ function updateHistoryButtons() {
 // 手で直した後の数え直し。悪くなったときの警告は、呼び出し側の「交換しました」
 // などの知らせと1つにまとめて出す（別々に出すと、後の知らせで警告が上書きされて
 // 見えなかった）。doneMsg を渡すとまとめて表示し、渡さなければ警告だけを出す。
-function refreshAfterManualEdit(doneMsg) {
-  const prevV = AppState.violations || [];
+// beforeShifts: 手直しの直前の表。これをいまの設定で数え直して比べる。
+// 保存されていた一覧や、設定を変える前の一覧と比べると、誤って警告が出ていた。
+function refreshAfterManualEdit(doneMsg, beforeShifts) {
+  const prevV = beforeShifts ? checkViolations(beforeShifts) : (AppState.violations || []);
   const prevSc = scoreViolations(prevV);
   AppState.violations = checkViolations(AppState.shifts);
   const nowSc = scoreViolations(AppState.violations);
   const warns = [];
   // 6連勤以上（コンプラ違反）が新しくできた、または伸びたときだけ、誰の何日かを出す。
   // 手直し前の同じ人の6連勤以上と日が重なり、その長さ以下なら（縮めた・変わらない）出さない。
-  const prevComp = prevV.filter(v => v.type === 'consecutive' && v.compliance);
-  const worseComp = (v) => !prevComp.some(p => p.staffId === v.staffId
-    && p.from <= v.to && v.from <= p.to && v.len <= p.len);
-  AppState.violations.filter(v => v.type === 'consecutive' && v.compliance && worseComp(v)).forEach(v => {
+  compWorsened(prevV, AppState.violations).forEach(v => {
     const nm = (AppState.staff.find(s => s.id === v.staffId) || {}).name || '';
     warns.push(`⛔ コンプラ違反：${nm}さん ${v.from >= 1 ? v.from + '日' : '前月'}〜${v.to}日が${v.len}連勤になりました`);
   });
@@ -2366,10 +2367,10 @@ async function trySurplusChange(apply, opts) {
   AppState.violations = checkViolations(AppState.shifts);
   const after = AppState.violations.length;
   const aSc = scoreViolations(AppState.violations);
-  const sd = _scoreDiff(bSc, aSc);
+  const sd = _scoreDiff(bSc, aSc, compWorsened(beforeV, AppState.violations).length > 0);
   const words = _diffWords(sd);
-  // 6連勤以上（コンプラ違反）が増える変更は、確認せずに止める
-  if (aSc.comp > bSc.comp) {
+  // 6連勤以上（コンプラ違反）ができる・伸びる・つながる変更は、確認せずに止める
+  if (sd.compUp) {
     restore();
     return { ok: false, blocked: true, before, after, sd,
              message: `⛔ 6連勤以上（コンプラ違反）になるため取り消しました（${words}）` };
@@ -2499,7 +2500,7 @@ function showSurplusResolveModal() {
       dailyC: JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
     };
     const before = checkViolations(AppState.shifts).length;
-    const beforeSc = scoreViolations(checkViolations(AppState.shifts));
+    const beforeV0 = checkViolations(AppState.shifts);
     const restore = () => {
       AppState.shifts = JSON.parse(JSON.stringify(bk.shifts));
       AppState.dailyRequirements = JSON.parse(JSON.stringify(bk.daily));
@@ -2507,8 +2508,8 @@ function showSurplusResolveModal() {
     };
     const out = [];
     // 件数(n)は表示用、sd は比べ方（scoreBetter / scoreCompare。並べ替え・良し悪しに使う）
-    const measure = (fn) => { let n; try { fn(); n = scoreViolations(checkViolations(AppState.shifts)); } catch (e) { n = null; } restore(); return n; };
-    const entry = (o, sc) => Object.assign(o, { delta: sc.count - before, before, after: sc.count, sd: _scoreDiff(beforeSc, sc) });
+    const measure = (fn) => { let n; try { fn(); n = checkViolations(AppState.shifts); } catch (e) { n = null; } restore(); return n; };
+    const entry = (o, aV) => Object.assign(o, { delta: aV.length - before, before, after: aV.length, sd: _diffOfLists(beforeV0, aV) });
     cells.forEach(c => {
       const st = AppState.staff.find(x => x.id === c.id); if (!st) return;
       // ㋐ その人のその日を有給にする
@@ -2597,7 +2598,7 @@ function showSurplusResolveModal() {
     const b = planRows.base;
     const rows = planRows.rows;
     const tag = (x) => {
-      const d = (x.sc && b.sc) ? _scoreDiff(b.sc, x.sc) : null;
+      const d = (x.sc && b.sc) ? _scoreDiff(b.sc, x.sc, x.compUp) : null;
       const sg = _diffSign(d);
       return `<b style="color:var(${sg !== null && sg <= 0 ? '--success' : '--danger'})">${_diffWords(d)}</b>`;
     };
@@ -2610,7 +2611,7 @@ function showSurplusResolveModal() {
           <b>${escapeHtml(x.key)}</b> で ${escapeHtml(x.tutor)}さんのそばに
           <span class="hint">（${x.kind === 'work' ? 'その日の必要人数+1' : '人数は増やさない'}）</span>　→ ${tag(x)}
           <span class="hint">・余 ${x.sur}コマ</span></span>
-        ${(x.sc && b.sc && x.sc.comp > b.sc.comp)
+        ${(x.compUp || (x.sc && b.sc && x.sc.comp > b.sc.comp))
           ? '<span class="hint">⛔ 6連勤以上になるため選べません</span>'
           : `<button class="btn ${i === 0 ? 'btn-primary' : ''}" data-plan="${i}">この通りに作り直す</button>`}
       </div>`).join('')}
@@ -2770,7 +2771,7 @@ function showSurplusResolveModal() {
       apply();
       const aV = checkViolations(AppState.shifts);
       after = aV.length;
-      sd = _scoreDiff(scoreViolations(bV), scoreViolations(aV));
+      sd = _diffOfLists(bV, aV);
     } finally {
       AppState.shifts = bk.shifts;
       AppState.dailyRequirements = bk.daily;
@@ -2784,7 +2785,7 @@ function showSurplusResolveModal() {
   const previewLine = (r) => {
     if (!r || !r.sd) return '';
     const sg = _diffSign(r.sd);
-    const comp = r.sd.a.comp > r.sd.b.comp;
+    const comp = r.sd.compUp;
     const icon = comp ? '⛔' : sg <= 0 ? '✅' : scoreWorsened(r.sd.a, r.sd.b).some(x => x.key !== 'soft') ? '🚨' : '⚠️';
     const col = comp || icon === '🚨' ? 'var(--danger)' : icon === '⚠️' ? '#b7791f' : 'var(--success)';
     return `<span style="color:${col};font-weight:700">${icon} ${escapeHtml(_diffWords(r.sd))}</span>`
@@ -2898,7 +2899,7 @@ function showSurplusResolveModal() {
     }
     // 6連勤以上になる日は出さない。並べ方は scoreCompare（① 6連勤以上 ② 人員不足
     // ③ 🚨 ④ 連勤の超過日数 ⑤ 🟡）、同じなら指導役がすでにいる日、次に余を消せる日
-    for (let i = rows.length - 1; i >= 0; i--) if (rows[i].sd && rows[i].sd.a.comp > rows[i].sd.b.comp) rows.splice(i, 1);
+    for (let i = rows.length - 1; i >= 0; i--) if (rows[i].sd && rows[i].sd.compUp) rows.splice(i, 1);
     rows.sort((x, y) => _diffCmp(x.sd, y.sd)
                      || (x.mode === 'already' ? 0 : 1) - (y.mode === 'already' ? 0 : 1)
                      || y.wasSurplus - x.wasSurplus || x.d - y.d);
@@ -3007,7 +3008,7 @@ function showSurplusResolveModal() {
     const bandOf2 = (k) => isEarlyCategory(k) ? 'e' : (isLate(k) ? 'l' : null);
     const trainKeys = (AppState.shiftTypes || []).filter(t => t.isTraining).map(t => t.key);
     const base = checkViolations(AppState.shifts).length;
-    const baseSc = scoreViolations(checkViolations(AppState.shifts));
+    const baseV = checkViolations(AppState.shifts);
     const bkS = JSON.parse(JSON.stringify(AppState.shifts));
     const bkD = JSON.parse(JSON.stringify(AppState.dailyRequirements || {}));
     const bkC = JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {}));
@@ -3040,18 +3041,18 @@ function showSurplusResolveModal() {
           store[k] = store[k] || {};
           store[k][d] = (store[k][d] != null ? store[k][d] : b0) + 1;
           AppState.shifts[L.id][d] = k;
-          const sc = scoreViolations(checkViolations(AppState.shifts));
+          const aV = checkViolations(AppState.shifts);
           undo();
-          out.push({ kind: 'work', id: L.id, name: L.name, day: d, key: k, tutor: T.name, cast, guess: sc.count - base, sd: _scoreDiff(baseSc, sc) });
+          out.push({ kind: 'work', id: L.id, name: L.name, day: d, key: k, tutor: T.name, cast, guess: aV.length - base, sd: _diffOfLists(baseV, aV) });
         });
         // ㋑ 研修で入れる
         trainKeys.forEach(tk => {
           const bd = bandOf2(tk); if (!bd) return;
           const T = tutorAt(bd); if (!T) return;
           AppState.shifts[L.id][d] = tk;
-          const sc = scoreViolations(checkViolations(AppState.shifts));
+          const aV = checkViolations(AppState.shifts);
           undo();
-          out.push({ kind: 'train', id: L.id, name: L.name, day: d, key: tk, tutor: T.name, cast, guess: sc.count - base, sd: _scoreDiff(baseSc, sc) });
+          out.push({ kind: 'train', id: L.id, name: L.name, day: d, key: tk, tutor: T.name, cast, guess: aV.length - base, sd: _diffOfLists(baseV, aV) });
         });
       }
     });
@@ -3129,11 +3130,12 @@ function showSurplusResolveModal() {
           .catch(() => { planProg.done++; drawPlanProgress(); return null; })));
       const got = rs.filter(Boolean);
       const bRow = got.find(x => x.j.kind === 'base');
-      if (bRow) planRows = { base: { n: bRow.r.violations.length, sc: scoreViolations(bRow.r.violations), sur: countSurIn(bRow.r.shifts) }, rows: [] };
+      if (bRow) planRows = { base: { n: bRow.r.violations.length, sc: scoreViolations(bRow.r.violations), v: bRow.r.violations, sur: countSurIn(bRow.r.shifts) }, rows: [] };
       if (!planRows) { const v0 = checkViolations(AppState.shifts);
-        planRows = { base: { n: v0.length, sc: scoreViolations(v0), sur: listSurplusCells().length }, rows: [] }; }
+        planRows = { base: { n: v0.length, sc: scoreViolations(v0), v: v0, sur: listSurplusCells().length }, rows: [] }; }
       got.filter(x => x.j.kind === 'cand').forEach(x =>
-        planRows.rows.push(Object.assign({}, x.j.c, { n: x.r.violations.length, sc: scoreViolations(x.r.violations), sur: countSurIn(x.r.shifts) })));
+        planRows.rows.push(Object.assign({}, x.j.c, { n: x.r.violations.length, sc: scoreViolations(x.r.violations),
+          compUp: compWorsened(planRows.base.v, x.r.violations).length > 0, sur: countSurIn(x.r.shifts) })));
       planRows.rows.sort((a, b2) => scoreCompare(a.sc, b2.sc) || (a.sur - b2.sur));
       planRows.left = planQueue.length;
       say(planRows.rows.length ? '✅ 比べ終わりました。下の一覧からお選びください。' : '組み直せる候補がありませんでした。', true);
@@ -3193,7 +3195,8 @@ function showSurplusResolveModal() {
                       fixed: JSON.parse(JSON.stringify(AppState.fixedShifts)),
                       daily: JSON.parse(JSON.stringify(AppState.dailyRequirements || {})),
                       dailyC: JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})) };
-      const bSc = scoreViolations(checkViolations(AppState.shifts));
+      const bV0 = checkViolations(AppState.shifts);
+      const bSc = scoreViolations(bV0);
       AppState.fixedShifts[x.id] = AppState.fixedShifts[x.id] || {};
       AppState.fixedShifts[x.id][x.day] = x.key;
       if (x.kind === 'work') {   // その日の必要人数を1人増やす
@@ -3207,7 +3210,7 @@ function showSurplusResolveModal() {
         await optimizeScheduleMILP(null, { fastMode: true });
         AppState.violations = checkViolations(AppState.shifts);
         const aSc = scoreViolations(AppState.violations);
-        if (aSc.comp > bSc.comp) {
+        if (compWorsened(bV0, AppState.violations).length) {
           AppState.shifts = bkAll.shifts; AppState.fixedShifts = bkAll.fixed;
           AppState.dailyRequirements = bkAll.daily; AppState.dailyRequirementsCast = bkAll.dailyC;
           AppState.violations = checkViolations(AppState.shifts);
@@ -3872,8 +3875,15 @@ function _trainingCandidates(learnerId, band, tutorIds) {
 // 「入れてみた前後」を比べる共通の物差し（optimizer.js の scoreViolations と同じ）。
 // 良し悪しは scoreBetter（どの🚨も増えず、どれかが減る）、並べ替えは scoreCompare
 // （① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 🟡）。表示は件数と超過日数を分けて出す。
-function _scoreDiff(before, after) {
-  return { b: before, a: after, dn: after.count - before.count, before: before.count, after: after.count };
+// compUp: 6連勤以上が新しくできた・伸びた・つながったか（compWorsened）。回数だけで
+// 判定すると、6連勤を7連勤に伸ばす変更などを見逃すため、分かるときは渡す。
+function _scoreDiff(before, after, compUp) {
+  return { b: before, a: after, dn: after.count - before.count, before: before.count, after: after.count,
+           compUp: !!compUp || after.comp > before.comp };
+}
+// 違反の一覧どうしから _scoreDiff を作る（⛔の判定まで含めて）
+function _diffOfLists(bV, aV) {
+  return _scoreDiff(scoreViolations(bV), scoreViolations(aV), compWorsened(bV, aV).length > 0);
 }
 // 良くなる: -1 / 変わらない: 0 / 悪くなる: 1 / 減るものと増えるものがある: 2
 function _diffSign(d) {
@@ -3898,7 +3908,7 @@ function _diffWords(d) {
   if (a.over !== b.over) ch.push(`連勤の超過 ${b.over}→${a.over}日`);
   if (a.soft !== b.soft) ch.push(`🟡 ${b.soft}→${a.soft}件`);
   const sg = _diffSign(d);
-  const head = a.comp > b.comp ? '⛔ コンプラ違反（6連勤以上）になります'
+  const head = d.compUp ? '⛔ コンプラ違反（6連勤以上）になります・伸びます'
              : sg < 0 ? '良くなります' : sg === 0 ? '変わりません'
              : sg === 1 ? '悪くなります' : '減るものと増えるものがあります';
   // 🚨の種類が入れ替わっただけ（件数は同じ）のときも分かるように、増えた種類を出す
@@ -3909,7 +3919,7 @@ function _diffWords(d) {
 }
 
 function _spMark(r) {
-  if (r.sd && r.sd.a.comp > r.sd.b.comp) return '⛔';   // 6連勤以上になる（コンプラ違反）
+  if (r.sd && r.sd.compUp) return '⛔';   // 6連勤以上になる・伸びる（コンプラ違反）
   const sg = _diffSign(r.sd);
   if (sg === 0) return '⭐';
   if (sg > 0)   return '⚠️';
@@ -3926,7 +3936,7 @@ function _spDeltaTag(r) {
 function _measureSurplusPick(r) {
   if (typeof checkViolations !== 'function' || !AppState.shifts) return null;
   try {
-    const base = scoreViolations(checkViolations(AppState.shifts));
+    const baseV = checkViolations(AppState.shifts);
     const row  = AppState.shifts[r.learnerId];
     if (!row) return null;
     const store = r.cast ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
@@ -3934,10 +3944,10 @@ function _measureSurplusPick(r) {
     store[r.k] = store[r.k] || {};
     const hadShift = row[r.d], hadReq = store[r.k][r.d];
     row[r.d] = r.k; store[r.k][r.d] = r.to;
-    const now = scoreViolations(checkViolations(AppState.shifts));
+    const nowV = checkViolations(AppState.shifts);
     row[r.d] = hadShift;
     if (hadReq === undefined) delete store[r.k][r.d]; else store[r.k][r.d] = hadReq;
-    r.sd = _scoreDiff(base, now);
+    r.sd = _diffOfLists(baseV, nowV);
     return r.sd.dn;
   } catch (e) { r.sd = null; return null; }
 }
@@ -4319,6 +4329,19 @@ function computeNextStep() {
   if (!vios.length) {
     return S('🎉 完成です', 'エラーはありません。「📊 シフト表」から Excel や CSV に書き出せます。',
              { ok: true, goTab: 'result', btn: 'シフト表をひらく' });
+  }
+  // 6連勤以上（コンプラ違反）が残っているときは、ほかより先にそれを直してもらう。
+  // 設定を緩めても消えないので「このまま運用」とは言わない。
+  const comps = vios.filter(v => v.type === 'consecutive' && v.compliance);
+  if (comps.length) {
+    const nm = (id) => (AppState.staff.find(s => s.id === id) || {}).name || '';
+    const lines = comps.slice(0, 5).map(v => `・${nm(v.staffId)}さん ${v.from >= 1 ? v.from + '日' : '前月'}〜${v.to}日（${v.len}連勤）`);
+    return S(`⛔ コンプラ違反（6連勤以上）が ${comps.length}件 あります。先に直してください`,
+             lines.join('\n') + (comps.length > 5 ? `\n・ほか ${comps.length - 5}件` : '')
+             + '\n\n連勤の途中に休みを入れてください（ほかの人と休みを入れ替える、または作り直す）。'
+             + '連勤の上限を上げても消えません。',
+             { danger: true, goTab: 'result', btn: 'シフト表をひらく',
+               why: '6連勤以上はコンプライアンス違反のため、このままでは使えません。' });
   }
   const plans = (typeof buildRelaxPlans === 'function') ? buildRelaxPlans(vios) : [];
   const best = plans.find(p => p.measured && p.measured.gain > 0 && !p.manual);

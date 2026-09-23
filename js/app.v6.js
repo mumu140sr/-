@@ -280,9 +280,11 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
     // じっくりモードで改善余地があるのは「早期停止(gap許容)を使った＝21人以上の部門」のときだけ。
     // 20人以下は既に上限10分・gap=0で解いているため、再計算しても結果は変わらない。
     const canRetry = !wasDeep && usedGap;
-    box.innerHTML = `⏱ <b>時間切れで打ち切りました（${elapsed}秒）</b>：残り ${vioCount}件は
-      <b>「避けられない」とは限りません</b>。計算時間（1部門あたり最大10分）が足りず、
-      途中までの best 解を表示しています。<br>
+    // 「確認済み」は、すべての段を一から解いて最後まで計算できたときだけ出す。
+    // それ以外（時間切れの段・近くだけを探し直した段がある）は「時間内でいちばん良い答え」。
+    box.innerHTML = `⏱ <b>時間内でいちばん良い答えです（${elapsed}秒）</b>：残り ${vioCount}件は
+      <b>「避けられない」とは限りません</b>。最後まで計算しきれなかった段があるため、
+      これが最良だとは確認できていません。<br>
       ${canRetry
         ? '<button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">⏳ 妥協なしで再計算（早期停止を無効・最大10分）</button>'
         : '上限いっぱいまで計算しても解ききれませんでした。⑤自動生成の「🔍 実現性チェック」で人手の不足を確認し、有給日数・日別必要人数・公休数のいずれかを緩めてください。'}`;
@@ -383,7 +385,7 @@ function setupGeneratePanel() {
       const cutOff = (res.allOptimal === false);   // 時間切れで打ち切られた＝最良解とは限らない
       $text.textContent = `完了！ 違反 ${res.violations.length}件（${elapsed}秒）` +
                           (opts.fastMode ? '｜⚡ 速い生成（証明なし）'
-                                         : cutOff ? '｜⏱ 時間切れで打ち切り（まだ改善余地あり）'
+                                         : cutOff ? '｜⏱ 時間内でいちばん良い答え（最良とは確認できていません）'
                                                   : '｜✅ これ以上良い組み合わせは無いと確認済み');
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
       $report.style.display = 'block';
@@ -706,7 +708,7 @@ function renderReport(result) {
     const detailLines = escapeHtml(d.detail).replace(/\n/g, '<br>');
     diagHtml += `
       <div class="diag-item" style="background:${c.bg};border-left:4px solid ${c.border}">
-        <div class="diag-title" style="color:${c.title}">${diagIcons[d.level]} ${escapeHtml(d.title)}</div>
+        <div class="diag-title" style="color:${c.title}">${/^⛔/.test(d.title || '') ? '' : diagIcons[d.level] + ' '}${escapeHtml(d.title)}</div>
         <div class="diag-detail" style="color:${c.body}">${detailLines}</div>
         ${d.suggestion ? `<div class="diag-suggestion">💡 ${escapeHtml(d.suggestion)}</div>` : ''}
       </div>`;

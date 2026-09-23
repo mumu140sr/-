@@ -204,11 +204,36 @@ self.addEventListener('message', async (e) => {
                `【${g.label || g.key}】第${ti + 1}段「${t.label}」を0に近づけています…`);
           const t0 = Date.now();
           const topts = tierOpts(t);
+          // コンプラ（6連勤以上）の段: 目的が6連勤の罰だけなので「誰も出勤しない」答えが最適に
+          // なる。これを「解けなかった」として捨てていたため、固定の出勤マスが無い部門では
+          // 上限が記録されず、6連勤以上が防げていなかった。出勤0件の答えも受け入れて、
+          // 件数だけを次の段からの上限として残す。答えそのものは出発点にしない（空の表から
+          // 近くを探しても意味がないため）。
+          if (t.types.length === 1 && t.types[0] === 'comp-cons') {
+            const sC = solver.solve(MILP.composeLP(m.parts, { types: t.types, budgets }),
+                                    Object.assign({}, topts, { time_limit: Math.max(3, cap) }));
+            const okC = MILP.solutionIsValid(sC, m.parts, budgets, true);
+            if (okC) {
+              bIdx[ti] = budgets.length;
+              budgets.push({ names: MILP.slackNames(m.parts, t.types), max: MILP.slackTotal(sC, m.parts, t.types) });
+              (t.types || []).forEach(ty => protect.push(ty));
+            }
+            if (!okC || String(sC && sC.Status) !== 'Optimal') tierProven = false;
+            if (msg.trace) self.postMessage({ type: 'trace', ti, label: t.label, cap,
+              sec: Math.round((Date.now() - t0) / 1000), status: String(sC && sC.Status), okStrict: okC,
+              prev: null, got: okC ? MILP.slackTotal(sC, m.parts, t.types) : null });
+            remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
+            continue;
+          }
           // ① まず「前の段は上限を超えない」という条件付きで解く。速くて確実だが、
           //    条件が積み上がると、成立する組合せを一から見つけられないことがある。
           let s2 = solver.solve(MILP.composeLP(m.parts, { types: t.types, budgets }),
                                 Object.assign({}, topts, { time_limit: Math.max(3, Math.floor(cap * 0.6)) }));
           let okStrict = MILP.solutionIsValid(s2, m.parts, budgets);
+          // 「最後まで計算できた」と言えるのは、この段を条件付きで一から解いて Optimal に
+          // なったときだけ。近くだけを探し直した答え（近傍探索）の Optimal は「近くの中で
+          // 一番良い」という意味で全体の最良ではない。前の答えを使い回したときも同じ。
+          let provenHere = okStrict && String(s2.Status) === 'Optimal';
           if (!okStrict && sol) {
             // ② 見つからなければ「近傍探索」に切り替える。いまの答えから
             //    決まった数のマスまでしか変えない、という条件を足して解く。
@@ -217,7 +242,7 @@ self.addEventListener('message', async (e) => {
               MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(sol), k: NBK } }),
               Object.assign({}, topts, { time_limit: Math.max(3, cap - Math.round((Date.now() - t0) / 1000)) }));
             // 近傍探索でも「前の段を悪化させていないか」は必ず確認する
-            if (MILP.solutionIsValid(s3, m.parts, budgets)) { s2 = s3; okStrict = true; }
+            if (MILP.solutionIsValid(s3, m.parts, budgets)) { s2 = s3; okStrict = true; provenHere = false; }
           } else if (okStrict && String(s2.Status) !== 'Optimal' && sol) {
             // ②' 時間切れで中途半端な答えしか出なかった場合、残り時間を捨てずに
             //     近傍探索でもう一度探し、件数が少ない方を採用する。
@@ -227,21 +252,21 @@ self.addEventListener('message', async (e) => {
                 MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(sol), k: NBK } }),
                 Object.assign({}, topts, { time_limit: rest }));
               if (MILP.solutionIsValid(s3, m.parts, budgets) &&
-                  MILP.slackTotal(s3, m.parts, t.types) < MILP.slackTotal(s2, m.parts, t.types)) s2 = s3;
+                  MILP.slackTotal(s3, m.parts, t.types) < MILP.slackTotal(s2, m.parts, t.types)) { s2 = s3; provenHere = false; }
             }
           }
           // 段の結果が、いま持っている答えより悪ければ、いまの答えを使う。
           // 実測で、早遅バランスの段が、前の答えでは0なのに 25・81 を返していた。
           //     いまの答えは前の段までの上限をすべて守っているので、必ず使える。
           if (!msg.noGuard && okStrict && sol &&
-              MILP.slackTotal(s2, m.parts, t.types) > MILP.slackTotal(sol, m.parts, t.types)) s2 = sol;
+              MILP.slackTotal(s2, m.parts, t.types) > MILP.slackTotal(sol, m.parts, t.types)) { s2 = sol; provenHere = false; }
           // 検証用の記録（画面からは使わない）
           if (msg.trace) self.postMessage({ type: 'trace', ti, label: t.label, cap,
             sec: Math.round((Date.now() - t0) / 1000), status: String(s2 && s2.Status), okStrict,
             prev: sol ? MILP.slackTotal(sol, m.parts, t.types) : null,
             got: okStrict ? MILP.slackTotal(s2, m.parts, t.types) : null });
           remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
-          if (String(s2 && s2.Status) !== 'Optimal') tierProven = false;
+          if (!provenHere) tierProven = false;
           // どちらの方式でも前の段を守れなかった場合は、この段の結果は採用しない。
           // ただし後ろの段は打ち切らない（別の段なら解けることがあるため）。
           if (!okStrict) {
@@ -352,6 +377,8 @@ self.addEventListener('message', async (e) => {
     if (tiered) {
       const byType = {};
       violations.forEach(v => { byType[v.type] = (byType[v.type] || 0) + 1; });
+      // コンプラの段の中身（comp-cons）は、検査では「6連勤以上の印が付いた連勤超過」として出る
+      byType['comp-cons'] = violations.filter(v => v.type === 'consecutive' && v.compliance).length;
       TIER_LIST.forEach(t => {
         const n = (t.types || []).reduce((a, ty) => a + (byType[ty] || 0), 0);
         tierLog.push(`${t.label}: ${n}件`);
