@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>シフト自動生成アプリ</title>
+<link rel="stylesheet" href="css/style.css?v=216" />
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<header class="app-header">
+  <div class="title">
+    <button id="btnNavToggle" class="nav-toggle" aria-label="メニュー">☰</button>
+    <span class="brand-logo">📅</span>
+    <h1>シフト自動生成アプリ</h1>
+    <span class="subtitle"></span>
+    <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
+         js の ?v=NNN と揃えて上げること。 -->
+    <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v216</span>
+  </div>
+  <div class="header-actions">
+    <button id="btnTheme" class="btn btn-ghost btn-theme" aria-label="テーマ切替" title="明暗を切り替え">🌙</button>
+    <button id="btnSave" class="btn btn-ghost">💾 保存</button>
+    <button id="btnLoad" class="btn btn-ghost">📂 読込</button>
+    <button id="btnExportData" class="btn btn-ghost" title="設定・希望休・シフト表をファイルに書き出します（バックアップ／別PCへの移行に）">📤 書き出し</button>
+    <button id="btnImportData" class="btn btn-ghost" title="書き出したファイルを読み込みます">📥 取り込み</button>
+    <input type="file" id="fileImportData" accept=".json,application/json" style="display:none" />
+    <button id="btnReset" class="btn btn-ghost">🗑 リセット</button>
+  </div>
+</header>
+
+<div class="app-shell">
+  <nav class="tabs" id="sideNav">
+    <button class="tab active" data-tab="settings"><span class="tab-ico">⚙️</span><span class="tab-txt">基本設定</span></button>
+    <button class="tab" data-tab="roles"><span class="tab-ico">🗂️</span><span class="tab-txt">シフト種別</span></button>
+    <button class="tab" data-tab="staff"><span class="tab-ico">👥</span><span class="tab-txt">スタッフ管理</span></button>
+    <button class="tab" data-tab="calendar"><span class="tab-ico">📅</span><span class="tab-txt">希望休入力</span></button>
+    <button class="tab" data-tab="generate"><span class="tab-ico">🚀</span><span class="tab-txt">自動生成</span></button>
+    <button class="tab" data-tab="result"><span class="tab-ico">📊</span><span class="tab-txt">シフト表</span></button>
+    <a class="tab nav-link" href="manual.html" target="_blank" rel="noopener"
+       title="使い方の手引きを別のタブで開きます"><span class="tab-ico">📖</span><span class="tab-txt">マニュアル</span></a>
+  </nav>
+
+<main class="content">
+
+  <!-- ① 基本設定 -->
+  <section class="tab-panel active" id="panel-settings">
+    <h2>① 基本設定</h2>
+    <div class="card">
+      <div class="form-row">
+        <label>対象年月</label>
+        <input type="month" id="targetMonth" />
+      </div>
+      <div class="form-row">
+        <label>連勤上限（日）</label>
+        <input type="number" id="maxConsecutive" min="2" max="10" value="4" />
+        <span class="hint">この日数を超える連勤を禁止します（例: 4にすると5連勤以上禁止）</span>
+      </div>
+      <div class="form-row">
+        <label>遅→早の禁止</label>
+        <label class="switch"><input type="checkbox" id="forbidLateEarly" checked /><span></span></label>
+        <span class="hint">前日が遅番系、翌日が早番系のパターンを禁止します</span>
+      </div>
+      <div class="form-row">
+        <label>単発休みのペナルティ</label>
+        <label class="switch"><input type="checkbox" id="penaltySingleOff" checked /><span></span></label>
+        <span class="hint">勤務日に挟まれた1日だけの休みを避けます</span>
+      </div>
+      <div class="form-row">
+        <label>段階的に仕上げる</label>
+        <label class="switch"><input type="checkbox" id="tieredOptimize" checked /><span></span></label>
+        <span class="hint">大事なルール（人員→公休→連勤→単発出勤→…）の順に1つずつ0を目指し、達成した分は以後崩しません。OFFにすると全ルールを一度に解きます（従来方式）</span>
+      </div>
+      <div class="form-row">
+        <label>複数パターンを同時に試す</label>
+        <label class="switch"><input type="checkbox" id="parallelSolve" checked /><span></span></label>
+        <span class="hint">解き方の違う計算を最大4通り同時に走らせ、いちばんエラーが少ない結果を採用します。同じ時間でも結果が良く・安定します。OFFにすると従来どおり1通りだけで解きます</span>
+      </div>
+      <div class="form-row">
+        <label>連休の目安回数（月・全体）</label>
+        <input type="number" id="pairRestTarget" min="0" max="10" value="0" style="width:70px" />
+        <span class="hint">全員に月◯回の2連休以上を目安として入れます（0=指定なし。スタッフ個人の設定があればそちらを優先）</span>
+      </div>
+    </div>
+
+    <!-- ルールごとの強弱（ON/OFF） -->
+    <div class="card">
+      <h3 style="cursor:pointer" onclick="toggleRuleLevelsPanel()">🎚️ ルールごとの強弱（ON/OFF） <span id="ruleLevelsToggle">▶ 展開</span></h3>
+      <div id="ruleLevelsPanel" style="display:none">
+        <p class="hint">
+          各ルールを <b>🔴絶対</b>（必ず守る）／<b>🟡できれば</b>（なるべく守る・残ってもOK）／<b>OFF</b>（使わない）で切り替えられます。
+          店舗ごとの運用に合わせてください。<b>人員不足・公休不足・連勤超過・担当外シフト</b>は安全のため固定（変更不可）です。
+          既定のままなら従来と同じ動作です。
+        </p>
+        <div id="ruleLevelsInputs"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>🌟 特別日設定</h3>
+      <div class="form-row">
+        <label>入れ替え日（副店長を遅番固定）</label>
+        <input type="text" id="replacementDays" placeholder="例: 1,15,28" style="width:200px" />
+        <span class="hint">カンマ区切りで日付を入力</span>
+      </div>
+      <div class="form-row">
+        <label>新装日（副店長を早番固定）</label>
+        <input type="text" id="renewalDays" placeholder="例: 10,20" style="width:200px" />
+        <span class="hint">カンマ区切りで日付を入力</span>
+      </div>
+      <div class="form-row">
+        <label>搬入日</label>
+        <input type="text" id="deliveryDays" placeholder="例: 3,17" style="width:200px" />
+        <span class="hint">カンマ区切りで日付を入力（人数のルールは下の「必要人数のルール」で決めます）</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>📐 必要人数のルール</h3>
+      <p class="hint" style="margin-top:0">
+        「入れ替え日は遅番を2人」のように<b>条件で決めておくと、月が変わっても日付が自動で決まります</b>。
+        毎月カレンダーに手入力する必要がなくなり、入れ違いも起きません。<br>
+        特定の日だけ変えたいときは、これまでどおり <b>日別必要人数</b> に直接入れてください（そちらが優先されます）。
+      </p>
+      <div id="reqRuleList"></div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button id="btnAddReqRule" class="btn">＋ ルールを追加</button>
+        <button id="btnReqRulePreset" class="btn">よく使うルールを入れる</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>📖 使い方</h3>
+      <ol class="usage">
+        <li><b>① 基本設定</b>で対象月・連勤上限などを決めます</li>
+        <li><b>② シフト種別</b>でシフト名・色・必要人数を自由に設定します</li>
+        <li><b>③ スタッフ管理</b>で各スタッフの担当シフト・公休数・希望を登録します</li>
+        <li><b>④ 希望休入力</b>で各スタッフの希望休をカレンダーに入力します</li>
+        <li><b>⑤ 自動生成</b>ボタンで最適化を実行します</li>
+        <li><b>⑥ シフト表</b>で結果を確認、ドラッグで手動修正もOKです</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ② シフト種別マスター -->
+  <section class="tab-panel" id="panel-roles">
+    <h2>② シフト種別マスター</h2>
+    <div class="card">
+      <p class="hint">シフトの種類を自由に追加・編集・削除できます。カテゴリ A = 早番系、B = 遅番系（連勤内の時間帯統一ルールで使用）。</p>
+      <div class="toolbar" style="margin-bottom:8px">
+        <button class="btn btn-primary" id="btnAddShiftType">＋ シフト追加</button>
+      </div>
+      <p class="hint" style="margin:0 0 6px">💡 表が画面より広い場合は左右にスクロールできます（「夜勤」列は「研修扱い」の右側）。</p>
+      <div class="table-wrap">
+        <table class="role-table">
+          <thead>
+            <tr>
+              <th>記号</th>
+              <th>名称</th>
+              <th>カテゴリ</th>
+              <th>集計対象</th>
+              <th>研修扱い</th>
+              <th>夜勤</th>
+              <th>色</th>
+              <th>労働時間<br><small>(h/コマ)</small></th>
+              <th>必要人数/日<br><small>(社員)</small></th>
+              <th>必要人数/日<br><small>(キャスト)</small></th>
+              <th>合算<br><small>(社員＋<br>キャスト)</small></th>
+              <th>削除</th>
+            </tr>
+          </thead>
+          <tbody id="roleTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="cursor:pointer" onclick="toggleDailyReqPanel()">📅 日別必要人数（上書き設定） <span id="dailyReqToggle">▶ 展開</span></h3>
+      <div id="dailyReqPanel" style="display:none">
+        <p class="hint">特定の日だけ必要人数を変えたい場合に入力してください。空欄または「-」の日はデフォルト値を使用します。</p>
+        <div id="dailyReqContent"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ③ スタッフ管理 -->
+  <section class="tab-panel" id="panel-staff">
+    <h2>③ スタッフ管理</h2>
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn btn-primary" id="btnAddStaff">＋ スタッフ追加</button>
+        <button class="btn" id="btnCarryOver">🔁 前月末の連勤・シフトを取り込む</button>
+        <span class="hint">今表示中のシフト表の末尾から「前月末連勤日数／前月末シフト」を自動入力します</span>
+      </div>
+      <div class="table-wrap">
+        <table class="staff-table">
+          <thead>
+            <tr>
+              <th>名前</th>
+              <th>部門</th>
+              <th>役職</th>
+              <th>担当シフト</th>
+              <th>スキル</th>
+              <th>公休数<br><small>(月の休み数)</small></th>
+              <th>有給<br><small>(月の有給数)</small></th>
+              <th>希望<br><small>早可/遅可</small></th>
+              <th>早遅バランス<br><small>(割合／のみ＝絶対)</small></th>
+              <th>連勤上限<br><small>(個人・空欄=全体)</small></th>
+              <th>連休上限<br><small>(個人・空欄=全体)</small></th>
+              <th>遅→早は<br><small>連休必須</small></th>
+              <th>土日休み<br><small>希望</small></th>
+              <th>休み方<br><small>連休/分散</small></th>
+              <th>連休回数<br><small>(月・空欄=全体)</small></th>
+              <th>前月末<br>連勤日数<br><small>0=月末は休み</small></th>
+              <th>前月末<br>シフト<br><small>連勤1日以上で選択</small></th>
+              <th>備考</th>
+              <th>削除</th>
+            </tr>
+          </thead>
+          <tbody id="staffTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>🎯 スキル設定</h3>
+      <p class="hint">「営業できる人」などのスキルを登録し、早番／遅番に最低何人必要かを設定できます。登録すると上のスタッフ表に各スキルのチェック欄が表示されます。</p>
+      <div class="toolbar" style="margin-bottom:8px">
+        <button class="btn btn-primary" id="btnAddSkill">＋ スキル追加</button>
+      </div>
+      <div id="skillsList"></div>
+    </div>
+
+    <div class="card">
+      <h3>役職タイプ説明</h3>
+      <ul class="hint-list">
+        <li><b>副店長</b>: 毎日少なくとも1人が出勤します（全員が同じ日に休むことを禁止）。特別日は早責/遅責に固定</li>
+        <li><b>チーフ / リーダー / スタッフ</b>: 担当シフト欄で入れるシフトを直接指定してください</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ④ 希望休入力 -->
+  <section class="tab-panel" id="panel-calendar">
+    <h2>④ 希望休・固定シフト入力</h2>
+    <div class="card">
+      <div id="requestMode" class="calendar-mode">
+        <div class="toolbar" style="flex-wrap:wrap">
+          <span>休系: </span>
+          <button class="chip-btn" data-mark="有">有給</button>
+          <button class="chip-btn" data-mark="休">休</button>
+          <button class="chip-btn" data-mark="半">半休</button>
+          <span style="margin-left:12px">出勤系（固定）: </span>
+          <span id="shiftChipContainer"></span>
+          <button class="chip-btn" data-mark="">クリア</button>
+        </div>
+        <p class="hint" style="margin:8px 0 0">クリックで選択中の記号を入力、ダブルクリックで削除。出勤シフト指定は最適化でロックされます。</p>
+      </div>
+      <div class="table-wrap">
+        <table id="calendarTable" class="calendar-table"></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ⑤ 自動生成 -->
+  <section class="tab-panel" id="panel-generate">
+    <h2>⑤ 自動生成</h2>
+    <div id="nextStepCard"></div>
+    <div class="card" style="text-align:center">
+      <button id="btnWizard" class="btn btn-primary btn-large" style="font-size:16px;padding:14px 28px">🧭 順番に確認して生成する（はじめての方はこちら）</button>
+      <p class="hint" style="margin:8px 0 0">ルール → 必要人数 → 希望の噛み合わせ → 余の使い道 → 生成 の順に、1つずつ確認しながら進みます。</p>
+      <div style="margin-top:10px"><button id="btnCancelGenerate" class="btn btn-large" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button></div>
+    </div>
+    <details class="card" id="advGenerate">
+      <summary style="cursor:pointer;font-weight:700">🔧 慣れた方向け（個別に実行する）</summary>
+      <p class="hint" style="margin:8px 0 0">上のボタンで順番に進めば、ここは使わなくても大丈夫です。手順が分かっている方は、個別に実行できます。</p>
+      <div class="genmode" style="margin-top:10px">
+        <div class="genmode-row"><b>⚡ 速い生成（証明なし）</b><span>1部門あたり最大60秒で打ち切り、その時点の最良の表を返します。設定を直しながら何度も試す段階はこちらが快適です。</span></div>
+        <div class="genmode-row"><b>🎯 じっくり生成（証明あり）</b><span>「これ以上良い組み合わせは存在しない」と数学的に確かめるまで解きます。1部門あたり最大10分。<b>最終確定はこちら</b>で。条件が厳しい月ほど、速い生成との差が大きくなります。</span></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="btnGenerateFast" class="btn btn-large btn-primary">⚡ 速い生成（証明なし・最大60秒）</button>
+        <button id="btnGenerate" class="btn btn-large" style="background:#4c51bf;color:#fff">🎯 じっくり生成（証明あり・最大10分）</button>
+        <button id="btnFeasibility" class="btn btn-large" style="background:#38a169;color:#fff">🔍 実現性チェック（生成前）</button>
+        <button id="btnRelax" class="btn btn-large" style="background:#dd6b20;color:#fff">🩹 エラー解消プラン</button>
+        <button id="btnSurplusPlan" class="btn btn-large" style="background:#2b6cb0;color:#fff">⚖️ 余の使い道を決める</button>
+      </div>
+      <p class="hint" style="margin-top:8px">
+        バックグラウンドで処理されるため、実行中もアプリは操作可能です。<br>
+        「🔍 実現性チェック」を押すと、<b>生成する前に</b>「どのエラーが人員的に避けられないか／配置で避けられるか」を判定します。<br>
+        「🩹 エラー解消プラン」は、<b>どの設定をいくつ動かせばエラーが消えるか</b>を影響の小さい順に並べ、ボタン1つで設定を変更できます。
+      </p>
+    </details>
+    <div class="card" id="progressArea" style="display:none">
+      <div class="progress-info">
+        <span id="progressText">準備中...</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+    </div>
+    <div class="card" id="reportCard" style="display:none">
+      <h3>📊 AI診断レポート</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button id="btnAIExplain" class="btn btn-primary">🤖 AIに違反を解説してもらう</button>
+      </div>
+      <div id="reportContent"></div>
+    </div>
+  </section>
+
+  <!-- ⑥ シフト表 -->
+  <section class="tab-panel" id="panel-result">
+    <h2>⑥ シフト表</h2>
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn btn-primary" id="btnExportExcel">📥 Excelエクスポート</button>
+        <button class="btn" id="btnExportCSV">📥 CSVエクスポート</button>
+        <button class="btn" id="btnRecheck">🔍 ルールチェック</button>
+        <button class="btn btn-primary" id="btnRepair">🛠 エラーを自動修正</button>
+        <button class="btn" id="btnResolveSurplus" title="余（人員余り）のコマを、有給にするか、その日の必要人数を増やして出勤にするかを選べます">⚖️ 余の解消</button>
+        <button class="btn" id="btnUndo" disabled>↩ 元に戻す</button>
+        <button class="btn" id="btnRedo" disabled>↪ やり直す</button>
+        <button class="btn" id="btnRangeLock" title="ドラッグで範囲を選んで、まとめて🔒固定／🔓解除できます">🔒 まとめて固定</button>
+        <button class="btn" id="btnPartialRegen" title="指定した日より前をそのまま残し、その日以降だけを作り直します">📅 途中から作り直す</button>
+        <button class="btn" id="btnClearFixed">🔓 固定をすべて解除</button>
+        <span class="hint">セルをドラッグ&ドロップでシフト交換、クリックで直接編集（編集すると🔒固定されます）。Ctrl+Z で元に戻す／Ctrl+Y でやり直し。</span>
+      </div>
+      <!-- 自動修正の進捗（シフト表用） -->
+      <div id="repairProgress" style="display:none;margin:10px 0">
+        <div style="background:#e2e8f0;border-radius:6px;height:14px;overflow:hidden">
+          <div id="repairBar" style="width:0%;height:100%;background:#667eea;transition:width .2s"></div>
+        </div>
+        <div id="repairText" style="font-size:13px;color:#4a5568;margin-top:6px"></div>
+      </div>
+      <!-- 凡例：シフト種別から動的生成 -->
+      <div class="legend" id="shiftLegend"></div>
+      <div class="table-wrap">
+        <div id="partialIgnoreBar" style="display:none"></div>
+        <table id="resultTable" class="result-table"></table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>📊 集計</h3>
+      <div id="summaryArea"></div>
+    </div>
+  </section>
+
+</main>
+</div>
+
+<div id="navScrim" class="nav-scrim"></div>
+<div id="toast" class="toast"></div>
+
+<!-- 手動シフト編集モーダル -->
+<div id="shiftEditModal" class="modal">
+  <div class="modal-content">
+    <h3>シフト編集</h3>
+    <p id="modalTarget"></p>
+    <div class="shift-selector" id="shiftOptionContainer">
+      <!-- 出勤シフトは動的生成、休み系は固定 -->
+    </div>
+    <div class="modal-actions">
+      <button id="modalCancel" class="btn">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/data.v6.js?v=216"></script>
+<script src="js/optimizer.v6.js?v=216"></script>
+<script src="js/worker-client.v6.js?v=216"></script>
+<script src="js/ai-explain.v6.js?v=216"></script>
+<script src="js/ui.v6.js?v=216"></script>
+<script src="js/milp.v6.js?v=216"></script>
+<script src="js/app.v6.js?v=216"></script>
+</body>
+</html>
