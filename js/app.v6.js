@@ -940,6 +940,7 @@ function setupResultPanel() {
       if ($text) $text.textContent = 'エラー箇所を修復中...';
 
       const before = AppState.violations.length;
+      const beforeSc = scoreViolations(AppState.violations);
       const backup = JSON.parse(JSON.stringify(AppState.shifts));
       try {
         if (typeof optimizeScheduleMILP !== 'function') throw new Error('数理最適化モジュール未読込（再読込してください）');
@@ -949,7 +950,9 @@ function setupResultPanel() {
           if ($text) $text.textContent = '数理最適化で修復中: ' + msg;
         });
         const after = res.violations.length;
-        if (after < before) {
+        // 件数ではなく「🚨 → 合計」（重み付き）で比べる。件数だけだと、🚨が
+        // 増えても合計が減れば「修復した」と採用してしまっていた。
+        if (scoreBetter(scoreViolations(res.violations), beforeSc)) {
           if ($bar) $bar.style.width = '100%';
           renderResultTable();
           document.getElementById('reportCard').style.display = 'block';

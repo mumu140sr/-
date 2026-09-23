@@ -77,14 +77,14 @@ function optimizeScheduleMILP(onProgress, opts) {
     // 答えの方が点数が良いため、使い道の候補がほとんど出てこない。
     const pickBySurplus = !!(opts && opts.pickBy === 'surplus');
     const countRest = (sh) => { let n2 = 0; for (const id in (sh || {})) { const row = sh[id]; for (const d in row) if (row[d] === '余') n2++; } return n2; };
-    // 良し悪しは「🚨の件数 → 重み付きの合計」の順で比べる。合計だけで比べると、
+    // 良し悪しは「🚨の重み付き合計 → 全体の重み付き合計」の順で比べる（scoreViolations）。合計だけで比べると、
     // 🚨4件・合計11件の答えが 🚨3件・合計12件の答えに勝ってしまう。
     const better = (a, b) => (a.must - b.must) || (a.score - b.score);
     const say = () => {
       const best = results.length ? results.slice().sort(better)[0] : null;
       onProgress && onProgress(null,
         `${n}通りの解き方を同時に計算中…（完了 ${done}/${n}` +
-        (best ? ` ・ いまの最良 ${best.violations.length}件（うち🚨${best.must}件）` : '') + '）');
+        (best ? ` ・ いまの最良 ${best.violations.length}件（うち🚨${best.mustCount}件）` : '') + '）');
     };
     say();
     for (let i = 0; i < n; i++) {
@@ -142,9 +142,10 @@ function _milpOnce(onProgress, opts, variant) {
         AppState.shifts = m.shifts || {}; AppState.violations = m.violations || []; AppState.generated = true;
         // 比べるときの点数は「件数」ではなく「重み付きの合計」。
         // 早遅バランスのように、1件でもずれが大きいものを正しく重く扱う。
-        const _vw = (m.violations || []).reduce((a, v) => a + (v && v.weight > 1 ? v.weight : 1), 0);
-        const _must = (m.violations || []).filter(v => v && (getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type))).length;
-        resolve({ _shifts: m.shifts || {}, violations: AppState.violations, score: _vw, must: _must,
+        // 🚨も重み付きで数える（連勤は上限を超えた日数。optimizer.js の scoreViolations）
+        const _sc = scoreViolations(m.violations || []);
+        resolve({ _shifts: m.shifts || {}, violations: AppState.violations, score: _sc.total, must: _sc.must,
+                  mustCount: _sc.mustCount,
                   success: (m.violations || []).length === 0,
                   allOptimal: m.allOptimal !== false, deep: !!m.deep, fast: !!m.fast, usedGap: !!m.usedGap,
                   tiered: !!m.tiered, tierLog: m.tierLog || [] });

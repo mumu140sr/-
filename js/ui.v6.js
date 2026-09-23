@@ -1836,10 +1836,14 @@ function updateHistoryButtons() {
  */
 function refreshAfterManualEdit() {
   const prevCount = (AppState.violations || []).length;
+  const prevSc = scoreViolations(AppState.violations || []);
   AppState.violations = checkViolations(AppState.shifts);
-  // 手動修正で玉突きの違反が増えた場合は知らせる
-  if (AppState.violations.length > prevCount) {
-    toast(`⚠ この変更で違反が ${prevCount}→${AppState.violations.length}件に増えました`, 'info', 4500);
+  // 手動修正で玉突きの違反が増えた場合は知らせる。件数が同じでも、連勤が
+  // 伸びた（重みが増えた）ときは悪くなっているので知らせる。
+  if (AppState.violations.length > prevCount || scoreBetter(prevSc, scoreViolations(AppState.violations))) {
+    toast(AppState.violations.length > prevCount
+      ? `⚠ この変更で違反が ${prevCount}→${AppState.violations.length}件に増えました`
+      : `⚠ この変更で違反が重くなりました（件数は${prevCount}件のまま・連勤が伸びたなど）`, 'info', 4500);
   }
   renderResultTable();
 
