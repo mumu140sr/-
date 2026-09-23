@@ -2492,19 +2492,22 @@ function showSurplusResolveModal() {
       dailyC: JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
     };
     const before = checkViolations(AppState.shifts).length;
+    const beforeSc = scoreViolations(checkViolations(AppState.shifts));
     const restore = () => {
       AppState.shifts = JSON.parse(JSON.stringify(bk.shifts));
       AppState.dailyRequirements = JSON.parse(JSON.stringify(bk.daily));
       AppState.dailyRequirementsCast = JSON.parse(JSON.stringify(bk.dailyC));
     };
     const out = [];
-    const measure = (fn) => { let n; try { fn(); n = checkViolations(AppState.shifts).length; } catch (e) { n = null; } restore(); return n; };
+    // 件数(n)は表示用、sd は重み付きの比べ方（並べ替え・良し悪しに使う）
+    const measure = (fn) => { let n; try { fn(); n = scoreViolations(checkViolations(AppState.shifts)); } catch (e) { n = null; } restore(); return n; };
+    const entry = (o, sc) => Object.assign(o, { delta: sc.count - before, before, after: sc.count, sd: _scoreDiff(beforeSc, sc) });
     cells.forEach(c => {
       const st = AppState.staff.find(x => x.id === c.id); if (!st) return;
       // ㋐ その人のその日を有給にする
       {
         const n = measure(() => { AppState.shifts[c.id][c.day] = '有'; });
-        if (n != null) out.push({ kind: 'paid', id: c.id, name: c.name, day: c.day, delta: n - before, before, after: n });
+        if (n != null) out.push(entry({ kind: 'paid', id: c.id, name: c.name, day: c.day }, n));
       }
       // ㋐' 指導役のそばで研修に入れる（研修は人員にカウントしないので定数を動かさない）
       {
@@ -2519,8 +2522,8 @@ function showSurplusResolveModal() {
           });
           if (!T) return;
           const n = measure(() => { AppState.shifts[c.id][c.day] = t.key; });
-          if (n != null) out.push({ kind: 'train', id: c.id, name: c.name, day: c.day, key: t.key,
-                                    tutor: T.name, delta: n - before, before, after: n });
+          if (n != null) out.push(entry({ kind: 'train', id: c.id, name: c.name, day: c.day, key: t.key,
+                                          tutor: T.name }, n));
         });
       }
       // ㋑ その日の必要人数を1人増やして出勤にする（入れるシフトぶん全部）
@@ -2534,12 +2537,12 @@ function showSurplusResolveModal() {
           store[k][c.day] = (store[k][c.day] != null ? store[k][c.day] : base) + 1;
           AppState.shifts[c.id][c.day] = k;
         });
-        if (n != null) out.push({ kind: 'work', id: c.id, name: c.name, day: c.day, key: k, delta: n - before, before, after: n });
+        if (n != null) out.push(entry({ kind: 'work', id: c.id, name: c.name, day: c.day, key: k }, n));
       });
     });
     // 有給は日数に限りがあるので、同じ結果なら「研修 → 出勤 → 有給」の順にすすめる
     const rank = { train: 0, work: 1, paid: 2 };
-    out.sort((a, b) => (a.delta - b.delta) || (rank[a.kind] - rank[b.kind]));
+    out.sort((a, b) => _diffCmp(a.sd, b.sd) || (rank[a.kind] - rank[b.kind]));
     return out;
   };
 
@@ -2548,9 +2551,7 @@ function showSurplusResolveModal() {
     const r = recoCache;
     if (!r.length) return '';
     const best = r[0];
-    const tag = (x) => x.delta < 0 ? `<b style="color:var(--success)">エラーが ${-x.delta}件 減ります</b>`
-                     : x.delta === 0 ? '<b style="color:var(--success)">エラーは増えません</b>'
-                     : `<b style="color:var(--danger)">エラーが ${x.delta}件 増えます</b>`;
+    const tag = (x) => `<b style="color:var(${_diffSign(x.sd) > 0 ? '--danger' : '--success'})">${_diffWords(x.sd)}</b>`;
     const line = (x, i) => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0${i ? ';border-top:1px solid var(--border)' : ''}">
         <span style="flex:1;min-width:230px">${i === 0 ? '👑 ' : ''}<b>${escapeHtml(x.name)}さん ${x.day}日</b> を
           ${x.kind === 'paid' ? '<b>有給</b>にする'
@@ -2571,7 +2572,7 @@ function showSurplusResolveModal() {
 
   // 組み直して比べた結果
   const planHtml = () => {
-    const allBad = recoCache && recoCache.length && recoCache.every(x => x.delta > 0 || x.kind === 'paid');
+    const allBad = recoCache && recoCache.length && recoCache.every(x => _diffSign(x.sd) > 0 || x.kind === 'paid');
     if (!planRows) {
       return `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">
         <div class="hint" style="margin-bottom:6px">
@@ -2589,9 +2590,11 @@ function showSurplusResolveModal() {
     const b = planRows.base;
     const rows = planRows.rows;
     const tag = (x) => {
+      const d = (x.sc && b.sc) ? _scoreDiff(b.sc, x.sc) : null;
       const dn = x.n - b.n;
+      if (d && d.dm > 0) return `<b style="color:var(--danger)">エラー ${b.n}件 → ${x.n}件（🚨が${d.dn > 0 ? '増えます' : '重くなります'}）</b>`;
       return dn < 0 ? `<b style="color:var(--success)">エラー ${b.n}件 → ${x.n}件（${dn}件）</b>`
-           : dn === 0 ? `<b style="color:var(--success)">エラー ${x.n}件（増えません）</b>`
+           : dn === 0 ? `<b style="color:var(${d && _diffSign(d) > 0 ? '--danger' : '--success'})">エラー ${x.n}件（${d && _diffSign(d) > 0 ? '件数は同じで重くなります' : '増えません'}）</b>`
            : `<b style="color:var(--danger)">エラー ${b.n}件 → ${x.n}件（+${dn}件）</b>`;
     };
     return `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">
@@ -2999,6 +3002,7 @@ function showSurplusResolveModal() {
     const bandOf2 = (k) => isEarlyCategory(k) ? 'e' : (isLate(k) ? 'l' : null);
     const trainKeys = (AppState.shiftTypes || []).filter(t => t.isTraining).map(t => t.key);
     const base = checkViolations(AppState.shifts).length;
+    const baseSc = scoreViolations(checkViolations(AppState.shifts));
     const bkS = JSON.parse(JSON.stringify(AppState.shifts));
     const bkD = JSON.parse(JSON.stringify(AppState.dailyRequirements || {}));
     const bkC = JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {}));
@@ -3031,22 +3035,22 @@ function showSurplusResolveModal() {
           store[k] = store[k] || {};
           store[k][d] = (store[k][d] != null ? store[k][d] : b0) + 1;
           AppState.shifts[L.id][d] = k;
-          const n = checkViolations(AppState.shifts).length;
+          const sc = scoreViolations(checkViolations(AppState.shifts));
           undo();
-          out.push({ kind: 'work', id: L.id, name: L.name, day: d, key: k, tutor: T.name, cast, guess: n - base });
+          out.push({ kind: 'work', id: L.id, name: L.name, day: d, key: k, tutor: T.name, cast, guess: sc.count - base, sd: _scoreDiff(baseSc, sc) });
         });
         // ㋑ 研修で入れる
         trainKeys.forEach(tk => {
           const bd = bandOf2(tk); if (!bd) return;
           const T = tutorAt(bd); if (!T) return;
           AppState.shifts[L.id][d] = tk;
-          const n = checkViolations(AppState.shifts).length;
+          const sc = scoreViolations(checkViolations(AppState.shifts));
           undo();
-          out.push({ kind: 'train', id: L.id, name: L.name, day: d, key: tk, tutor: T.name, cast, guess: n - base });
+          out.push({ kind: 'train', id: L.id, name: L.name, day: d, key: tk, tutor: T.name, cast, guess: sc.count - base, sd: _scoreDiff(baseSc, sc) });
         });
       }
     });
-    out.sort((a, b) => (a.guess - b.guess) || (a.day - b.day));
+    out.sort((a, b) => _diffCmp(a.sd, b.sd) || (a.day - b.day));
     return out;
   };
 
@@ -3120,11 +3124,12 @@ function showSurplusResolveModal() {
           .catch(() => { planProg.done++; drawPlanProgress(); return null; })));
       const got = rs.filter(Boolean);
       const bRow = got.find(x => x.j.kind === 'base');
-      if (bRow) planRows = { base: { n: bRow.r.violations.length, sur: countSurIn(bRow.r.shifts) }, rows: [] };
-      if (!planRows) planRows = { base: { n: checkViolations(AppState.shifts).length, sur: listSurplusCells().length }, rows: [] };
+      if (bRow) planRows = { base: { n: bRow.r.violations.length, sc: scoreViolations(bRow.r.violations), sur: countSurIn(bRow.r.shifts) }, rows: [] };
+      if (!planRows) { const v0 = checkViolations(AppState.shifts);
+        planRows = { base: { n: v0.length, sc: scoreViolations(v0), sur: listSurplusCells().length }, rows: [] }; }
       got.filter(x => x.j.kind === 'cand').forEach(x =>
-        planRows.rows.push(Object.assign({}, x.j.c, { n: x.r.violations.length, sur: countSurIn(x.r.shifts) })));
-      planRows.rows.sort((a, b2) => (a.n - b2.n) || (a.sur - b2.sur));
+        planRows.rows.push(Object.assign({}, x.j.c, { n: x.r.violations.length, sc: scoreViolations(x.r.violations), sur: countSurIn(x.r.shifts) })));
+      planRows.rows.sort((a, b2) => scoreCompare(a.sc, b2.sc) || (a.sur - b2.sur));
       planRows.left = planQueue.length;
       say(planRows.rows.length ? '✅ 比べ終わりました。下の一覧からお選びください。' : '組み直せる候補がありませんでした。', true);
     } catch (e) {
@@ -3846,28 +3851,55 @@ function _trainingCandidates(learnerId, band, tutorIds) {
   return out;   // 絞らない。並べ替えと選択は画面側でする
 }
 
+// 「入れてみた前後」を比べる共通の物差し（optimizer.js の scoreViolations と同じ）。
+// 良し悪しと並べ替えは重み付き（🚨の重み → 全体の重み）で決め、画面に出す数は件数。
+// 件数だけで比べると、連勤が伸びても件数が同じなら「増えません」と出てしまう。
+function _scoreDiff(before, after) {
+  return { dn: after.count - before.count, dm: after.must - before.must, dt: after.total - before.total,
+           before: before.count, after: after.count };
+}
+// 良くなる: -1 / 変わらない: 0 / 悪くなる: 1（🚨が重くなるなら合計が減っても 1）
+function _diffSign(d) {
+  if (!d) return null;
+  if (d.dm !== 0) return d.dm > 0 ? 1 : -1;
+  return d.dt > 0 ? 1 : (d.dt < 0 ? -1 : 0);
+}
+// 並べ替え用（良い順）。測れなかったもの(null)は最後
+function _diffCmp(a, b) {
+  if (!a || !b) return (a ? -1 : 0) + (b ? 1 : 0);
+  return (a.dm - b.dm) || (a.dt - b.dt);
+}
+// 画面に出す言い方。件数が変わらなくても🚨が重くなるときは、はっきり知らせる
+function _diffWords(d) {
+  if (!d) return '';
+  if (d.dm > 0) return d.dn > 0 ? `🚨が増えます（${d.before}件 → ${d.after}件）`
+                                : `🚨が重くなります（件数は${d.after}件・連勤が伸びるなど）`;
+  if (_diffSign(d) < 0) return d.dn < 0 ? `エラーが ${-d.dn}件 減ります` : 'エラーが軽くなります';
+  if (_diffSign(d) === 0) return 'エラーは増えません';
+  return d.dn > 0 ? `エラーが ${d.dn}件 増えます` : 'エラーが重くなります';
+}
+
 // その候補を実際に表へ入れてみて、エラーが何件増えるかを数える（数えたら元に戻す）。
 // 候補行の印と、実測したエラー増減の表示。警告文だけでは良し悪しが判断できない
 // という声があったため、「入れたら何件増えるか」を数字で出す。
 function _spMark(r) {
-  if (r.delta === 0) return '⭐';
-  if (r.delta > 0)   return '⚠️';
-  if (r.delta < 0)   return '🎉';
+  const sg = _diffSign(r.sd);
+  if (sg === 0) return '⭐';
+  if (sg > 0)   return '⚠️';
+  if (sg < 0)   return '🎉';
   return (r.warn && r.warn.length) ? '⚠️' : '⭐';
 }
 function _spDeltaTag(r) {
-  if (r.delta == null) return '';
-  const col = r.delta > 0 ? 'var(--danger)' : (r.delta < 0 ? 'var(--success, #2e7d32)' : 'var(--text-dim, inherit)');
-  const txt = r.delta === 0 ? 'エラー増えません'
-            : r.delta > 0   ? `エラー +${r.delta}件`
-                            : `エラー ${r.delta}件`;
-  return `<span style="margin-left:8px;font-size:12px;color:${col}">（${txt}）</span>`;
+  if (!r.sd) return '';
+  const sg = _diffSign(r.sd);
+  const col = sg > 0 ? 'var(--danger)' : (sg < 0 ? 'var(--success, #2e7d32)' : 'var(--text-dim, inherit)');
+  return `<span style="margin-left:8px;font-size:12px;color:${col}">（${_diffWords(r.sd)}）</span>`;
 }
 
 function _measureSurplusPick(r) {
   if (typeof checkViolations !== 'function' || !AppState.shifts) return null;
   try {
-    const base = checkViolations(AppState.shifts).length;
+    const base = scoreViolations(checkViolations(AppState.shifts));
     const row  = AppState.shifts[r.learnerId];
     if (!row) return null;
     const store = r.cast ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
@@ -3875,11 +3907,12 @@ function _measureSurplusPick(r) {
     store[r.k] = store[r.k] || {};
     const hadShift = row[r.d], hadReq = store[r.k][r.d];
     row[r.d] = r.k; store[r.k][r.d] = r.to;
-    const now = checkViolations(AppState.shifts).length;
+    const now = scoreViolations(checkViolations(AppState.shifts));
     row[r.d] = hadShift;
     if (hadReq === undefined) delete store[r.k][r.d]; else store[r.k][r.d] = hadReq;
-    return now - base;
-  } catch (e) { return null; }
+    r.sd = _scoreDiff(base, now);
+    return r.sd.dn;
+  } catch (e) { r.sd = null; return null; }
 }
 
 // 選んだ日を入れたら連勤がどうなるかを、その場で数える。
@@ -4100,7 +4133,7 @@ function showSurplusPlanModal() {
       if (sel.learner) {
         rows = _trainingCandidates(sel.learner, sel.band, sel.tutors);
         // 実際に入れて数えた結果が良い順に並べる（同点なら日付順）
-        rows.sort((a, b) => ((a.delta == null ? 99 : a.delta) - (b.delta == null ? 99 : b.delta)) || (a.d - b.d));
+        rows.sort((a, b) => _diffCmp(a.sd, b.sd) || (a.d - b.d));
         if (!rows.length) toast('入れられる日が見つかりませんでした。時間帯や担当シフトをご確認ください', 'error', 6000);
         render();
         return;

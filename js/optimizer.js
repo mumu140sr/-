@@ -4295,18 +4295,27 @@ function measureRelaxEffect(mut) {
   if (!Object.keys(shifts).length) return null;      // 表がまだ無いときは測れない
   const snapSettings = JSON.parse(JSON.stringify(AppState.settings || {}));
   const snapSkills   = JSON.parse(JSON.stringify(AppState.skills || []));
-  let before = 0, after = 0;
+  let before = 0, after = 0, bSc = null, aSc = null;
   try {
-    before = checkViolations(shifts).length;
+    const bv = checkViolations(shifts); before = bv.length; bSc = scoreViolations(bv);
     mut(AppState);
-    after = checkViolations(shifts).length;
+    const av = checkViolations(shifts); after = av.length; aSc = scoreViolations(av);
   } catch (e) {
     return null;
   } finally {
     AppState.settings = snapSettings;
     AppState.skills = snapSkills;
   }
-  return { before, after, gain: before - after };
+  // 件数が同じでも、連勤の上限を1日上げると超過日数は減る。件数だけ見ると
+  // 「減りません」になってしまうので、重み付きで軽くなったかも返す。
+  const lighter = after === before && scoreBetter(aSc, bSc);
+  return { before, after, gain: before - after, lighter };
+}
+// 設定を緩めたときの効き目の言い方（件数が減る／件数は同じで軽くなる／減らない）
+function relaxEffectText(e) {
+  if (e.gain > 0) return `いまの表で ${e.gain}件 消えます`;
+  if (e.lighter)  return 'いまの表で件数は同じですが、軽くなります（超えている日数が減ります）';
+  return 'いまの表では減りません';
 }
 
 function buildRelaxPlans(violations) {
@@ -4402,7 +4411,7 @@ function buildRelaxPlans(violations) {
       id: 'rule-soften', group: 'rule', pain: 'small',
       gain: eff ? eff.gain : n, count: n, measured: eff,
       title: `「${r.label}」のルールを ${lv === 'must' ? '🟡できれば に下げる' : 'OFF にする'}`,
-      effect: eff ? (eff.gain > 0 ? `いまの表で ${eff.gain}件 消えます` : 'いまの表では減りません') : `${n}件が対象`,
+      effect: eff ? relaxEffectText(eff) : `${n}件が対象`,
       detail: lv === 'must'
         // 🟡に下げても、そのルールのエラーは画面から消えない。優先順位が下がるだけ。
         // 以前は「件数が減るか警告扱いになります」と書いていたが、実測では
@@ -4412,7 +4421,7 @@ function buildRelaxPlans(violations) {
           + `実測では、この変更だけでは件数が変わらないことが多いです。`
           + `確実に消したい場合は OFF にしてください。人手は増減しません。`
         : `${n}件出ています。OFF にすると、このルールは一切チェックしなくなります。人手は増減しません。`,
-      after: eff && eff.gain <= 0
+      after: eff && eff.gain <= 0 && !eff.lighter
         ? '※ いまの表では減りません。作り直すと並びが変わるため、結果は変わることがあります。'
         : '生成し直すと結果に反映されます。',
       params: { type: r.type, to },
@@ -4432,12 +4441,12 @@ function buildRelaxPlans(violations) {
         id: 'balance-tol', group: 'rule', pain: 'small',
         gain: eb ? eb.gain : cnt['balance-diff'], count: cnt['balance-diff'], measured: eb,
         title: `早遅バランスの許容幅を ${tol}日 → ${tol + 1}日 に広げる`,
-        effect: eb ? (eb.gain > 0 ? `いまの表で ${eb.gain}件 消えます` : 'いまの表では減りません') : `${cnt['balance-diff']}件が対象`,
+        effect: eb ? relaxEffectText(eb) : `${cnt['balance-diff']}件が対象`,
         detail: `目標比率からのずれを ${tol + 1}日 まで許すようにします。`
-              + (eb && eb.gain <= 0
+              + (eb && eb.gain <= 0 && !eb.lighter
                  ? `ただし、いまの表のずれは1日広げただけでは収まりません。広げても件数は変わらない見込みです。`
                  : `出勤日数によっては比率がぴったりにならないため、1日広げるだけで消えることがよくあります。`),
-        after: eb && eb.gain <= 0
+        after: eb && eb.gain <= 0 && !eb.lighter
           ? '※ いまの表では減りません。ルールが緩むぶん他の並びが変わり、かえって増えることもあります。'
           : '生成し直すと結果に反映されます。',
         params: { to: tol + 1 },
@@ -4465,12 +4474,12 @@ function buildRelaxPlans(violations) {
       id: 'maxoffrun', group: 'rule', pain: 'small',
       gain: er ? er.gain : cnt['long-rest'], count: cnt['long-rest'], measured: er,
       title: `連休の上限を ${cur}日 → ${cur + 1}日 に延ばす`,
-      effect: er ? (er.gain > 0 ? `いまの表で ${er.gain}件 消えます` : 'いまの表では減りません') : `${cnt['long-rest']}件が対象`,
+      effect: er ? relaxEffectText(er) : `${cnt['long-rest']}件が対象`,
       detail: `${cur + 1}連休までは許すようにします。`
-            + (er && er.gain <= 0
+            + (er && er.gain <= 0 && !er.lighter
                ? `ただし、いまの表の連休は1日延ばしただけでは収まりません。`
                : `人手が足りない月は連休が伸びやすいため、1日延ばすと消えることがあります。`),
-      after: er && er.gain <= 0 ? '※ いまの表では減りません。' : '生成し直すと結果に反映されます。',
+      after: er && er.gain <= 0 && !er.lighter ? '※ いまの表では減りません。' : '生成し直すと結果に反映されます。',
       params: { to: cur + 1 },
     });
   }
@@ -4480,12 +4489,12 @@ function buildRelaxPlans(violations) {
     const curC = parseInt(AppState.settings.maxConsecutive) || 0;
     if (curC >= 1 && curC < 7) {
       const ec = measureRelaxEffect(A => { A.settings.maxConsecutive = curC + 1; });
-      if (!ec || ec.gain > 0) {
+      if (!ec || ec.gain > 0 || ec.lighter) {
         plans.push({
           id: 'maxcons', group: 'rule', pain: 'mid',
           gain: ec ? ec.gain : (cnt['consecutive'] || 0), count: cnt['consecutive'] || 0, measured: ec,
           title: `連勤の上限を ${curC}日 → ${curC + 1}日 に延ばす`,
-          effect: ec ? `いまの表で ${ec.gain}件 消えます` : `${cnt['consecutive'] || 0}件が対象`,
+          effect: ec ? relaxEffectText(ec) : `${cnt['consecutive'] || 0}件が対象`,
           detail: `連続して働ける日数を1日増やします。休みの置き場所が自由になるため、`
                 + `連勤超過だけでなく、連休の長さや時間帯の切替にも効くことがあります。`
                 + `働く人の負担が増えるので、現場と相談してから使ってください。`,
