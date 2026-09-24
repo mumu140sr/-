@@ -2602,10 +2602,19 @@ function showSurplusResolveModal() {
   let pendingAsk = null, panelClosed = false;
   // 開いている間に表が変わったら（手で直す・月を変える・元に戻すなど）、おすすめを数え直す。
   // 確認待ち・計算中は数え直さない（変更の途中の表で数えてしまうため）。
+  // マウスがパネルの上にある間は入れ替えない（読んでいる最中に中身が変わらないように）。
+  // 入れ替えたときは「おすすめが変わりました」と知らせ、2秒間ボタンを押せなくする。
+  modal.addEventListener('mouseenter', () => { mouseOnPanel = true; });
+  modal.addEventListener('mouseleave', () => { mouseOnPanel = false; });
+  const RECO_HOLD_MS = 2000;
   const fpTimer = setInterval(() => {
     if (!modal.isConnected) { clearInterval(fpTimer); return; }
-    if (pendingAsk || (typeof calcBusy === 'function' && calcBusy())) return;
-    if (recoCache !== null && stateFp() !== recoFp) { recoCache = null; render(); }
+    if (pendingAsk || mouseOnPanel || (typeof calcBusy === 'function' && calcBusy())) return;
+    if (recoCache !== null && stateFp() !== recoFp) {
+      recoCache = null; recoHoldUntil = Date.now() + RECO_HOLD_MS; render();
+      say('🔄 表が変わったので、おすすめが変わりました。新しい一覧を確かめてから押してください。', false);
+      setTimeout(() => { if (modal.isConnected) modal.querySelectorAll('[data-reco]').forEach(b => { b.disabled = false; }); }, RECO_HOLD_MS);
+    }
   }, 1500);
   // パネルを閉じる（✕・開き直し）。答えていない確認は「やめる」にする。確認があれば true
   modal._closePanel = () => {
@@ -2682,6 +2691,8 @@ function showSurplusResolveModal() {
   // エラーが何件増えるかを測って良い順に返す。3つの方法が並んでいるだけでは
   // どれを使えばよいか分からない、という声への対応。
   let recoCache = null, recoDirty = false, recoFp = '';
+  // 一覧が自動で入れ替わった直後は、少しの間ボタンを押せなくする（読んだ案と違う案を押さないように）
+  let recoHoldUntil = 0, mouseOnPanel = false;
   // 表などの中身の「指紋」。おすすめを作ったときと違えば、一覧は古い
   // （パネルを開いたまま手で直す・月を変える・元に戻す、など）。
   const stateFp = () => JSON.stringify([AppState.settings.targetMonth, AppState.shifts, AppState.requests,
@@ -2783,7 +2794,9 @@ function showSurplusResolveModal() {
             : x.kind === 'train' ? `<b>${escapeHtml(x.key)}</b> で ${escapeHtml(x.tutor)}さんのそばに入れる（人数は増えません）`
             : `<b>${escapeHtml(x.key)}</b> で出勤にする（その日の必要人数+1）`}
           　→ ${tag(x)}<span class="hint">（${x.before}件 → ${x.after}件）</span></span>
-        <button class="btn ${i === 0 ? 'btn-primary' : ''}" data-reco="${i}">この通りにする</button>
+        <button class="btn ${i === 0 ? 'btn-primary' : ''}" data-reco="${i}"
+          data-rid="${escapeHtml(x.id)}" data-rday="${x.day}" data-rkind="${x.kind}" data-rkey="${escapeHtml(x.key || '')}"
+          ${Date.now() < recoHoldUntil ? 'disabled' : ''}>この通りにする</button>
       </div>`;
     const rest = r.slice(1, 4);
     return `<div style="border:2px solid var(--accent);border-radius:10px;padding:12px 14px;margin:10px 0;background:color-mix(in srgb, var(--accent) 7%, var(--surface))">
@@ -3454,10 +3467,15 @@ function showSurplusResolveModal() {
     modal.querySelectorAll('[data-reco]').forEach(btn => btn.addEventListener('click', () => {
       const x = (recoCache || [])[parseInt(btn.dataset.reco)];
       if (!x) return;
+      if (Date.now() < recoHoldUntil) return;
+      // ボタンに書いてある人・日・内容と、実行する中身が同じかを確かめる
+      const same = btn.dataset.rid === String(x.id) && btn.dataset.rday === String(x.day) &&
+                   btn.dataset.rkind === x.kind && btn.dataset.rkey === String(x.key || '');
       // 一覧を作ったあとに表が変わっていたら、古い一覧のまま実行しない（手で直したマスを上書きしていた）
-      if (stateFp() !== recoFp || cellOf(x.id, x.day) !== '余') {
-        recoCache = null; render();
-        say('表が変わっていたので、おすすめを数え直しました。もう一度お選びください。', false);
+      if (!same || stateFp() !== recoFp || cellOf(x.id, x.day) !== '余') {
+        recoCache = null; recoHoldUntil = Date.now() + 2000; render();
+        say('🔄 表が変わっていたので、おすすめを数え直しました。新しい一覧を確かめてから、もう一度お選びください。', false);
+        setTimeout(() => { if (modal.isConnected) modal.querySelectorAll('[data-reco]').forEach(b => { b.disabled = false; }); }, 2000);
         return;
       }
       if (x.kind === 'paid') { selPaid = { id: x.id, day: x.day }; render(); modal.querySelector('#paidGo').click(); }
