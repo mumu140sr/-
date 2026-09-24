@@ -1907,6 +1907,28 @@ function _applyChangeList(list, dir) {
     if (set === undefined) delete row[d]; else row[d] = set;
   });
 }
+// 変えた所を調べるための控え（表・希望・🔒固定・日ごとの必要人数・有給日数）
+const _DELTA_MAPS = ['shifts', 'requests', 'fixedShifts', 'dailyRequirements', 'dailyRequirementsCast'];
+function captureChangeBase() {
+  const o = {};
+  _DELTA_MAPS.forEach(k => { o[k] = JSON.parse(JSON.stringify(AppState[k] || {})); });
+  o.paid = {}; (AppState.staff || []).forEach(s => { o.paid[s.id] = s.paidLeave; });
+  return o;
+}
+/** 控えと今を比べて、変えた所の一覧を返す（_applyChangeList の形） */
+function changesSince(base) {
+  const now = captureChangeBase(), out = [];
+  _DELTA_MAPS.forEach(k => {
+    const A = base[k], B = now[k];
+    new Set([...Object.keys(A), ...Object.keys(B)]).forEach(id => {
+      const a = A[id] || {}, b = B[id] || {};
+      new Set([...Object.keys(a), ...Object.keys(b)]).forEach(d => { if (a[d] !== b[d]) out.push([k, id, d, a[d], b[d]]); });
+    });
+  });
+  Object.keys(now.paid).forEach(id => { if (base.paid[id] !== now.paid[id]) out.push(['paid', id, null, base.paid[id], now.paid[id]]); });
+  return out;
+}
+
 /** 変えた所だけの履歴を積む（余の解消が実行されたとき） */
 function recordDeltaHistory(list) {
   if (!list || !list.length) return;
@@ -3461,6 +3483,7 @@ function showSurplusResolveModal() {
       const x = planRows && planRows.rows[parseInt(btn.dataset.plan)];
       if (!x) return;
       if (!calcBegin('余の使い道の作り直し')) return;
+      const histBase = captureChangeBase();   // 作り直しで変えた所を、元に戻すの履歴に積むため
       busy(true);
       say(`⏳ ${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.key)} に固定して作り直しています…`, true, true);
       // 作り直した結果が6連勤以上を増やすなら、元に戻す（⛔ で止める）
@@ -3491,6 +3514,8 @@ function showSurplusResolveModal() {
           throw new Error('⛔ 作り直すと6連勤以上（コンプラ違反）になるため、元に戻しました');
         }
         const sgn = _diffSign(_scoreDiff(bSc, aSc));
+        // 元に戻すで、作り直し（表・🔒固定・必要人数+1）を一緒に戻せるようにする
+        recordDeltaHistory(changesSince(histBase));
         say(`${sgn <= 0 ? '✅' : '⚠️'} ${escapeHtml(_diffWords(_scoreDiff(bSc, aSc)))}。${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.tutor)}さんのそばに入れて作り直しました（余 ${listSurplusCells().length}コマ）。`, true);
       } catch (e) {
         // 中止・失敗のときは、固定と必要人数の変更も元に戻す（作り直していない表に変更だけ残さない）
@@ -4508,6 +4533,8 @@ function showSurplusPlanModal() {
     if ($a) $a.addEventListener('click', () => {
       const pick = rows.filter(r => r.checked);
       if (!pick.length) { toast('反映する場所が選ばれていません', 'error'); return; }
+      if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+      const histBase = captureChangeBase();   // 反映で変えた所を、元に戻すの履歴に積むため
       pick.forEach(r => {
         const store = r.cast ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
                              : (AppState.dailyRequirements || (AppState.dailyRequirements = {}));
@@ -4520,6 +4547,7 @@ function showSurplusPlanModal() {
           AppState.fixedShifts[r.learnerId][r.d] = r.k;
         }
       });
+      recordDeltaHistory(changesSince(histBase));
       autoSave(); refreshAllUI();
       const who = pick[0] && pick[0].learnerName;
       toast(`${pick.length}件を反映しました${who ? '（' + who + 'さんをその日そのシフトに固定しました）' : ''}。続けて生成してください`, 'success', 7000);
