@@ -1902,9 +1902,10 @@ function _applyChangeList(list, dir) {
       return;
     }
     const M = AppState[k] || (AppState[k] = {});
-    const row = M[id] || (M[id] = {});
+    const row = M[id] || {};
     if (row[d] !== want) return;                 // あとから変えられた所は触らない
-    if (set === undefined) delete row[d]; else row[d] = set;
+    if (set === undefined) { delete row[d]; if (M[id] && !Object.keys(M[id]).length) delete M[id]; }
+    else { M[id] = row; row[d] = set; }
   });
 }
 // 変えた所を調べるための控え（表・希望・🔒固定・日ごとの必要人数・有給日数）
@@ -1929,6 +1930,42 @@ function changesBetween(base, now) {
   });
   Object.keys(now.paid).forEach(id => { if (base.paid[id] !== now.paid[id]) out.push(['paid', id, null, base.paid[id], now.paid[id]]); });
   return out;
+}
+
+/**
+ * 変更そのもの（base0→mid の全部）と、そのあとの計算で動いた表のマス（mid→今 の shifts だけ）を
+ * 合わせた一覧。計算中に利用者が入れた希望・必要人数・有給日数・スタッフは含めない
+ * （含めると、元に戻す・やめるで一緒に消えていた）。
+ */
+function changesOfChangeAndCalc(base0, mid) {
+  if (!mid) return changesSince(base0);
+  const list = changesBetween(base0, mid);
+  changesSince(mid).filter(c => c[0] === 'shifts').forEach(c => {
+    const same = list.find(x => x[0] === c[0] && x[1] === c[1] && x[2] === c[2]);
+    if (same) same[4] = c[4]; else list.push([c[0], c[1], c[2], c[3], c[4]]);
+  });
+  return list.filter(x => x[3] !== x[4]);
+}
+/**
+ * 表などの「指紋」。空の入れ物（空の希望・空の日ごとの必要人数など）は無視する。
+ * 見積もりで仮に書いて戻すと空の入れ物が残り、中身は同じなのに「表が変わった」と
+ * 取り違えていた（おすすめが止まる・🎓の候補が作り直されて選び直しが消える）。
+ */
+function contentFingerprint() {
+  const clean = (o) => {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return o;
+    const r = {};
+    Object.keys(o).sort().forEach(k => {
+      const v = clean(o[k]);
+      if (v === undefined || v === null || v === '') return;
+      if (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length) return;
+      r[k] = v;
+    });
+    return r;
+  };
+  return JSON.stringify([AppState.settings.targetMonth, clean(AppState.shifts), clean(AppState.requests),
+    clean(AppState.fixedShifts), clean(AppState.dailyRequirements), clean(AppState.dailyRequirementsCast),
+    (AppState.staff || []).map(s => [s.id, s.paidLeave])]);
 }
 
 /** 変えた所だけの履歴を積む（余の解消が実行されたとき） */
@@ -2547,15 +2584,7 @@ async function _trySurplusChange(apply, opts) {
   // 戻すのは、いまもその値のままの所だけ（あとから別の編集をした所は触らない）。
   const base0 = captureChangeBase();
   let changes = null, mid = null;
-  const collectChanges = () => {
-    if (!mid) return changesSince(base0);
-    const list = changesBetween(base0, mid);
-    changesSince(mid).filter(c => c[0] === 'shifts').forEach(c => {
-      const same = list.find(x => x[0] === c[0] && x[1] === c[1] && x[2] === c[2]);
-      if (same) same[4] = c[4]; else list.push([c[0], c[1], c[2], c[3], c[4]]);
-    });
-    return list.filter(x => x[3] !== x[4]);
-  };
+  const collectChanges = () => changesOfChangeAndCalc(base0, mid);
   // 取り消すときは、変えた所を戻すだけで、元に戻す／やり直すの履歴には触らない
   const restore = () => {
     _applyChangeList(changes || collectChanges(), 'undo');
@@ -2630,6 +2659,7 @@ function showSurplusResolveModal() {
   let selWork = { id: '', day: '', key: '' };
   let selPair = { tutors: null, b: '', band: 'e' };   // 教育：指導役は複数候補／band: e=早番帯 l=遅番帯
   let pairRows = null;       // 探した候補日（再描画でも残す）
+  let pairFp = '', pairArgs = null;   // 候補を探したときの表の指紋と条件（表が変わったら探し直す）
   let pos = null;            // 動かした位置（再描画で戻らないように覚えておく）
   let minimized = false;     // 小さくした状態かどうか
 
@@ -2658,6 +2688,10 @@ function showSurplusResolveModal() {
   const fpTimer = setInterval(() => {
     if (!modal.isConnected) { clearInterval(fpTimer); return; }
     const canSwap = !pendingAsk && !mouseOnPanel && !(typeof calcBusy === 'function' && calcBusy());
+    if (canSwap && pairRows && pairArgs && stateFp() !== pairFp) {
+      pairRows = findPairDays(pairArgs[0], pairArgs[1], pairArgs[2]); pairFp = stateFp(); renderPairRows();
+      say('🔄 表が変わったので、🎓の入れられる日を探し直しました。', false);
+    }
     if (canSwap && recoCache !== null && stateFp() !== recoFp) {
       recoCache = null; recoHoldUntil = Date.now() + RECO_HOLD_MS; render();
       say('🔄 表が変わったので、おすすめが変わりました。新しい一覧を確かめてから押してください。', false);
@@ -2748,9 +2782,7 @@ function showSurplusResolveModal() {
     (typeof calcBusy === 'function' && calcBusy());
   // 表などの中身の「指紋」。おすすめを作ったときと違えば、一覧は古い
   // （パネルを開いたまま手で直す・月を変える・元に戻す、など）。
-  const stateFp = () => JSON.stringify([AppState.settings.targetMonth, AppState.shifts, AppState.requests,
-    AppState.fixedShifts, AppState.dailyRequirements, AppState.dailyRequirementsCast,
-    (AppState.staff || []).map(s => [s.id, s.paidLeave])]);
+  const stateFp = () => contentFingerprint();
   const buildReco = () => {
     recoFp = stateFp();
     const cells = listSurplusCells();
@@ -3225,6 +3257,12 @@ function showSurplusResolveModal() {
 
   // 選んだ日に配置する
   const applyPair = async (d) => {
+    // 候補を探したあとに表が変わっていたら、古い候補のまま入れない（探し直して知らせる）
+    if (pairRows && pairArgs && stateFp() !== pairFp) {
+      pairRows = findPairDays(pairArgs[0], pairArgs[1], pairArgs[2]); pairFp = stateFp(); renderPairRows();
+      say('🔄 表が変わっていたので、入れられる日を探し直しました。もう一度お選びください。', false);
+      return;
+    }
     const row = (pairRows || []).find(x => x.d === d);
     const T = row && AppState.staff.find(x => x.id === row.tutorId);
     const L = AppState.staff.find(x => x.id === selPair.b);
@@ -3493,6 +3531,9 @@ function showSurplusResolveModal() {
         store[x.key] = store[x.key] || {};
         store[x.key][x.day] = (store[x.key][x.day] != null ? store[x.key][x.day] : b0) + 1;
       }
+      // 変更そのもの（固定と必要人数+1）を入れた直後の控え。計算中に利用者が入れた希望・
+      // 必要人数・有給日数・スタッフは履歴に入れない（↩ で一緒に消えていた）
+      const histMid = captureChangeBase();
       try {
         await optimizeScheduleMILP(null, { fastMode: true });
         AppState.violations = checkViolations(AppState.shifts);
@@ -3506,7 +3547,7 @@ function showSurplusResolveModal() {
         }
         const sgn = _diffSign(_scoreDiff(bSc, aSc));
         // 元に戻すで、作り直し（表・🔒固定・必要人数+1）を一緒に戻せるようにする
-        recordDeltaHistory(changesSince(histBase));
+        recordDeltaHistory(changesOfChangeAndCalc(histBase, histMid));
         say(`${sgn <= 0 ? '✅' : '⚠️'} ${escapeHtml(_diffWords(_scoreDiff(bSc, aSc)))}。${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.tutor)}さんのそばに入れて作り直しました（余 ${listSurplusCells().length}コマ）。`, true);
       } catch (e) {
         // 中止・失敗のときは、固定と必要人数の変更も元に戻す（作り直していない表に変更だけ残さない）
@@ -3598,7 +3639,7 @@ function showSurplusResolveModal() {
       if (!t.length) { say('⚠️ 指導役の候補を1人以上えらんでください。', false); return; }
       const $r = modal.querySelector('#pairResult');
       if ($r) $r.innerHTML = '<span class="hint">⏳ 入れられる日を調べています…</span>';
-      setTimeout(() => { pairRows = findPairDays(t, selPair.b, selPair.band); renderPairRows(); }, 30);
+      setTimeout(() => { pairRows = findPairDays(t, selPair.b, selPair.band); pairFp = stateFp(); pairArgs = [t, selPair.b, selPair.band]; renderPairRows(); }, 30);
     });
     renderPairRows();
 
@@ -4340,8 +4381,7 @@ function showSurplusPlanModal() {
   // 🎓「この日に入れる」の候補は、いまの表から作る。開いたまま表が変わったら数え直し、
   // 古い候補のまま反映しない（候補の日がもう入れられない日になっていることがある）。
   let rowsFp = '', rowsLearner = false;
-  const fpNow = () => JSON.stringify([AppState.settings.targetMonth, AppState.shifts, AppState.requests,
-    AppState.fixedShifts, AppState.dailyRequirements, AppState.dailyRequirementsCast]);
+  const fpNow = () => contentFingerprint();
   const recountLearner = (why) => {
     rows = _trainingCandidates(sel.learner, sel.band, sel.tutors);
     rows.sort((a, b) => _diffCmp(a.sd, b.sd) || (a.d - b.d));
