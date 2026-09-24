@@ -2359,7 +2359,15 @@ function candidateShiftsFor(staff, day) {
 // 変更を試して、前後を比べる（scoreViolations / scoreBetter / scoreWorsened）。
 // 6連勤以上になる変更は止める。どれかが増えるときは confirm で「それでも実行するか」を聞く。
 // @returns {ok:boolean, before:number, after:number, sd, message:string}
+// 作り直し（adjust）を伴うときは計算なので、ほかの計算と同時に走らないようにする
 async function trySurplusChange(apply, opts) {
+  const o = opts || {};
+  if (!o.adjust) return _trySurplusChange(apply, o);
+  if (!calcBegin('余の解消')) return { ok: false, busy: true, before: 0, after: 0, sd: null,
+                                       message: 'ほかの計算中のため、実行しませんでした' };
+  try { return await _trySurplusChange(apply, o); } finally { calcEnd(); }
+}
+async function _trySurplusChange(apply, opts) {
   const o = opts || {};
   const backup = {
     shifts:  JSON.parse(JSON.stringify(AppState.shifts)),
@@ -3121,6 +3129,7 @@ function showSurplusResolveModal() {
     const batch = planQueue.splice(0, first ? PLAN_PAR - 1 : PLAN_PAR);
     if (!batch.length) { say('これ以上の候補はありません。', true); render(); return; }
 
+    if (!calcBegin('余の使い道の候補さがし')) { planQueue.unshift(...batch); return; }
     planBusy = true; busy(true);
     planProg = { done: 0, total: batch.length + (first ? 1 : 0), t0: Date.now() };
     const timer = setInterval(drawPlanProgress, 500);
@@ -3167,6 +3176,7 @@ function showSurplusResolveModal() {
       say('計算に失敗しました: ' + escapeHtml(e.message), false);
     } finally {
       clearInterval(timer);
+      calcEnd();
       planBusy = false; planProg = null; busy(false); render();
     }
   };
@@ -3212,6 +3222,7 @@ function showSurplusResolveModal() {
     modal.querySelectorAll('[data-plan]').forEach(btn => btn.addEventListener('click', async () => {
       const x = planRows && planRows.rows[parseInt(btn.dataset.plan)];
       if (!x) return;
+      if (!calcBegin('余の使い道の作り直し')) return;
       busy(true);
       say(`⏳ ${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.key)} に固定して作り直しています…`, true, true);
       // 作り直した結果が6連勤以上を増やすなら、元に戻す（⛔ で止める）
@@ -3243,7 +3254,13 @@ function showSurplusResolveModal() {
         }
         const sgn = _diffSign(_scoreDiff(bSc, aSc));
         say(`${sgn <= 0 ? '✅' : '⚠️'} ${escapeHtml(_diffWords(_scoreDiff(bSc, aSc)))}。${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.tutor)}さんのそばに入れて作り直しました（余 ${listSurplusCells().length}コマ）。`, true);
-      } catch (e) { say('作り直しに失敗しました: ' + escapeHtml(e.message), false); }
+      } catch (e) {
+        // 中止・失敗のときは、固定と必要人数の変更も元に戻す（作り直していない表に変更だけ残さない）
+        AppState.shifts = bkAll.shifts; AppState.fixedShifts = bkAll.fixed;
+        AppState.dailyRequirements = bkAll.daily; AppState.dailyRequirementsCast = bkAll.dailyC;
+        AppState.violations = checkViolations(AppState.shifts);
+        say((/^cancel/.test(e.message || '') ? '中止しました。元に戻しました。' : '作り直しに失敗しました: ' + escapeHtml(e.message)), false);
+      } finally { calcEnd(); }
       planRows = null; recoDirty = true;
       busy(false); renderResultTable(); render();
     }));
@@ -3593,6 +3610,8 @@ function showPartialRegenModal() {
       render();
     });
     const run = (opts) => {
+      // ほかの計算中なら、固定をかける前に止める（固定だけ残って作り直されないのを防ぐ）
+      if (calcBusy()) { calcBusyToast(); return; }
       const n = applyPartialLock(cut);
       close();
       toast(`🔒 1〜${cut - 1}日の ${n}マス を固定しました。${cut}日以降を作り直します…`, 'info', 4000);
@@ -4202,6 +4221,7 @@ function showSurplusPlanModal() {
         render();
         return;
       }
+      if (!calcBegin('余の使い道の試し計算')) return;
       $c.disabled = true; $c.textContent = '⏳ 計算中…';
       try {
         // 「余を残すな」と指示して解かせる。押し出しの強さは、実測では 8000 だと半分しか出ず、
@@ -4213,8 +4233,9 @@ function showSurplusPlanModal() {
             settingsPatch: { useUpSurplus: true, penalties: { offSurplusUnused: 20000 } } });
         rows = _collectSurplusRows(res._shifts);
       } catch (e) {
-        toast('計算に失敗しました: ' + e.message, 'error');
-      }
+        if (/^cancel/.test(e.message || '')) toast('試し計算を中止しました', 'info');
+        else toast('計算に失敗しました: ' + e.message, 'error');
+      } finally { calcEnd(); }
       render();
     });
     if ($a) $a.addEventListener('click', () => {

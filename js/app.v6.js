@@ -368,6 +368,7 @@ function setupGeneratePanel() {
     const $text = document.getElementById('progressText');
     const $report = document.getElementById('reportCard');
 
+    if (!calcBegin('生成')) return;
     setBusy(true);
     if (btnCancel) btnCancel.style.display = 'inline-block';
     $area.style.display = 'block';
@@ -419,6 +420,7 @@ function setupGeneratePanel() {
       return;
     } finally {
       setBusy(false);
+      calcEnd();
       if (btnCancel) btnCancel.style.display = 'none';
     }
   };
@@ -942,6 +944,7 @@ function setupResultPanel() {
         return;
       }
 
+      if (!calcBegin('エラーの自動修正')) return;
       // 修復前の状態を履歴に積む → 気に入らなければ Ctrl+Z で戻せる
       if (typeof recordShiftHistory === 'function') recordShiftHistory();
 
@@ -994,6 +997,7 @@ function setupResultPanel() {
         if (/^cancel/.test(e.message || '')) toast('自動修正を中止しました（表は元のままです）', 'info');
         else toast('修復中にエラーが発生しました: ' + e.message, 'error');
       } finally {
+        calcEnd();
         btnRepair.disabled = false;
         btnRepair.textContent = orig;
         // 数秒後に進捗表示を隠す（結果は表とレポートに残る）

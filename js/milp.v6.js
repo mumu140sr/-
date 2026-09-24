@@ -47,6 +47,35 @@ function cancelMILP() {
 function milpRunning() { return _milpRunning.size > 0; }
 const MILP_CANCEL_MSG = 'cancel: 中止しました';
 
+// 計算は一度に1つだけ。生成中に「エラーを自動修正」などを押すと計算が同時に走り、
+// 後から終わった古いほうの結果で表が上書きされることがあった。
+// 計算を始める所（生成・自動修正・途中から作り直す・余の使い道・余の解消）は
+// calcBegin で始め、終わったら必ず calcEnd を呼ぶ。計算中は下のボタンを押せなくする。
+let _calcOwner = null;
+const CALC_BUTTONS = ['btnGenerate', 'btnGenerateFast', 'btnWizard', 'btnRepair', 'btnPartialRegen',
+                      'btnSurplusPlan', 'btnRelax', 'btnResolveSurplus'];
+function calcBusy() { return !!_calcOwner; }
+function calcBusyToast() {
+  if (typeof toast === 'function')
+    toast(`いまは「${_calcOwner}」を計算中です。終わるのを待つか、⏹ 中止を押してからにしてください`, 'warning', 6000);
+}
+/** 計算を始めてよければ true。ほかの計算中なら知らせて false */
+function calcBegin(label) {
+  if (_calcOwner) { calcBusyToast(); return false; }
+  _calcOwner = label || '計算';
+  _calcButtons(true);
+  return true;
+}
+function calcEnd() { _calcOwner = null; _calcButtons(false); }
+function _calcButtons(on) {
+  if (typeof document === 'undefined') return;
+  CALC_BUTTONS.forEach(id => {
+    const b = document.getElementById(id); if (!b) return;
+    if (on) { if (!b.disabled) { b.disabled = true; b.dataset.calcLocked = '1'; } }
+    else if (b.dataset.calcLocked) { b.disabled = false; delete b.dataset.calcLocked; }
+  });
+}
+
 /**
  * ③複数同時実行: 解き方の違う計算を同時に走らせ、一番エラーが少ないものを採る。
  * シフト作成は「たまたま良い枝に入れるか」で結果がぶれるため、
