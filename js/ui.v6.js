@@ -2510,7 +2510,13 @@ function showSurplusResolveModal() {
 
   // 「エラーが増えますが実行しますか？」をモーダル内で聞く。
   // 公休不足・連勤超過などの重要ルールが増える場合は、個人の希望と分けて表示する。
-  const askWorsen = (sd, up) => new Promise(resolve => {
+  // 答えを待っている確認。パネルを ✕ で閉じたら「やめる」として答え、変更を元に戻す。
+  // 答えないまま閉じると、計算の鍵が外れずアプリが固まり、答えていない変更も表に残っていた。
+  let pendingAsk = null, panelClosed = false;
+  const askWorsen = (sd, up) => new Promise(resolve0 => {
+    if (panelClosed) return resolve0(false);     // 計算中に閉じられていたら、聞かずにやめる
+    const resolve = (v) => { pendingAsk = null; resolve0(v); };
+    pendingAsk = resolve;
     const $m = modal.querySelector('#resolveMsg');
     const words = _diffWords(sd);
     if (!$m) return resolve(confirm(`${words}。実行しますか？`));
@@ -3265,7 +3271,13 @@ function showSurplusResolveModal() {
 
   const bind = () => {
     const $ = (id) => modal.querySelector('#' + id);
-    $('surplusX').addEventListener('click', () => { modal.remove(); refreshAllUI(); });
+    $('surplusX').addEventListener('click', () => {
+      panelClosed = true;
+      if (pendingAsk) pendingAsk(false);           // 答えていない確認は「やめる」
+      modal.remove();
+      // 元に戻す処理（答えを受け取った側）が終わってから画面を描き直す
+      setTimeout(() => refreshAllUI(), 0);
+    });
 
     if ($('planSearch')) $('planSearch').addEventListener('click', () => { planQueue = null; planRows = null; runPlanSearch(false); });
     if ($('planMore'))   $('planMore').addEventListener('click',   () => { runPlanSearch(true); });
