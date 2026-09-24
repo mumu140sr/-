@@ -148,50 +148,72 @@ function setupSettingsPanel() {
   $renwDays.value = Object.keys(AppState.specialDays)
     .filter(d => AppState.specialDays[d] === 'renewal').join(',');
 
-  $month.addEventListener('change', () => {
+  // ── 対象年月を変える ─────────────────────────────
+  // キーボードで打ち替えると、途中の値（「11」を打つ途中の「1月」など）でも change が来る。
+  // その都度確認画面を出すと画面が重なり、下に残った画面の操作で、やめたつもりの片付けが
+  // 実行されていた。確認画面は1枚だけにし（開いていれば中身を最新の値に差し替える）、
+  // 打ち終わって少し待ったとき・入力欄から離れたときの最後の値だけで判断する。
+  const validYM = (ym) => { const m = /^(\d{4})-(\d{2})$/.exec(ym || ''); if (!m) return false;
+    const y = +m[1], mo = +m[2]; return y >= 2000 && y <= 2100 && mo >= 1 && mo <= 12; };
+  const nextOf = (ym) => { const m = /^(\d{4})-(\d{2})$/.exec(ym || ''); if (!m) return '';
+    const y = +m[1], mo = +m[2]; return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`; };
+  let monthModal = null, monthTarget = '', monthTimer = null;
+  const closeMonthModal = () => { if (monthModal) monthModal.remove(); monthModal = null; monthTarget = ''; };
+  const revertMonth = () => { $month.value = AppState.settings.targetMonth || ''; };
+  // 月を変える（clean=片付ける, carry=前月末を引き継ぐ）
+  const doMonthChange = (newMonth, clean, carry) => {
+    const prevMonth = AppState.settings.targetMonth;
+    if (calcBusy()) { revertMonth(); calcBusyToast(); return; }
+    // 引き継ぎ → 片付け の順。片付けたあとでは前の月の表が読めない。
+    const info = carry ? calcPrevMonthEndFromShifts(AppState.shifts, getDaysInMonth(prevMonth)) : null;
+    AppState.settings.targetMonth = newMonth;
+    // 月が変わったら「◯日以前は確定済み」の扱いは意味を失うので解除する
+    AppState.settings.ignoreVioBeforeDay = 0;
+    if (info) { applyPrevMonthEnd(info); renderStaffTable(); }
+    if (clean) {
+      // 片付けるのは、日付に結びついたものだけ。スタッフ・設定・ルールの強弱・
+      // 必要人数のルールは、次の月もそのまま使うので残す。
+      AppState.shifts = {}; AppState.requests = {}; AppState.fixedShifts = {};
+      AppState.specialDays = {}; AppState.events = [];
+      AppState.dailyRequirements = {}; AppState.dailyRequirementsCast = {};
+      // 日ごとのスキル指定も日付つきなので片付ける。スキルの種類と目標人数（skills）は残す。
+      const ds = {}; Object.keys(AppState.dailySkills || {}).forEach(k => { ds[k] = {}; }); AppState.dailySkills = ds;
+      AppState.violations = []; AppState.generated = false;
+      if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 前の月の表へ戻せないように
+    }
+    refreshAllUI();
+    autoSave();
+    toast(`${newMonth} に切り替えました` + (clean ? '（前の月の表・希望・固定などを片付けました）' : '') +
+          (info ? '。前月末の連勤日数・シフトを引き継ぎました' : ''), 'success', 5000);
+  };
+  const decideMonth = () => {
+    clearTimeout(monthTimer); monthTimer = null;
     const prevMonth = AppState.settings.targetMonth;
     const newMonth = $month.value;
-    if (prevMonth === newMonth) return;
-    // ちょうど翌月に進めたときだけ、前月末（連勤日数・最後のシフト）を引き継げる。
-    // 月を戻したときや2か月以上飛ばしたときは、前の表の月末は新しい月の前月末ではない。
-    const nextOf = (ym) => { const m = /^(\d{4})-(\d{2})$/.exec(ym || ''); if (!m) return '';
-      const y = +m[1], mo = +m[2]; return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`; };
-    const canCarry = !!prevMonth && newMonth === nextOf(prevMonth) && AppState.generated;
-    const doChange = (clean, carry) => {
-      // 引き継ぎ → 片付け の順。片付けたあとでは前の月の表が読めない。
-      const info = carry ? calcPrevMonthEndFromShifts(AppState.shifts, getDaysInMonth(prevMonth)) : null;
-      AppState.settings.targetMonth = newMonth;
-      // 月が変わったら「◯日以前は確定済み」の扱いは意味を失うので解除する
-      AppState.settings.ignoreVioBeforeDay = 0;
-      if (info) { applyPrevMonthEnd(info); renderStaffTable(); }
-      if (clean) {
-        // 片付けるのは、日付に結びついたものだけ。スタッフ・設定・ルールの強弱・
-        // 必要人数のルールは、次の月もそのまま使うので残す。
-        AppState.shifts = {}; AppState.requests = {}; AppState.fixedShifts = {};
-        AppState.specialDays = {}; AppState.events = [];
-        AppState.dailyRequirements = {}; AppState.dailyRequirementsCast = {};
-        // 日ごとのスキル指定も日付つきなので片付ける。スキルの種類と目標人数（skills）は残す。
-        const ds = {}; Object.keys(AppState.dailySkills || {}).forEach(k => { ds[k] = {}; }); AppState.dailySkills = ds;
-        AppState.violations = []; AppState.generated = false;
-        if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 前の月の表へ戻せないように
-      }
-      refreshAllUI();
-      autoSave();
-      toast(`${newMonth} に切り替えました` + (clean ? '（前の月の表・希望・固定などを片付けました）' : '') +
-            (info ? '。前月末の連勤日数・シフトを引き継ぎました' : ''), 'success', 5000);
-    };
-    // 前の月の日付つきデータが残っていれば、片付けてよいか聞く。何も無ければそのまま変える。
+    if (newMonth === prevMonth) { closeMonthModal(); return; }
+    // ありえない年月（打っている途中の 0002年 など）では聞かない。入力欄を離れたら元に戻す。
+    if (!validYM(newMonth)) { closeMonthModal(); if (document.activeElement !== $month) revertMonth(); return; }
+    // 計算中は月を変えない（終わった答えが新しい月の表に入って保存されてしまう）
+    if (calcBusy()) { closeMonthModal(); revertMonth(); calcBusyToast(); return; }
+    if (monthModal && monthTarget === newMonth) return;   // 同じ値で開いている（ボタンを押す途中など）
     const cnt = (o) => Object.values(o || {}).reduce((a, r) => a + Object.keys(r || {}).length, 0);
     const has = { 表: cnt(AppState.shifts), 希望休: cnt(AppState.requests), '🔒固定': cnt(AppState.fixedShifts),
                   特別日: Object.keys(AppState.specialDays || {}).length, 行事: (AppState.events || []).length,
                   日ごとの必要人数: cnt(AppState.dailyRequirements) + cnt(AppState.dailyRequirementsCast),
                   日ごとのスキル指定: cnt(AppState.dailySkills) };
     const list = Object.keys(has).filter(k => has[k] > 0);
-    if (!list.length) { doChange(false, false); return; }
-    const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
-    modal.style.zIndex = 10050;
-    modal.innerHTML = `
+    // 前の月の日付つきデータが無ければ、聞かずにそのまま変える
+    if (!list.length) { closeMonthModal(); doMonthChange(newMonth, false, false); return; }
+    // ちょうど翌月に進めたときだけ、前月末（連勤日数・最後のシフト）を引き継げる。
+    const canCarry = !!prevMonth && newMonth === nextOf(prevMonth) && AppState.generated;
+    if (!monthModal) {
+      monthModal = document.createElement('div');
+      monthModal.className = 'modal-overlay';
+      monthModal.style.zIndex = 10050;
+      document.body.appendChild(monthModal);
+    }
+    monthTarget = newMonth;
+    monthModal.innerHTML = `
       <div class="modal-content" style="max-width:560px">
         <div class="modal-header"><h3 style="margin:0">📅 ${escapeHtml(newMonth)} に切り替えます</h3></div>
         <div class="modal-body" style="line-height:1.8">
@@ -208,19 +230,27 @@ function setupSettingsPanel() {
           <button class="btn btn-primary" id="mcClean">片付けて切り替える</button>
         </div>
       </div>`;
-    document.body.appendChild(modal);
-    const carry = () => { const c = modal.querySelector('#mcCarry'); return !!(c && c.checked); };
-    const close = () => modal.remove();
-    modal.querySelector('#mcCancel').addEventListener('click', () => { $month.value = prevMonth || ''; close(); });
-    modal.querySelector('#mcExport').addEventListener('click', () => {
+    const m = monthModal;
+    const carry = () => { const c = m.querySelector('#mcCarry'); return !!(c && c.checked); };
+    m.querySelector('#mcCancel').addEventListener('click', () => { closeMonthModal(); revertMonth(); });
+    m.querySelector('#mcExport').addEventListener('click', () => {
       // 書き出しは、月を変える前（前の月の名前・中身のまま）に行う。
       // 書き出しに失敗したら片付けない（画面は開いたままにして、選び直してもらう）。
       const ok = (typeof exportAppData === 'function') && exportAppData();
       if (!ok) { toast('書き出しに失敗したので、片付けずに止めました。「やめる」か、もう一度お試しください', 'error', 8000); return; }
-      const c = carry(); close(); doChange(true, c);
+      const t = monthTarget, c = carry(); closeMonthModal(); doMonthChange(t, true, c);
     });
-    modal.querySelector('#mcClean').addEventListener('click', () => { const c = carry(); close(); doChange(true, c); });
+    m.querySelector('#mcClean').addEventListener('click', () => {
+      const t = monthTarget, c = carry(); closeMonthModal(); doMonthChange(t, true, c);
+    });
+  };
+  $month.addEventListener('change', () => {
+    // 計算中は、打った時点で元に戻して知らせる
+    if (calcBusy() && $month.value !== AppState.settings.targetMonth) { revertMonth(); calcBusyToast(); return; }
+    clearTimeout(monthTimer);
+    monthTimer = setTimeout(decideMonth, 800);   // 打ち終わるのを少し待つ
   });
+  $month.addEventListener('blur', () => decideMonth());
   $maxCons.addEventListener('change', () => {
     AppState.settings.maxConsecutive = parseInt($maxCons.value) || 4;
     warnComplianceLimit(AppState.settings.maxConsecutive, '全体');
@@ -1704,6 +1734,8 @@ function setupDragAndDrop() {
     td.addEventListener('drop', e => {
       e.preventDefault();
       if (!dragSource || dragSource === td) return;
+      // 計算中は手で変えない（終わった答えで上書きされる）
+      if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
       recordShiftHistory();
       const sid1 = dragSource.dataset.sid, d1 = parseInt(dragSource.dataset.day);
       const sid2 = td.dataset.sid,         d2 = parseInt(td.dataset.day);
@@ -1803,6 +1835,7 @@ function setupManualEdit() {
     e.stopPropagation();
     const btn = e.target.closest('.shift-option');
     if (!btn || !editingCell) return;
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
     recordShiftHistory();
     const sid      = editingCell.dataset.sid;
     const d        = parseInt(editingCell.dataset.day);
@@ -3499,6 +3532,7 @@ const RangeLock = {
     if (!tbl) return;
     const sel = [...tbl.querySelectorAll('td.range-sel')];
     if (!sel.length) return;
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
     if (typeof recordShiftHistory === 'function') recordShiftHistory();
     let n = 0;
     sel.forEach(td => {

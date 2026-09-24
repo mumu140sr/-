@@ -103,6 +103,8 @@ function setupHeaderActions() {
   });
 
   document.getElementById('btnLoad').addEventListener('click', () => {
+    // 計算中は読み込まない（終わった答えが、読み込んだデータの表に入ってしまう）
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
     if (loadFromStorage()) {
       // 読み込む前の表へ「元に戻す」で戻れてしまうと、読み込んだデータが古い表で上書きされる
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
@@ -121,10 +123,11 @@ function setupHeaderActions() {
   const btnImp = document.getElementById('btnImportData');
   const fileImp = document.getElementById('fileImportData');
   if (btnImp && fileImp) {
-    btnImp.addEventListener('click', () => fileImp.click());
+    btnImp.addEventListener('click', () => { if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; } fileImp.click(); });
     fileImp.addEventListener('change', () => {
       const f = fileImp.files && fileImp.files[0];
       if (!f) return;
+      if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); fileImp.value = ''; return; }
       const rd = new FileReader();
       rd.onload = () => {
         try {
@@ -147,6 +150,7 @@ function setupHeaderActions() {
   }
 
   document.getElementById('btnReset').addEventListener('click', () => {
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
     if (confirm('全てのデータをリセットしますか？（保存データも削除されます）')) {
       resetAll();
       addSampleStaff();
@@ -860,6 +864,7 @@ function renderFixPlans(root) {
       box.querySelectorAll('[data-fixplan]').forEach(btn => btn.addEventListener('click', () => {
         const p = plans[parseInt(btn.dataset.fixplan)];
         if (!p) return;
+        if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
         if (typeof recordShiftHistory === 'function') recordShiftHistory();
         p.steps.forEach(m => {
           const t = AppState.shifts[m.aId][m.day];
@@ -920,6 +925,7 @@ function setupResultPanel() {
   });
 
   document.getElementById('btnClearFixed').addEventListener('click', () => {
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
     let count = 0;
     for (const sid in AppState.fixedShifts) {
       count += Object.keys(AppState.fixedShifts[sid] || {}).length;
