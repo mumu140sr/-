@@ -1892,9 +1892,9 @@ function refreshAfterManualEdit(doneMsg, before) {
   // そのほか悪くなったもの（件数と連勤の超過日数を分けて出す）
   const up = scoreWorsened(nowSc, prevSc).filter(x => x.key !== 'comp');
   if (up.length) {
-    const lab = (k) => k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過（回）' : k === 'soft' ? '🟡'
+    const lab = (k) => k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? '🟡'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
-    warns.push('⚠ 悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${x.key === 'over' ? '日' : x.key === 'bsOver' ? '' : '件'}`).join('・'));
+    warns.push('⚠ 悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${x.key === 'over' ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('・'));
   }
   if (warns.length) {
     toast((doneMsg ? doneMsg + '。' : '') + warns.join(' ／ '), warns.some(w => w.startsWith('⛔')) ? 'error' : 'warning', 8000);
@@ -3008,7 +3008,7 @@ function showSurplusResolveModal() {
     if (!up.length) return '';
     const lab = (k) => k === 'comp' ? '⛔コンプラ違反' : k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? '🟡'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
-    return `<br><span class="hint">増えたもの：${up.map(x => escapeHtml(lab(x.key)) + ` ${x.from}→${x.to}${x.key === 'over' ? '日' : '件'}`).join('、')}</span>`;
+    return `<br><span class="hint">増えたもの：${up.map(x => escapeHtml(lab(x.key)) + ` ${x.from}→${x.to}${x.key === 'over' ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('、')}</span>`;
   };
 
   const busy = (on) => modal.querySelectorAll('button, select').forEach(el => {

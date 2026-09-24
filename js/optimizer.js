@@ -3061,7 +3061,7 @@ function checkViolations(shifts) {
         if (n > cap) {
           const must = getRuleLevel('band-switch') === 'must';
           violations.push({
-            staffId: s.id, day: swDays[cap], type: 'band-switch', over: n - cap, weight: n - cap, count: n,
+            staffId: s.id, day: swDays[cap], to: swDays[swDays.length - 1], type: 'band-switch', over: n - cap, weight: n - cap, count: n,
             message: `${must ? '🚨' : '⚠️'} 早遅の切り替え ${n}回（月${cap}回まで・${n - cap}回超過）　切り替えた日: ${swDays.join('・')}日`,
             action: '早番・遅番の時間帯をまとめてください（切り替える日を減らす）',
           });
@@ -3336,8 +3336,10 @@ function checkViolations(shifts) {
   // ただし月単位の違反（公休数・早遅バランスなど・day=0）は後半で調整できるため残す。
   // 連勤は、終わった日（to）で前半か後半かを決める。上限を超えた日（day）で決めると、
   // 確定した前半から後半へ続いて6連勤以上になった連勤が数えられなかった。
+  // 早遅の切り替えも同じく、最後に切り替えた日（to）で決める。上限を超えた日で決めると、
+  // 前半だけで上限を超えた人は、後半の切り替えも検査から消えていた。
   const cut = parseInt(AppState.settings.ignoreVioBeforeDay) || 0;
-  const dayOf = (v) => (v.type === 'consecutive' && v.to) ? v.to : v.day;
+  const dayOf = (v) => ((v.type === 'consecutive' || v.type === 'band-switch') && v.to) ? v.to : v.day;
   return violations.filter(v => getRuleLevel(v.type) !== 'off')
                    .filter(v => !(cut > 1 && dayOf(v) > 0 && dayOf(v) < cut));
 }
