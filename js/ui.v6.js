@@ -155,7 +155,11 @@ function setupSettingsPanel() {
     if (prevMonth !== $month.value) AppState.settings.ignoreVioBeforeDay = 0;
     // 月を変えたとき、前の月のシフト表から「前月末連勤日数・前月末シフト」を引き継ぐ。
     // 手入力し忘れ／古い値の残りによる「前月末が反映されない」を防ぐ。
-    if (prevMonth && prevMonth !== $month.value && AppState.generated) {
+    // 聞くのは、ちょうど翌月に進めたときだけ。月を戻したときや2か月以上飛ばしたときは、
+    // 前の表の月末は新しい月の「前月末」ではないので引き継がない。
+    const nextOf = (ym) => { const m = /^(\d{4})-(\d{2})$/.exec(ym || ''); if (!m) return '';
+      const y = +m[1], mo = +m[2]; return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`; };
+    if (prevMonth && $month.value === nextOf(prevMonth) && AppState.generated) {
       const info = calcPrevMonthEndFromShifts(AppState.shifts, getDaysInMonth(prevMonth));
       const names = Object.keys(info).filter(id => info[id].cons > 0).length;
       const msg = `${prevMonth} のシフト表から、各スタッフの「前月末連勤日数」「前月末シフト」を`
