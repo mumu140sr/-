@@ -150,30 +150,71 @@ function setupSettingsPanel() {
 
   $month.addEventListener('change', () => {
     const prevMonth = AppState.settings.targetMonth;
-    AppState.settings.targetMonth = $month.value;
-    // 月が変わったら「◯日以前は確定済み」の扱いは意味を失うので解除する
-    if (prevMonth !== $month.value) AppState.settings.ignoreVioBeforeDay = 0;
-    // 月を変えたとき、前の月のシフト表から「前月末連勤日数・前月末シフト」を引き継ぐ。
-    // 手入力し忘れ／古い値の残りによる「前月末が反映されない」を防ぐ。
-    // 聞くのは、ちょうど翌月に進めたときだけ。月を戻したときや2か月以上飛ばしたときは、
-    // 前の表の月末は新しい月の「前月末」ではないので引き継がない。
+    const newMonth = $month.value;
+    if (prevMonth === newMonth) return;
+    // ちょうど翌月に進めたときだけ、前月末（連勤日数・最後のシフト）を引き継げる。
+    // 月を戻したときや2か月以上飛ばしたときは、前の表の月末は新しい月の前月末ではない。
     const nextOf = (ym) => { const m = /^(\d{4})-(\d{2})$/.exec(ym || ''); if (!m) return '';
       const y = +m[1], mo = +m[2]; return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`; };
-    if (prevMonth && $month.value === nextOf(prevMonth) && AppState.generated) {
-      const info = calcPrevMonthEndFromShifts(AppState.shifts, getDaysInMonth(prevMonth));
-      const names = Object.keys(info).filter(id => info[id].cons > 0).length;
-      const msg = `${prevMonth} のシフト表から、各スタッフの「前月末連勤日数」「前月末シフト」を`
-                + `自動で引き継ぎますか？\n（${names}人が月末に連勤中です）\n\n`
-                + `※「キャンセル」を選ぶと現在の設定値がそのまま残ります。`;
-      if (confirm(msg)) {
-        applyPrevMonthEnd(info);
-        renderStaffTable();
-        toast('前月末の連勤日数・シフトを引き継ぎました', 'success', 4000);
+    const canCarry = !!prevMonth && newMonth === nextOf(prevMonth) && AppState.generated;
+    const doChange = (clean, carry) => {
+      // 引き継ぎ → 片付け の順。片付けたあとでは前の月の表が読めない。
+      const info = carry ? calcPrevMonthEndFromShifts(AppState.shifts, getDaysInMonth(prevMonth)) : null;
+      AppState.settings.targetMonth = newMonth;
+      // 月が変わったら「◯日以前は確定済み」の扱いは意味を失うので解除する
+      AppState.settings.ignoreVioBeforeDay = 0;
+      if (info) { applyPrevMonthEnd(info); renderStaffTable(); }
+      if (clean) {
+        // 片付けるのは、日付に結びついたものだけ。スタッフ・設定・ルールの強弱・
+        // 必要人数のルールは、次の月もそのまま使うので残す。
+        AppState.shifts = {}; AppState.requests = {}; AppState.fixedShifts = {};
+        AppState.specialDays = {}; AppState.events = [];
+        AppState.dailyRequirements = {}; AppState.dailyRequirementsCast = {};
+        AppState.violations = []; AppState.generated = false;
+        if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 前の月の表へ戻せないように
       }
-    }
-    renderCalendar();
-    renderResultTable();
-    autoSave();
+      refreshAllUI();
+      autoSave();
+      toast(`${newMonth} に切り替えました` + (clean ? '（前の月の表・希望・固定などを片付けました）' : '') +
+            (info ? '。前月末の連勤日数・シフトを引き継ぎました' : ''), 'success', 5000);
+    };
+    // 前の月の日付つきデータが残っていれば、片付けてよいか聞く。何も無ければそのまま変える。
+    const cnt = (o) => Object.values(o || {}).reduce((a, r) => a + Object.keys(r || {}).length, 0);
+    const has = { 表: cnt(AppState.shifts), 希望休: cnt(AppState.requests), '🔒固定': cnt(AppState.fixedShifts),
+                  特別日: Object.keys(AppState.specialDays || {}).length, 行事: (AppState.events || []).length,
+                  日ごとの必要人数: cnt(AppState.dailyRequirements) + cnt(AppState.dailyRequirementsCast) };
+    const list = Object.keys(has).filter(k => has[k] > 0);
+    if (!list.length) { doChange(false, false); return; }
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.zIndex = 10050;
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width:560px">
+        <div class="modal-header"><h3 style="margin:0">📅 ${escapeHtml(newMonth)} に切り替えます</h3></div>
+        <div class="modal-body" style="line-height:1.8">
+          <p>${escapeHtml(prevMonth || '前の月')} の次のデータが残っています。そのまま残すと、
+             <b>同じ日付のまま ${escapeHtml(newMonth)} の生成に使われてしまいます</b>。</p>
+          <p style="margin:6px 0 10px">${list.map(k => `・${k}（${has[k]}件）`).join('<br>')}</p>
+          <p class="hint">片付けるのは上のものだけです。スタッフ・設定・ルールの強弱・必要人数のルールはそのまま残ります。</p>
+          ${canCarry ? `<label style="display:block;margin-top:8px"><input type="checkbox" id="mcCarry" checked>
+             ${escapeHtml(prevMonth)} の表から「前月末の連勤日数・最後のシフト」を引き継ぐ（片付ける前に読み取ります）</label>` : ''}
+        </div>
+        <div class="modal-footer" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <button class="btn" id="mcCancel">やめる（月も変えない）</button>
+          <button class="btn" id="mcExport">📤 先に書き出してから片付ける</button>
+          <button class="btn btn-primary" id="mcClean">片付けて切り替える</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    const carry = () => { const c = modal.querySelector('#mcCarry'); return !!(c && c.checked); };
+    const close = () => modal.remove();
+    modal.querySelector('#mcCancel').addEventListener('click', () => { $month.value = prevMonth || ''; close(); });
+    modal.querySelector('#mcExport').addEventListener('click', () => {
+      // 書き出しは、月を変える前（前の月の名前・中身のまま）に行う
+      const ex = document.getElementById('btnExportData'); if (ex) ex.click();
+      const c = carry(); close(); doChange(true, c);
+    });
+    modal.querySelector('#mcClean').addEventListener('click', () => { const c = carry(); close(); doChange(true, c); });
   });
   $maxCons.addEventListener('change', () => {
     AppState.settings.maxConsecutive = parseInt($maxCons.value) || 4;
