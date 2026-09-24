@@ -29,6 +29,24 @@ function _milpPayload(settingsPatch) {
   };
 }
 
+// 動いている計算（Worker）の一覧。「⏹ 中止」で全部止めるために覚えておく。
+// これまで中止ボタンは古い計算（焼きなまし）の Worker しか止めておらず、
+// 数理最適化は止まらずに最後まで走り、終わった結果で表が置き換わっていた。
+const _milpRunning = new Set();
+function _milpTrack(worker, onAbort) {
+  const h = { abort: () => { try { worker.terminate(); } catch (_) {} onAbort(); } };
+  _milpRunning.add(h);
+  return () => _milpRunning.delete(h);
+}
+/** 動いている数理最適化をすべて止める。止めたものがあれば true */
+function cancelMILP() {
+  const any = _milpRunning.size > 0;
+  Array.from(_milpRunning).forEach(h => { _milpRunning.delete(h); h.abort(); });
+  return any;
+}
+function milpRunning() { return _milpRunning.size > 0; }
+const MILP_CANCEL_MSG = 'cancel: 中止しました';
+
 /**
  * ③複数同時実行: 解き方の違う計算を同時に走らせ、一番エラーが少ないものを採る。
  * シフト作成は「たまたま良い枝に入れるか」で結果がぶれるため、
@@ -55,14 +73,15 @@ function milpTrial(payload, variant, timeOverride) {
     let worker;
     try { worker = new Worker('js/milp.worker.js?v=220'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
-    const timeout = setTimeout(() => { try { worker.terminate(); } catch (_) {} reject(new Error('タイムアウト')); }, 600000);
+    const untrack = _milpTrack(worker, () => { clearTimeout(timeout); reject(new Error(MILP_CANCEL_MSG)); });
+    const timeout = setTimeout(() => { untrack(); try { worker.terminate(); } catch (_) {} reject(new Error('タイムアウト')); }, 600000);
     worker.onmessage = (e) => {
       const m = e.data || {};
       if (m.type === 'progress') return;
-      if (m.type === 'done')  { clearTimeout(timeout); worker.terminate(); resolve({ shifts: m.shifts || {}, violations: m.violations || [] }); return; }
-      if (m.type === 'error') { clearTimeout(timeout); worker.terminate(); reject(new Error(m.message || '数理最適化エラー')); return; }
+      if (m.type === 'done')  { untrack(); clearTimeout(timeout); worker.terminate(); resolve({ shifts: m.shifts || {}, violations: m.violations || [] }); return; }
+      if (m.type === 'error') { untrack(); clearTimeout(timeout); worker.terminate(); reject(new Error(m.message || '数理最適化エラー')); return; }
     };
-    worker.onerror = (err) => { clearTimeout(timeout); try { worker.terminate(); } catch (_) {} reject(new Error(err.message || 'Workerエラー')); };
+    worker.onerror = (err) => { untrack(); clearTimeout(timeout); try { worker.terminate(); } catch (_) {} reject(new Error(err.message || 'Workerエラー')); };
     worker.postMessage({ type: 'milp', appState: payload, fastMode: true, timeOverride: parseInt(timeOverride) || 0, variant: parseInt(variant) || 0 });
   });
 }
@@ -154,7 +173,9 @@ function _milpOnce(onProgress, opts, variant) {
       const pct = Math.min(95, 30 + sec); // 見た目の進み（実際の内部進捗ではない）
       onProgress && onProgress(pct, `計算中… 経過${sec}秒（最良解を探索中。画面が止まって見えても動いています）`);
     }, 1000);
-    const cleanup = () => { clearTimeout(timeout); clearInterval(ticker); };
+    let untrack = () => {};
+    const cleanup = () => { untrack(); clearTimeout(timeout); clearInterval(ticker); };
+    untrack = _milpTrack(worker, () => { cleanup(); reject(new Error(MILP_CANCEL_MSG)); });
     worker.onmessage = (e) => {
       const m = e.data || {};
       if (m.type === 'progress') { if (/計算中/.test(m.label || '')) solving = true; onProgress && onProgress(m.pct, m.label); return; }

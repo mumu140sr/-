@@ -429,7 +429,11 @@ function setupGeneratePanel() {
   // キャンセルボタン
   if (btnCancel) {
     btnCancel.addEventListener('click', () => {
-      if (typeof cancelActiveOptimization === 'function' && cancelActiveOptimization()) {
+      // 数理最適化（いまの生成）と、古い計算の両方を止める。これまでは古い計算しか
+      // 止めておらず、押しても数理最適化は最後まで走って表を置き換えていた。
+      const stopped = (typeof cancelMILP === 'function' && cancelMILP()) |
+                      (typeof cancelActiveOptimization === 'function' && cancelActiveOptimization());
+      if (stopped) {
         toast('中止リクエストを送りました', 'info');
         btnCancel.style.display = 'none';
         setBusy(false);
@@ -987,7 +991,8 @@ function setupResultPanel() {
         console.error(e);
         AppState.shifts = backup; AppState.violations = checkViolations(backup);
         if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-        toast('修復中にエラーが発生しました: ' + e.message, 'error');
+        if (/^cancel/.test(e.message || '')) toast('自動修正を中止しました（表は元のままです）', 'info');
+        else toast('修復中にエラーが発生しました: ' + e.message, 'error');
       } finally {
         btnRepair.disabled = false;
         btnRepair.textContent = orig;
