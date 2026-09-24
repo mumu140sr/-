@@ -81,6 +81,8 @@ function setupHeaderActions() {
 
   document.getElementById('btnLoad').addEventListener('click', () => {
     if (loadFromStorage()) {
+      // 読み込む前の表へ「元に戻す」で戻れてしまうと、読み込んだデータが古い表で上書きされる
+      if (typeof resetShiftHistory === 'function') resetShiftHistory();
       refreshAllUI();
       toast('設定を読込みました', 'success');
     } else {
@@ -130,6 +132,7 @@ function setupHeaderActions() {
            'specialDays','events','shifts'].forEach(k => { if (d[k] !== undefined) AppState[k] = d[k]; });
           AppState.generated = !!(d.shifts && Object.keys(d.shifts).length);
           AppState.violations = AppState.generated ? checkViolations(AppState.shifts) : [];
+          if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 取り込む前の表には戻さない
           saveToStorage(); refreshAllUI();
           toast('設定を取り込みました', 'success');
         } catch (e) { toast('取り込みに失敗しました: ' + e.message, 'error', 6000); }
@@ -143,6 +146,7 @@ function setupHeaderActions() {
     if (confirm('全てのデータをリセットしますか？（保存データも削除されます）')) {
       resetAll();
       addSampleStaff();
+      if (typeof resetShiftHistory === 'function') resetShiftHistory();   // リセット前の表には戻さない
       refreshAllUI();
       toast('リセットしました', 'info');
     }
