@@ -170,6 +170,8 @@ function setupSettingsPanel() {
         AppState.shifts = {}; AppState.requests = {}; AppState.fixedShifts = {};
         AppState.specialDays = {}; AppState.events = [];
         AppState.dailyRequirements = {}; AppState.dailyRequirementsCast = {};
+        // 日ごとのスキル指定も日付つきなので片付ける。スキルの種類と目標人数（skills）は残す。
+        const ds = {}; Object.keys(AppState.dailySkills || {}).forEach(k => { ds[k] = {}; }); AppState.dailySkills = ds;
         AppState.violations = []; AppState.generated = false;
         if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 前の月の表へ戻せないように
       }
@@ -182,7 +184,8 @@ function setupSettingsPanel() {
     const cnt = (o) => Object.values(o || {}).reduce((a, r) => a + Object.keys(r || {}).length, 0);
     const has = { 表: cnt(AppState.shifts), 希望休: cnt(AppState.requests), '🔒固定': cnt(AppState.fixedShifts),
                   特別日: Object.keys(AppState.specialDays || {}).length, 行事: (AppState.events || []).length,
-                  日ごとの必要人数: cnt(AppState.dailyRequirements) + cnt(AppState.dailyRequirementsCast) };
+                  日ごとの必要人数: cnt(AppState.dailyRequirements) + cnt(AppState.dailyRequirementsCast),
+                  日ごとのスキル指定: cnt(AppState.dailySkills) };
     const list = Object.keys(has).filter(k => has[k] > 0);
     if (!list.length) { doChange(false, false); return; }
     const modal = document.createElement('div');
@@ -195,7 +198,7 @@ function setupSettingsPanel() {
           <p>${escapeHtml(prevMonth || '前の月')} の次のデータが残っています。そのまま残すと、
              <b>同じ日付のまま ${escapeHtml(newMonth)} の生成に使われてしまいます</b>。</p>
           <p style="margin:6px 0 10px">${list.map(k => `・${k}（${has[k]}件）`).join('<br>')}</p>
-          <p class="hint">片付けるのは上のものだけです。スタッフ・設定・ルールの強弱・必要人数のルールはそのまま残ります。</p>
+          <p class="hint">片付けるのは上のものだけです。スタッフ・設定・ルールの強弱・必要人数のルール・スキルの種類と目標人数はそのまま残ります。</p>
           ${canCarry ? `<label style="display:block;margin-top:8px"><input type="checkbox" id="mcCarry" checked>
              ${escapeHtml(prevMonth)} の表から「前月末の連勤日数・最後のシフト」を引き継ぐ（片付ける前に読み取ります）</label>` : ''}
         </div>
