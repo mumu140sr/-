@@ -72,6 +72,29 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+/** 設定一式をファイルに書き出す。うまくいけば true（月を変えるときの「先に書き出す」でも使う） */
+function exportAppData() {
+  try {
+    const data = {
+      _app: 'shift-app', _version: 1, _savedAt: new Date().toISOString(),
+      settings: AppState.settings, shiftTypes: AppState.shiftTypes,
+      roleRequirements: AppState.roleRequirements, roleRequirementsCast: AppState.roleRequirementsCast,
+      dailyRequirements: AppState.dailyRequirements, dailyRequirementsCast: AppState.dailyRequirementsCast,
+      skills: AppState.skills, dailySkills: AppState.dailySkills,
+      staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
+      specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `シフト設定_${AppState.settings.targetMonth || '未設定'}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('設定を書き出しました', 'success');
+    return true;
+  } catch (e) { toast('書き出しに失敗しました: ' + e.message, 'error', 7000); return false; }
+}
+
 // ヘッダーアクション
 function setupHeaderActions() {
   document.getElementById('btnSave').addEventListener('click', () => {
@@ -92,26 +115,7 @@ function setupHeaderActions() {
 
   // 設定一式をファイルに書き出す（バックアップ・別PCへの移行・相談用）
   const btnExp = document.getElementById('btnExportData');
-  if (btnExp) btnExp.addEventListener('click', () => {
-    try {
-      const data = {
-        _app: 'shift-app', _version: 1, _savedAt: new Date().toISOString(),
-        settings: AppState.settings, shiftTypes: AppState.shiftTypes,
-        roleRequirements: AppState.roleRequirements, roleRequirementsCast: AppState.roleRequirementsCast,
-        dailyRequirements: AppState.dailyRequirements, dailyRequirementsCast: AppState.dailyRequirementsCast,
-        skills: AppState.skills, dailySkills: AppState.dailySkills,
-        staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
-        specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
-      };
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `シフト設定_${AppState.settings.targetMonth || '未設定'}.json`;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      toast('設定を書き出しました', 'success');
-    } catch (e) { toast('書き出しに失敗しました: ' + e.message, 'error'); }
-  });
+  if (btnExp) btnExp.addEventListener('click', () => { exportAppData(); });
 
   // 書き出したファイルを取り込む
   const btnImp = document.getElementById('btnImportData');

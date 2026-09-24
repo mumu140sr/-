@@ -213,8 +213,10 @@ function setupSettingsPanel() {
     const close = () => modal.remove();
     modal.querySelector('#mcCancel').addEventListener('click', () => { $month.value = prevMonth || ''; close(); });
     modal.querySelector('#mcExport').addEventListener('click', () => {
-      // 書き出しは、月を変える前（前の月の名前・中身のまま）に行う
-      const ex = document.getElementById('btnExportData'); if (ex) ex.click();
+      // 書き出しは、月を変える前（前の月の名前・中身のまま）に行う。
+      // 書き出しに失敗したら片付けない（画面は開いたままにして、選び直してもらう）。
+      const ok = (typeof exportAppData === 'function') && exportAppData();
+      if (!ok) { toast('書き出しに失敗したので、片付けずに止めました。「やめる」か、もう一度お試しください', 'error', 8000); return; }
       const c = carry(); close(); doChange(true, c);
     });
     modal.querySelector('#mcClean').addEventListener('click', () => { const c = carry(); close(); doChange(true, c); });
