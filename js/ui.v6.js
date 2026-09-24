@@ -1912,7 +1912,7 @@ function recordDeltaHistory(list) {
   if (!list || !list.length) return;
   _undoStack.push({ delta: list });
   if (_undoStack.length > 100) _undoStack.shift();
-  _redoStack = [];
+  _redoStack = []; _redoBeforeRecord = null;
   updateHistoryButtons();
 }
 function _afterHistoryApply(touchedStaff) {
@@ -1929,9 +1929,13 @@ function _afterHistoryApply(touchedStaff) {
 }
 
 /** 編集を加える「直前」の状態を履歴に積む（手動編集ハンドラの先頭で呼ぶ） */
+// 積む前のやり直す履歴。積んだ履歴を捨てる（自動修正が改善しなかった・中止した、
+// 途中から作り直すを中止した）ときに元に戻す。捨てたのに、やり直すの履歴だけ消えていた。
+let _redoBeforeRecord = null;
 function recordShiftHistory() {
   _undoStack.push(_snapshotShiftState());
   if (_undoStack.length > 100) _undoStack.shift();
+  _redoBeforeRecord = _redoStack;
   _redoStack = []; // 新しい編集をしたら やり直し履歴は破棄
   updateHistoryButtons();
 }
@@ -1939,7 +1943,7 @@ function recordShiftHistory() {
 /** 生成直後などに履歴をリセット（この状態が一番最初の戻り先になる） */
 function resetShiftHistory() {
   _undoStack = [];
-  _redoStack = [];
+  _redoStack = []; _redoBeforeRecord = null;
   updateHistoryButtons();
 }
 
@@ -1983,6 +1987,7 @@ function redoShiftEdit() {
 /** 直前に積んだ履歴を取り消す（修復が改善しなかった場合などに使う） */
 function discardLastShiftHistory() {
   if (_undoStack.length > 0) _undoStack.pop();
+  if (_redoBeforeRecord) { _redoStack = _redoBeforeRecord; _redoBeforeRecord = null; }
   updateHistoryButtons();
 }
 
