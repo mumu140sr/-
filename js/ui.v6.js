@@ -3051,12 +3051,9 @@ function showSurplusResolveModal() {
 
   // 押す前に「この指定だと何がどうなるか」を先に計算する。
   // 実際には変えず、調べたあとで必ず元に戻す。
+  // 見積もり。押したときと同じ変更（希望・🔒固定・有給日数も）で数え、変えた所だけを戻す。
   const preview = (apply) => {
-    const bk = {
-      shifts: JSON.parse(JSON.stringify(AppState.shifts)),
-      daily:  JSON.parse(JSON.stringify(AppState.dailyRequirements || {})),
-      dailyC: JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
-    };
+    const base = captureChangeBase();
     const bV = checkViolations(AppState.shifts);
     let after, sd;
     try {
@@ -3065,9 +3062,7 @@ function showSurplusResolveModal() {
       after = aV.length;
       sd = _diffOfLists(bV, aV);
     } finally {
-      AppState.shifts = bk.shifts;
-      AppState.dailyRequirements = bk.daily;
-      AppState.dailyRequirementsCast = bk.dailyC;
+      _applyChangeList(changesSince(base), 'undo');
     }
     return { before: bV.length, after, sd };
   };
@@ -3091,9 +3086,12 @@ function showSurplusResolveModal() {
       const id = selPaid.id, d = parseInt(selPaid.day);
       const st = AppState.staff.find(x => x.id === id);
       $p.innerHTML = (st && d)
-        ? previewLine(preview(() => {
+        ? previewLine(preview(() => {   // 「有給にする」を押したときと同じ変更（👑の見積もりと同じ数え方）
+            AppState.requests[id] = AppState.requests[id] || {};
+            AppState.requests[id][d] = '有';
             AppState.shifts[id] = AppState.shifts[id] || {};
             AppState.shifts[id][d] = '有';
+            st.paidLeave = (parseInt(st.paidLeave) || 0) + 1;
           }))
         : '';
     }
@@ -3109,6 +3107,8 @@ function showSurplusResolveModal() {
             const base = (cast ? (AppState.roleRequirementsCast || {}) : AppState.roleRequirements)[key] || 0;
             store[key] = store[key] || {};
             store[key][d] = (store[key][d] != null ? store[key][d] : base) + 1;
+            AppState.fixedShifts[id] = AppState.fixedShifts[id] || {};   // 押したときと同じく固定も
+            AppState.fixedShifts[id][d] = key;
             AppState.shifts[id] = AppState.shifts[id] || {};
             AppState.shifts[id][d] = key;
           })) + '<span class="hint"> ※つじつま合わせ前の目安です</span>'
