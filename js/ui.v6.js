@@ -2560,6 +2560,13 @@ function showSurplusResolveModal() {
   // 答えを待っている確認。パネルを ✕ で閉じたら「やめる」として答え、変更を元に戻す。
   // 答えないまま閉じると、計算の鍵が外れずアプリが固まり、答えていない変更も表に残っていた。
   let pendingAsk = null, panelClosed = false;
+  // 開いている間に表が変わったら（手で直す・月を変える・元に戻すなど）、おすすめを数え直す。
+  // 確認待ち・計算中は数え直さない（変更の途中の表で数えてしまうため）。
+  const fpTimer = setInterval(() => {
+    if (!modal.isConnected) { clearInterval(fpTimer); return; }
+    if (pendingAsk || (typeof calcBusy === 'function' && calcBusy())) return;
+    if (recoCache !== null && stateFp() !== recoFp) { recoCache = null; render(); }
+  }, 1500);
   // パネルを閉じる（✕・開き直し）。答えていない確認は「やめる」にする。確認があれば true
   modal._closePanel = () => {
     panelClosed = true;
@@ -2634,8 +2641,14 @@ function showSurplusResolveModal() {
   // 余のマスごとに「有給にする／定数+1で出勤にする」を全部試し、
   // エラーが何件増えるかを測って良い順に返す。3つの方法が並んでいるだけでは
   // どれを使えばよいか分からない、という声への対応。
-  let recoCache = null, recoDirty = false;
+  let recoCache = null, recoDirty = false, recoFp = '';
+  // 表などの中身の「指紋」。おすすめを作ったときと違えば、一覧は古い
+  // （パネルを開いたまま手で直す・月を変える・元に戻す、など）。
+  const stateFp = () => JSON.stringify([AppState.settings.targetMonth, AppState.shifts, AppState.requests,
+    AppState.fixedShifts, AppState.dailyRequirements, AppState.dailyRequirementsCast,
+    (AppState.staff || []).map(s => [s.id, s.paidLeave])]);
   const buildReco = () => {
+    recoFp = stateFp();
     const cells = listSurplusCells();
     if (!cells.length) return [];
     // 見積もりは、押したときと同じ変更で数える（有給なら希望「有」と有給日数+1、研修なら🔒固定も）。
@@ -3401,6 +3414,12 @@ function showSurplusResolveModal() {
     modal.querySelectorAll('[data-reco]').forEach(btn => btn.addEventListener('click', () => {
       const x = (recoCache || [])[parseInt(btn.dataset.reco)];
       if (!x) return;
+      // 一覧を作ったあとに表が変わっていたら、古い一覧のまま実行しない（手で直したマスを上書きしていた）
+      if (stateFp() !== recoFp || cellOf(x.id, x.day) !== '余') {
+        recoCache = null; render();
+        say('表が変わっていたので、おすすめを数え直しました。もう一度お選びください。', false);
+        return;
+      }
       if (x.kind === 'paid') { selPaid = { id: x.id, day: x.day }; render(); modal.querySelector('#paidGo').click(); }
       else if (x.kind === 'train') { applyTrainReco(x); }
       else { selWork = { id: x.id, day: x.day, key: x.key }; render(); const g = modal.querySelector('#workGo'); if (g) g.click(); }
