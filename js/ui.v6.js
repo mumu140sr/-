@@ -4337,6 +4337,23 @@ function showSurplusPlanModal() {
 
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+  // 🎓「この日に入れる」の候補は、いまの表から作る。開いたまま表が変わったら数え直し、
+  // 古い候補のまま反映しない（候補の日がもう入れられない日になっていることがある）。
+  let rowsFp = '', rowsLearner = false;
+  const fpNow = () => JSON.stringify([AppState.settings.targetMonth, AppState.shifts, AppState.requests,
+    AppState.fixedShifts, AppState.dailyRequirements, AppState.dailyRequirementsCast]);
+  const recountLearner = (why) => {
+    rows = _trainingCandidates(sel.learner, sel.band, sel.tutors);
+    rows.sort((a, b) => _diffCmp(a.sd, b.sd) || (a.d - b.d));
+    rowsFp = fpNow(); rowsLearner = true;
+    render();
+    if (why) toast('🔄 表が変わったので、入れられる日を数え直しました。選び直してください', 'warning', 6000);
+  };
+  const fpTimer2 = setInterval(() => {
+    if (!modal.isConnected) { clearInterval(fpTimer2); return; }
+    if (typeof calcBusy === 'function' && calcBusy()) return;
+    if (rowsLearner && rows && sel.learner && fpNow() !== rowsFp) recountLearner(true);
+  }, 800);
   const render = () => {
     const capTxt = caps.map(c => c.surplus > 0
       ? `${caps.length > 1 ? '【' + c.label + '】' : ''}必要 ${c.required}人日 ／ 出せる ${c.avail}人日 → <b style="color:var(--accent)">余り ${c.surplus}人日</b>`
@@ -4497,13 +4514,12 @@ function showSurplusPlanModal() {
     if ($c) $c.addEventListener('click', async () => {
       // 教わる人を選んでいる場合は、その人を入れられる日をすぐ探す（生成は不要）
       if (sel.learner) {
-        rows = _trainingCandidates(sel.learner, sel.band, sel.tutors);
         // 実際に入れて数えた結果が良い順に並べる（同点なら日付順）
-        rows.sort((a, b) => _diffCmp(a.sd, b.sd) || (a.d - b.d));
+        recountLearner(false);
         if (!rows.length) toast('入れられる日が見つかりませんでした。時間帯や担当シフトをご確認ください', 'error', 6000);
-        render();
         return;
       }
+      rowsLearner = false;
       if (!calcBegin('余の使い道の試し計算')) return;
       $c.disabled = true; $c.textContent = '⏳ 計算中…';
       try {
@@ -4525,6 +4541,8 @@ function showSurplusPlanModal() {
       const pick = rows.filter(r => r.checked);
       if (!pick.length) { toast('反映する場所が選ばれていません', 'error'); return; }
       if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+      // 🎓の候補を出したあとに表が変わっていたら、古い候補のまま反映しない
+      if (rowsLearner && sel.learner && fpNow() !== rowsFp) { recountLearner(true); return; }
       const histBase = captureChangeBase();   // 反映で変えた所を、元に戻すの履歴に積むため
       pick.forEach(r => {
         const store = r.cast ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
