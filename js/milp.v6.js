@@ -59,9 +59,16 @@ let _calcOwner = null;
 const CALC_BUTTONS = ['btnGenerate', 'btnGenerateFast', 'btnWizard', 'btnRepair', 'btnPartialRegen',
                       'btnSurplusPlan', 'btnRelax', 'btnResolveSurplus'];
 function calcBusy() { return !!_calcOwner; }
+// ⏹ 中止ボタンがあるのは、生成と自動修正だけ。ほかの計算では中止を案内しない
+// （ボタンが無いのに「⏹ 中止を押して」と案内していた）。確認待ちは、答えるよう案内する。
+const CALC_HAS_STOP = new Set(['生成', 'エラーの自動修正']);
 function calcBusyToast() {
-  if (typeof toast === 'function')
-    toast(`いまは「${_calcOwner}」を計算中です。終わるのを待つか、⏹ 中止を押してからにしてください`, 'warning', 6000);
+  if (typeof toast !== 'function') return;
+  const what = _calcOwner || '計算';
+  const how = /確認待ち/.test(what) ? '余の解消パネルの「実行しますか？」に答えてからにしてください'
+            : CALC_HAS_STOP.has(what) ? '終わるのを待つか、⏹ 中止を押してからにしてください'
+            : '終わるまでお待ちください';
+  toast(`いまは「${what}」の${/確認待ち/.test(what) ? '途中' : '計算中'}です。${how}`, 'warning', 6000);
 }
 /** 計算を始めてよければ true。ほかの計算中なら知らせて false */
 function calcBegin(label) {
