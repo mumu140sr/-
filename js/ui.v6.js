@@ -400,7 +400,17 @@ function renderRuleLevels() {
         </select>${numHtml}</div>`;
     }
   });
+  // 早遅バランスと切り替えを両方「絶対」にすると、ぶつかることがある（oct11 の実測:
+  // 切り替えを先に解くとバランスのずれ最大10日、バランスを先にすると切り替え最大4回）。
+  // 両方を絶対にしない使い方にしたので、そうなっているときは知らせる。
+  html += '<div id="bsConflictNote" class="hint" style="display:none;margin-top:8px;padding:8px 10px;border-radius:8px;' +
+    'background:color-mix(in srgb, var(--warning) 16%, var(--surface));border:1px solid color-mix(in srgb, var(--warning) 40%, transparent)">' +
+    '⚠️ 「早遅バランス」と「早遅の切り替え」が両方とも「絶対」です。この2つはぶつかることがあります。' +
+    'どちらか一方を「できれば」にしてください。</div>';
   container.innerHTML = html;
+  const bsBoth = () => getRuleLevel('balance-diff') === 'must' && getRuleLevel('band-switch') === 'must';
+  const showBsNote = () => { const n = document.getElementById('bsConflictNote'); if (n) n.style.display = bsBoth() ? '' : 'none'; };
+  showBsNote();
   container.querySelectorAll('select[data-rule]').forEach(el => {
     el.addEventListener('change', e => {
       const t = e.target.dataset.rule, def = e.target.dataset.def, v = e.target.value;
@@ -408,6 +418,9 @@ function renderRuleLevels() {
       else AppState.settings.ruleLevels[t] = v;
       autoSave();
       renderResultTable(); // 表示中の🔴/🟡分類を即反映
+      showBsNote();
+      if ((t === 'balance-diff' || t === 'band-switch') && v === 'must' && bsBoth())
+        toast('「早遅バランス」と「早遅の切り替え」が両方「絶対」です。ぶつかることがあるので、どちらか一方を「できれば」にしてください。', 'warning', 8000);
     });
   });
   container.querySelectorAll('input[data-rulenum]').forEach(el => {
