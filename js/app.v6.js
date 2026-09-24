@@ -380,7 +380,7 @@ function setupGeneratePanel() {
     const $text = document.getElementById('progressText');
     const $report = document.getElementById('reportCard');
 
-    if (!calcBegin('生成')) return;
+    if (!calcBegin('生成')) { if (typeof opts.onAbort === 'function') opts.onAbort(); return; }
     setBusy(true);
     if (btnCancel) btnCancel.style.display = 'inline-block';
     $area.style.display = 'block';
@@ -429,6 +429,8 @@ function setupGeneratePanel() {
         toast('数理最適化に失敗しました: ' + e.message, 'error', 7000);
         $text.textContent = 'エラー: ' + e.message;
       }
+      // 途中から作り直すなど、生成の前に変えたものを元に戻す
+      if (typeof opts.onAbort === 'function') { try { opts.onAbort(); } catch (_) {} }
       return;
     } finally {
       setBusy(false);

@@ -3824,6 +3824,17 @@ function showPartialRegenModal() {
     const run = (opts) => {
       // ほかの計算中なら、固定をかける前に止める（固定だけ残って作り直されないのを防ぐ）
       if (calcBusy()) { calcBusyToast(); return; }
+      // 中止・失敗したときは、前半の固定と「◯日以前は数えない」を元に戻す（固定だけ残っていた）
+      const bkFixed = JSON.parse(JSON.stringify(AppState.fixedShifts || {}));
+      const bkCut = AppState.settings.ignoreVioBeforeDay || 0;
+      opts = Object.assign({}, opts, { onAbort: () => {
+        AppState.fixedShifts = bkFixed;
+        AppState.settings.ignoreVioBeforeDay = bkCut;
+        if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
+        AppState.violations = checkViolations(AppState.shifts);
+        saveToStorage(); refreshAllUI();
+        toast('作り直しをやめたので、前半の🔒固定と「◯日以前は数えない」を元に戻しました', 'info', 6000);
+      } });
       const n = applyPartialLock(cut);
       close();
       toast(`🔒 1〜${cut - 1}日の ${n}マス を固定しました。${cut}日以降を作り直します…`, 'info', 4000);
