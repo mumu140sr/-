@@ -233,12 +233,16 @@ function setupSettingsPanel() {
     const m = monthModal;
     const carry = () => { const c = m.querySelector('#mcCarry'); return !!(c && c.checked); };
     m.querySelector('#mcCancel').addEventListener('click', () => { closeMonthModal(); revertMonth(); });
-    m.querySelector('#mcExport').addEventListener('click', () => {
+    m.querySelector('#mcExport').addEventListener('click', async (ev) => {
       // 書き出しは、月を変える前（前の月の名前・中身のまま）に行う。
-      // 書き出しに失敗したら片付けない（画面は開いたままにして、選び直してもらう）。
-      const ok = (typeof exportAppData === 'function') && exportAppData();
-      if (!ok) { toast('書き出しに失敗したので、片付けずに止めました。「やめる」か、もう一度お試しください', 'error', 8000); return; }
-      const t = monthTarget, c = carry(); closeMonthModal(); doMonthChange(t, true, c);
+      // 保存できたと分からないとき（失敗・取り消し）は片付けない（画面は開いたまま）。
+      const t = monthTarget, c = carry(), btn = ev.currentTarget;
+      btn.disabled = true;
+      const ok = (typeof exportAppDataSure === 'function') && await exportAppDataSure();
+      if (!m.isConnected || monthTarget !== t) return;   // 待っている間に閉じられた・変えられた
+      btn.disabled = false;
+      if (!ok) { toast('書き出しができていないので、片付けずに止めました。「やめる」か、もう一度お試しください', 'error', 8000); return; }
+      closeMonthModal(); doMonthChange(t, true, c);
     });
     m.querySelector('#mcClean').addEventListener('click', () => {
       const t = monthTarget, c = carry(); closeMonthModal(); doMonthChange(t, true, c);

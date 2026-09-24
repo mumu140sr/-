@@ -95,6 +95,42 @@ function exportAppData() {
   } catch (e) { toast('書き出しに失敗しました: ' + e.message, 'error', 7000); return false; }
 }
 
+/**
+ * 片付ける前の書き出し。保存できたと分かったときだけ true。
+ * ふつうのダウンロードでは、保存の画面で取り消されても分からない（成功と見なしていた）。
+ * 保存先を選ぶ画面が使えるブラウザではそれを使い、取り消されたら false。
+ * 使えないブラウザでは、ダウンロードのあとで「保存できましたか？」と聞く。
+ */
+async function exportAppDataSure() {
+  const month = AppState.settings.targetMonth || '未設定';
+  if (typeof window.showSaveFilePicker === 'function') {
+    try {
+      const data = {
+        _app: 'shift-app', _version: 1, _savedAt: new Date().toISOString(),
+        settings: AppState.settings, shiftTypes: AppState.shiftTypes,
+        roleRequirements: AppState.roleRequirements, roleRequirementsCast: AppState.roleRequirementsCast,
+        dailyRequirements: AppState.dailyRequirements, dailyRequirementsCast: AppState.dailyRequirementsCast,
+        skills: AppState.skills, dailySkills: AppState.dailySkills,
+        staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
+        specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
+      };
+      const h = await window.showSaveFilePicker({ suggestedName: `シフト設定_${month}.json`,
+        types: [{ description: 'シフト設定', accept: { 'application/json': ['.json'] } }] });
+      const w = await h.createWritable();
+      await w.write(JSON.stringify(data, null, 2));
+      await w.close();
+      toast('設定を書き出しました', 'success');
+      return true;
+    } catch (e) {
+      if (e && e.name === 'AbortError') toast('書き出しを取り消しました', 'info', 5000);
+      else toast('書き出しに失敗しました: ' + ((e && e.message) || e), 'error', 7000);
+      return false;
+    }
+  }
+  if (!exportAppData()) return false;
+  return confirm(`${month} のファイルを保存できましたか？\n\n保存できていれば「OK」を押してください（片付けます）。\n保存の画面で取り消した・保存できなかった場合は「キャンセル」を押してください（片付けません）。`);
+}
+
 // ヘッダーアクション
 function setupHeaderActions() {
   document.getElementById('btnSave').addEventListener('click', () => {
