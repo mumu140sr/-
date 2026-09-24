@@ -2096,7 +2096,9 @@ function calcPrevMonthEndFromShifts(shifts, days) {
     let cons = 0, lastBand = '';
     for (let d = days; d >= 1; d--) {
       const v = row[d] || '';
-      if (!isWork(v)) break;                 // 休みが出たら連勤は途切れる
+      // 半休も出勤として数える（検査の連勤と同じ）。数えないと「早早早早半」が0連勤になっていた。
+      const half = typeof isHalfWork === 'function' && isHalfWork(v);
+      if (!isWork(v) && !half) break;        // 休みが出たら連勤は途切れる
       if (!lastBand) lastBand = isLate(v) ? '遅' : '早';  // 月末に一番近い勤務の時間帯
       cons++;
     }
