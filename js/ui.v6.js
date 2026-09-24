@@ -2473,22 +2473,45 @@ async function trySurplusChange(apply, opts) {
 }
 async function _trySurplusChange(apply, opts) {
   const o = opts || {};
-  const backup = {
-    shifts:  JSON.parse(JSON.stringify(AppState.shifts)),
-    req:     JSON.parse(JSON.stringify(AppState.requests)),
-    fixed:   JSON.parse(JSON.stringify(AppState.fixedShifts)),
-    daily:   JSON.parse(JSON.stringify(AppState.dailyRequirements || {})),
-    dailyC:  JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
-    staff:   JSON.parse(JSON.stringify(AppState.staff)),
+  // 取り消すときは、この変更で変えた所だけを戻す（まるごと戻すと、確認を待つ間にした
+  // 希望の入力・必要人数・スタッフの追加などまで消えていた）。
+  // 変えた所 = 変更の前と、変更（と周りの調整）の後で値が違うマス。戻すのは、
+  // いまもその「後」の値のままのマスだけ（あとから別の編集をしたマスは触らない）。
+  const MAPS = ['shifts', 'requests', 'fixedShifts', 'dailyRequirements', 'dailyRequirementsCast'];
+  const snap = () => {
+    const o2 = {};
+    MAPS.forEach(k => { o2[k] = JSON.parse(JSON.stringify(AppState[k] || {})); });
+    o2.paid = {}; (AppState.staff || []).forEach(s => { o2.paid[s.id] = s.paidLeave; });
+    return o2;
+  };
+  const backup = snap();
+  let changes = null;                 // [種類, 行, 列, 前の値, 後の値]
+  const collectChanges = () => {
+    const now = snap(), out = [];
+    MAPS.forEach(k => {
+      const A = backup[k], B = now[k];
+      new Set([...Object.keys(A), ...Object.keys(B)]).forEach(id => {
+        const a = A[id] || {}, b = B[id] || {};
+        new Set([...Object.keys(a), ...Object.keys(b)]).forEach(d => {
+          if (a[d] !== b[d]) out.push([k, id, d, a[d], b[d]]);
+        });
+      });
+    });
+    Object.keys(now.paid).forEach(id => { if (backup.paid[id] !== now.paid[id]) out.push(['paid', id, null, backup.paid[id], now.paid[id]]); });
+    return out;
   };
   const restore = () => {
     if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-    AppState.shifts = backup.shifts;
-    AppState.requests = backup.req;
-    AppState.fixedShifts = backup.fixed;
-    AppState.dailyRequirements = backup.daily;
-    AppState.dailyRequirementsCast = backup.dailyC;
-    AppState.staff = backup.staff;
+    (changes || collectChanges()).forEach(([k, id, d, from, to]) => {
+      if (k === 'paid') {
+        const s = (AppState.staff || []).find(x => x.id === id);
+        if (s && s.paidLeave === to) s.paidLeave = from;
+        return;
+      }
+      const M = AppState[k] || (AppState[k] = {});
+      const row = M[id]; if (!row || row[d] !== to) return;   // あとから変えられたマスは触らない
+      if (from === undefined) delete row[d]; else row[d] = from;
+    });
     AppState.violations = checkViolations(AppState.shifts);
   };
   const beforeV = checkViolations(AppState.shifts);
@@ -2502,6 +2525,7 @@ async function _trySurplusChange(apply, opts) {
     try { await optimizeScheduleMILP(() => {}, { adjustMode: true, adjustK: (o.k || 24), fastMode: true }); }
     catch (_) { /* 調整できなくてもそのまま検証する */ }
   }
+  changes = collectChanges();         // 確認を待つ前に、この変更で変えた所を覚えておく
   AppState.violations = checkViolations(AppState.shifts);
   const after = AppState.violations.length;
   const aSc = scoreViolations(AppState.violations);
