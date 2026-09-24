@@ -1882,20 +1882,50 @@ function setupManualEdit() {
 let _undoStack = [];
 let _redoStack = [];
 
-// 元に戻すで戻すもの。表と🔒固定のほかに、余の解消が変える希望（「有」）・日ごとの必要人数・
-// 有給日数も含める（表だけ戻り、希望「有」と有給日数+1が残っていた）。
-// 有給日数は人ごとに戻す（スタッフの追加・削除まで戻さないため）。
 function _snapshotShiftState() {
-  const paid = {};
-  (AppState.staff || []).forEach(s => { paid[s.id] = s.paidLeave; });
   return {
     shifts: JSON.parse(JSON.stringify(AppState.shifts || {})),
     fixed:  JSON.parse(JSON.stringify(AppState.fixedShifts || {})),
-    req:    JSON.parse(JSON.stringify(AppState.requests || {})),
-    daily:  JSON.parse(JSON.stringify(AppState.dailyRequirements || {})),
-    dailyC: JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
-    paid,
   };
+}
+
+// 余の解消などの「変えた所だけ」の履歴。[種類, 行, 列, 前の値, 後の値] の並び。
+// 表まるごと（希望・必要人数・有給日数まで）を戻すと、あとで④などで入れた値まで消えるので、
+// 変えたマスと項目だけを、いまもその値のままのときに戻す。
+// 種類: 'shifts' 'requests' 'fixedShifts' 'dailyRequirements' 'dailyRequirementsCast' 'paid'（有給日数）
+function _applyChangeList(list, dir) {
+  (list || []).forEach(([k, id, d, from, to]) => {
+    const want = dir === 'undo' ? to : from, set = dir === 'undo' ? from : to;
+    if (k === 'paid') {
+      const s = (AppState.staff || []).find(x => x.id === id);
+      if (s && s.paidLeave === want) s.paidLeave = set;
+      return;
+    }
+    const M = AppState[k] || (AppState[k] = {});
+    const row = M[id] || (M[id] = {});
+    if (row[d] !== want) return;                 // あとから変えられた所は触らない
+    if (set === undefined) delete row[d]; else row[d] = set;
+  });
+}
+/** 変えた所だけの履歴を積む（余の解消が実行されたとき） */
+function recordDeltaHistory(list) {
+  if (!list || !list.length) return;
+  _undoStack.push({ delta: list });
+  if (_undoStack.length > 100) _undoStack.shift();
+  _redoStack = [];
+  updateHistoryButtons();
+}
+function _afterHistoryApply(touchedStaff) {
+  AppState.violations  = checkViolations(AppState.shifts);
+  renderResultTable();
+  if (touchedStaff && typeof renderStaffTable === 'function') renderStaffTable();
+  const reportCard = document.getElementById('reportCard');
+  if (reportCard && reportCard.style.display !== 'none' && typeof renderReport === 'function') {
+    renderReport({ success: AppState.violations.length === 0,
+      score: AppState.violations.length, violations: AppState.violations });
+  }
+  if (typeof saveToStorage === 'function') saveToStorage();
+  updateHistoryButtons();
 }
 
 /** 編集を加える「直前」の状態を履歴に積む（手動編集ハンドラの先頭で呼ぶ） */
@@ -1916,35 +1946,37 @@ function resetShiftHistory() {
 function _applyShiftState(st) {
   AppState.shifts      = JSON.parse(JSON.stringify(st.shifts));
   AppState.fixedShifts = JSON.parse(JSON.stringify(st.fixed));
-  if (st.req)    AppState.requests              = JSON.parse(JSON.stringify(st.req));
-  if (st.daily)  AppState.dailyRequirements     = JSON.parse(JSON.stringify(st.daily));
-  if (st.dailyC) AppState.dailyRequirementsCast = JSON.parse(JSON.stringify(st.dailyC));
-  if (st.paid) (AppState.staff || []).forEach(s => { if (s.id in st.paid) s.paidLeave = st.paid[s.id]; });
-  AppState.violations  = checkViolations(AppState.shifts);
-  renderResultTable();
-  const reportCard = document.getElementById('reportCard');
-  if (reportCard && reportCard.style.display !== 'none' && typeof renderReport === 'function') {
-    renderReport({ success: AppState.violations.length === 0,
-      score: AppState.violations.length, violations: AppState.violations });
-  }
-  if (typeof saveToStorage === 'function') saveToStorage();
-  updateHistoryButtons();
+  _afterHistoryApply(false);
 }
 
 function undoShiftEdit() {
   // 計算中は戻さない（終わった答えで上書きされ、戻した表が消える）
   if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
   if (_undoStack.length === 0) { toast('これ以上 戻せません', 'info', 1200); return; }
-  _redoStack.push(_snapshotShiftState());
-  _applyShiftState(_undoStack.pop());
+  const st = _undoStack.pop();
+  if (st.delta) {                               // 変えた所だけを戻す
+    _applyChangeList(st.delta, 'undo');
+    _redoStack.push(st);
+    _afterHistoryApply(st.delta.some(c => c[0] === 'paid'));
+  } else {
+    _redoStack.push(_snapshotShiftState());
+    _applyShiftState(st);
+  }
   toast('元に戻しました', 'info', 1200);
 }
 
 function redoShiftEdit() {
   if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
   if (_redoStack.length === 0) { toast('やり直す操作がありません', 'info', 1200); return; }
-  _undoStack.push(_snapshotShiftState());
-  _applyShiftState(_redoStack.pop());
+  const st = _redoStack.pop();
+  if (st.delta) {
+    _applyChangeList(st.delta, 'redo');
+    _undoStack.push(st);
+    _afterHistoryApply(st.delta.some(c => c[0] === 'paid'));
+  } else {
+    _undoStack.push(_snapshotShiftState());
+    _applyShiftState(st);
+  }
   toast('やり直しました', 'info', 1200);
 }
 
@@ -2506,25 +2538,15 @@ async function _trySurplusChange(apply, opts) {
     Object.keys(now.paid).forEach(id => { if (backup.paid[id] !== now.paid[id]) out.push(['paid', id, null, backup.paid[id], now.paid[id]]); });
     return out;
   };
+  // 取り消すときは、変えた所を戻すだけで、元に戻す／やり直すの履歴には触らない
+  // （前は先に履歴を積んで取り消しで捨てていたため、やり直すの履歴まで消えていた）
   const restore = () => {
-    if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-    (changes || collectChanges()).forEach(([k, id, d, from, to]) => {
-      if (k === 'paid') {
-        const s = (AppState.staff || []).find(x => x.id === id);
-        if (s && s.paidLeave === to) s.paidLeave = from;
-        return;
-      }
-      const M = AppState[k] || (AppState[k] = {});
-      const row = M[id]; if (!row || row[d] !== to) return;   // あとから変えられたマスは触らない
-      if (from === undefined) delete row[d]; else row[d] = from;
-    });
+    _applyChangeList(changes || collectChanges(), 'undo');
     AppState.violations = checkViolations(AppState.shifts);
   };
   const beforeV = checkViolations(AppState.shifts);
   const before = beforeV.length;
   const bSc = scoreViolations(beforeV);
-  // 元に戻すで、この変更だけを戻せるように履歴に積む（取り消したときは履歴も捨てる）
-  if (typeof recordShiftHistory === 'function') recordShiftHistory();
   apply();
   // 周りのつじつまを、最小限の変更で合わせる
   if (o.adjust && typeof optimizeScheduleMILP === 'function') {
@@ -2552,9 +2574,11 @@ async function _trySurplusChange(apply, opts) {
       ? await o.confirm(sd, up)
       : confirm(`この変更で ${words}。\nそれでも実行しますか？`);
     if (!go) { restore(); return { ok: false, before, after, sd, cancelled: true, message: `${words}ため取り消しました` }; }
+    recordDeltaHistory(changes);   // 元に戻すで、この変更だけを戻せるように
     autoSave();
     return { ok: true, before, after, sd, worsened: true, hadCritical, message: words };
   }
+  recordDeltaHistory(changes);
   autoSave();
   return { ok: true, before, after, sd, message: words };
 }
@@ -2615,13 +2639,15 @@ function showSurplusResolveModal() {
   const RECO_HOLD_MS = 2000;
   const fpTimer = setInterval(() => {
     if (!modal.isConnected) { clearInterval(fpTimer); return; }
-    if (pendingAsk || mouseOnPanel || (typeof calcBusy === 'function' && calcBusy())) return;
-    if (recoCache !== null && stateFp() !== recoFp) {
+    const canSwap = !pendingAsk && !mouseOnPanel && !(typeof calcBusy === 'function' && calcBusy());
+    if (canSwap && recoCache !== null && stateFp() !== recoFp) {
       recoCache = null; recoHoldUntil = Date.now() + RECO_HOLD_MS; render();
       say('🔄 表が変わったので、おすすめが変わりました。新しい一覧を確かめてから押してください。', false);
-      setTimeout(() => { if (modal.isConnected) modal.querySelectorAll('[data-reco]').forEach(b => { b.disabled = false; }); }, RECO_HOLD_MS);
     }
-  }, 1500);
+    // 押せない理由が無くなったら押せるようにする（2秒たった・確認に答えた・計算が終わった）
+    const blocked = recoBlocked();
+    modal.querySelectorAll('[data-reco]').forEach(b => { b.disabled = blocked; });
+  }, 500);
   // パネルを閉じる（✕・開き直し）。答えていない確認は「やめる」にする。確認があれば true
   modal._closePanel = () => {
     panelClosed = true;
@@ -2699,6 +2725,9 @@ function showSurplusResolveModal() {
   let recoCache = null, recoDirty = false, recoFp = '';
   // 一覧が自動で入れ替わった直後は、少しの間ボタンを押せなくする（読んだ案と違う案を押さないように）
   let recoHoldUntil = 0, mouseOnPanel = false;
+  // 👑を押せないとき: 入れ替わった直後・確認待ち・計算中
+  const recoBlocked = () => Date.now() < recoHoldUntil || !!pendingAsk ||
+    (typeof calcBusy === 'function' && calcBusy());
   // 表などの中身の「指紋」。おすすめを作ったときと違えば、一覧は古い
   // （パネルを開いたまま手で直す・月を変える・元に戻す、など）。
   const stateFp = () => JSON.stringify([AppState.settings.targetMonth, AppState.shifts, AppState.requests,
@@ -2802,7 +2831,7 @@ function showSurplusResolveModal() {
           　→ ${tag(x)}<span class="hint">（${x.before}件 → ${x.after}件）</span></span>
         <button class="btn ${i === 0 ? 'btn-primary' : ''}" data-reco="${i}"
           data-rid="${escapeHtml(x.id)}" data-rday="${x.day}" data-rkind="${x.kind}" data-rkey="${escapeHtml(x.key || '')}"
-          ${Date.now() < recoHoldUntil ? 'disabled' : ''}>この通りにする</button>
+          ${recoBlocked() ? 'disabled' : ''}>この通りにする</button>
       </div>`;
     const rest = r.slice(1, 4);
     return `<div style="border:2px solid var(--accent);border-radius:10px;padding:12px 14px;margin:10px 0;background:color-mix(in srgb, var(--accent) 7%, var(--surface))">
@@ -3473,7 +3502,10 @@ function showSurplusResolveModal() {
     modal.querySelectorAll('[data-reco]').forEach(btn => btn.addEventListener('click', () => {
       const x = (recoCache || [])[parseInt(btn.dataset.reco)];
       if (!x) return;
+      // 入れ替わった直後・確認待ち・計算中は押しても何もしない（描き直すと「実行する／やめる」が消えていた）
       if (Date.now() < recoHoldUntil) return;
+      if (pendingAsk) { say('先に「実行しますか？」に答えてください。', false); return; }
+      if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
       // ボタンに書いてある人・日・内容と、実行する中身が同じかを確かめる
       const same = btn.dataset.rid === String(x.id) && btn.dataset.rday === String(x.day) &&
                    btn.dataset.rkind === x.kind && btn.dataset.rkey === String(x.key || '');
@@ -3481,7 +3513,7 @@ function showSurplusResolveModal() {
       if (!same || stateFp() !== recoFp || cellOf(x.id, x.day) !== '余') {
         recoCache = null; recoHoldUntil = Date.now() + 2000; render();
         say('🔄 表が変わっていたので、おすすめを数え直しました。新しい一覧を確かめてから、もう一度お選びください。', false);
-        setTimeout(() => { if (modal.isConnected) modal.querySelectorAll('[data-reco]').forEach(b => { b.disabled = false; }); }, 2000);
+
         return;
       }
       if (x.kind === 'paid') { selPaid = { id: x.id, day: x.day }; render(); modal.querySelector('#paidGo').click(); }
