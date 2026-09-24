@@ -4048,12 +4048,15 @@ function _surplusOf() {
 }
 
 // その日その時間帯にいる指導役（副店長を先に、次にチーフ）
-function _tutorsOn(day, band) {
+// shifts: どの表で見るか（省略時は本物の表）。余の使い道の試し計算では、試し計算の表を渡す
+// （本物の表を見ていたため、まだ生成していないと指導役が誰もいないことになり、日付順になっていた）。
+function _tutorsOn(day, band, shifts) {
   const rank = { viceManager: 0, chief: 1 };
+  const SH = shifts || AppState.shifts;
   return (AppState.staff || [])
     .filter(s => rank[s.positionType] != null)
     .map(s => {
-      const v = (AppState.shifts[s.id] || {})[day] || '';
+      const v = (SH[s.id] || {})[day] || '';
       const here = v && isWork(v) && (band === 'e' ? isEarlyCategory(v) : isLate(v));
       const canBe = (s.allowedShifts || []).some(k => (band === 'e' ? isEarlyCategory(k) : isLate(k)));
       return { s, v, here, canBe };
@@ -4503,7 +4506,7 @@ function showSurplusPlanModal() {
           if (cnt[k] <= need) return;
           out.push({ d, k, from: need, to: cnt[k], cast, checked: !((store[k] || {})[d] === 0),
                      zeroed: (store[k] || {})[d] === 0,
-                     tutors: _tutorsOn(d, isEarlyCategory(k) ? 'e' : 'l') });
+                     tutors: _tutorsOn(d, isEarlyCategory(k) ? 'e' : 'l', SH) });
         });
       }
     });
