@@ -1916,8 +1916,10 @@ function captureChangeBase() {
   return o;
 }
 /** 控えと今を比べて、変えた所の一覧を返す（_applyChangeList の形） */
-function changesSince(base) {
-  const now = captureChangeBase(), out = [];
+function changesSince(base) { return changesBetween(base, captureChangeBase()); }
+/** 2つの控えの間で変わった所の一覧 */
+function changesBetween(base, now) {
+  const out = [];
   _DELTA_MAPS.forEach(k => {
     const A = base[k], B = now[k];
     new Set([...Object.keys(A), ...Object.keys(B)]).forEach(id => {
@@ -2540,33 +2542,21 @@ async function _trySurplusChange(apply, opts) {
   const o = opts || {};
   // 取り消すときは、この変更で変えた所だけを戻す（まるごと戻すと、確認を待つ間にした
   // 希望の入力・必要人数・スタッフの追加などまで消えていた）。
-  // 変えた所 = 変更の前と、変更（と周りの調整）の後で値が違うマス。戻すのは、
-  // いまもその「後」の値のままのマスだけ（あとから別の編集をしたマスは触らない）。
-  const MAPS = ['shifts', 'requests', 'fixedShifts', 'dailyRequirements', 'dailyRequirementsCast'];
-  const snap = () => {
-    const o2 = {};
-    MAPS.forEach(k => { o2[k] = JSON.parse(JSON.stringify(AppState[k] || {})); });
-    o2.paid = {}; (AppState.staff || []).forEach(s => { o2.paid[s.id] = s.paidLeave; });
-    return o2;
-  };
-  const backup = snap();
-  let changes = null;                 // [種類, 行, 列, 前の値, 後の値]
+  // 変えた所 = 変更（apply）で変えた所 ＋ つじつま合わせが動かした表のマス。
+  // つじつま合わせの間に利用者が入れた希望・必要人数などは含めない（「やめる」で消えていた）。
+  // 戻すのは、いまもその値のままの所だけ（あとから別の編集をした所は触らない）。
+  const base0 = captureChangeBase();
+  let changes = null, mid = null;
   const collectChanges = () => {
-    const now = snap(), out = [];
-    MAPS.forEach(k => {
-      const A = backup[k], B = now[k];
-      new Set([...Object.keys(A), ...Object.keys(B)]).forEach(id => {
-        const a = A[id] || {}, b = B[id] || {};
-        new Set([...Object.keys(a), ...Object.keys(b)]).forEach(d => {
-          if (a[d] !== b[d]) out.push([k, id, d, a[d], b[d]]);
-        });
-      });
+    if (!mid) return changesSince(base0);
+    const list = changesBetween(base0, mid);
+    changesSince(mid).filter(c => c[0] === 'shifts').forEach(c => {
+      const same = list.find(x => x[0] === c[0] && x[1] === c[1] && x[2] === c[2]);
+      if (same) same[4] = c[4]; else list.push([c[0], c[1], c[2], c[3], c[4]]);
     });
-    Object.keys(now.paid).forEach(id => { if (backup.paid[id] !== now.paid[id]) out.push(['paid', id, null, backup.paid[id], now.paid[id]]); });
-    return out;
+    return list.filter(x => x[3] !== x[4]);
   };
   // 取り消すときは、変えた所を戻すだけで、元に戻す／やり直すの履歴には触らない
-  // （前は先に履歴を積んで取り消しで捨てていたため、やり直すの履歴まで消えていた）
   const restore = () => {
     _applyChangeList(changes || collectChanges(), 'undo');
     AppState.violations = checkViolations(AppState.shifts);
@@ -2575,6 +2565,7 @@ async function _trySurplusChange(apply, opts) {
   const before = beforeV.length;
   const bSc = scoreViolations(beforeV);
   apply();
+  mid = captureChangeBase();          // ここまでが、この変更そのもので変えた所
   // 周りのつじつまを、最小限の変更で合わせる
   if (o.adjust && typeof optimizeScheduleMILP === 'function') {
     try { await optimizeScheduleMILP(() => {}, { adjustMode: true, adjustK: (o.k || 24), fastMode: true }); }
