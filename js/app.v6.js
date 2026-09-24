@@ -281,9 +281,12 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
     // 20人以下は既に上限10分・gap=0で解いているため、再計算しても結果は変わらない。
     const canRetry = !wasDeep && usedGap;
     // 「確認済み」は、すべての段を一から解いて最後まで計算できたときだけ出す。
-    // それ以外（時間切れの段・近くだけを探し直した段がある）は「時間内でいちばん良い答え」。
+    // それ以外（時間切れの段・近くだけを探し直した段・「ほぼ最良」で止めた段がある）は
+    // 「時間内でいちばん良い答え」。
     box.innerHTML = `⏱ <b>時間内でいちばん良い答えです（${elapsed}秒）</b>：残り ${vioCount}件は
-      <b>「避けられない」とは限りません</b>。最後まで計算しきれなかった段があるため、
+      <b>「避けられない」とは限りません</b>。${canRetry
+        ? '21人以上の部門は、時間を短くするため「ほぼ最良（差2%以内）」のところで計算を止めているため、'
+        : '最後まで計算しきれなかった段があるため、'}
       これが最良だとは確認できていません。<br>
       ${canRetry
         ? '<button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">⏳ 妥協なしで再計算（早期停止を無効・最大10分）</button>'

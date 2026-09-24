@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=217', 'optimizer.js?v=217', 'milp-core.js?v=217');
+self.importScripts('data.js?v=218', 'optimizer.js?v=218', 'milp-core.js?v=218');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=217'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=218'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -110,6 +110,13 @@ self.addEventListener('message', async (e) => {
         opts = { time_limit: TIME_LIMIT, mip_rel_gap: 0.02, mip_abs_gap: 2000, presolve: 'on' };
         usedGap = true;   // 早期停止あり＝じっくりモードで更に良くなる可能性がある
       }
+      // 「最良と証明できた」と言えるか。gap を許す設定（21人以上・速い生成）では、HiGHS は
+      // 「2%・2000点以内」に入った時点で Optimal を返すので、Optimal でも証明にならない。
+      // 返ってくる答えに gap は入っていないため、設定で判断する。件数が0なら、それ以上
+      // 減らしようがないので、gap を許していても証明済みとしてよい。
+      const exact = !(opts.mip_rel_gap > 0) && !(opts.mip_abs_gap > 0);
+      const provenOf = (s, types) => String(s && s.Status) === 'Optimal' &&
+        (exact || MILP.slackTotal(s, m.parts, types) === 0);
       // ── 微調整モード ────────────────────────────────────
       // いまの表を出発点に、決まった数のコマまでしか変えずにつじつまを合わせる。
       // 表全体が作り直されないので、確認済みの並びが崩れない。
@@ -129,7 +136,8 @@ self.addEventListener('message', async (e) => {
         const s2 = solver.solve(MILP.composeLP(m.parts, { neighbor: { ones, k: adjustK } }),
                                 Object.assign({}, opts, { time_limit: Math.min(20, opts.time_limit) }));   // 微調整は20秒上限
         if (MILP.solutionIsValid(s2, m.parts, [])) {
-          if (String(s2.Status) !== 'Optimal') allOptimal = false;
+          // 近くだけ（K マスまで）を探したので、Optimal でも全体の最良の証明ではない
+          allOptimal = false;
           MILP.applyGroupSolution(m, s2, shifts);
           gi++;
           continue;
@@ -206,7 +214,7 @@ self.addEventListener('message', async (e) => {
               budgets.push({ names: MILP.slackNames(m.parts, t.types), max: MILP.slackTotal(sC, m.parts, t.types) });
               (t.types || []).forEach(ty => protect.push(ty));
             }
-            if (!okC || String(sC && sC.Status) !== 'Optimal') tierProven = false;
+            if (!okC || !provenOf(sC, t.types)) tierProven = false;
             if (msg.trace) self.postMessage({ type: 'trace', ti, label: t.label, cap,
               sec: Math.round((Date.now() - t0) / 1000), status: String(sC && sC.Status), okStrict: okC,
               prev: null, got: okC ? MILP.slackTotal(sC, m.parts, t.types) : null });
@@ -224,7 +232,7 @@ self.addEventListener('message', async (e) => {
           // 「最後まで計算できた」と言えるのは、この段を条件付きで一から解いて Optimal に
           // なったときだけ。近くだけを探し直した答え（近傍探索）の Optimal は「近くの中で
           // 一番良い」という意味で全体の最良ではない。前の答えを使い回したときも同じ。
-          let provenHere = okStrict && String(s2.Status) === 'Optimal';
+          let provenHere = okStrict && provenOf(s2, t.types);
           // 前の答えが無く、持ち時間を使い切っても途中の答えのままなら、その答えを出発点に
           // 続けて解く（全体の残り時間から、この段の持ち時間ぶんまで）。
           if (!sol && okStrict && !provenHere && MILP.slackTotal(s2, m.parts, t.types) > 0) {
@@ -355,7 +363,7 @@ self.addEventListener('message', async (e) => {
           else break;      // これ以上良くならない
         }
       }
-      if (!sol) { sol = solver.solve(m.lp, opts); tierProven = String(sol && sol.Status) === 'Optimal'; }
+      if (!sol) { sol = solver.solve(m.lp, opts); tierProven = exact && String(sol && sol.Status) === 'Optimal'; }
       // 時間切れかどうかは「各段を証明できたか」で決める。仕上げ処理の Status は見ない。
       if (!tierProven) allOptimal = false;
       MILP.applyGroupSolution(m, sol, shifts);
