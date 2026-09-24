@@ -1878,10 +1878,19 @@ function setupManualEdit() {
 let _undoStack = [];
 let _redoStack = [];
 
+// 元に戻すで戻すもの。表と🔒固定のほかに、余の解消が変える希望（「有」）・日ごとの必要人数・
+// 有給日数も含める（表だけ戻り、希望「有」と有給日数+1が残っていた）。
+// 有給日数は人ごとに戻す（スタッフの追加・削除まで戻さないため）。
 function _snapshotShiftState() {
+  const paid = {};
+  (AppState.staff || []).forEach(s => { paid[s.id] = s.paidLeave; });
   return {
     shifts: JSON.parse(JSON.stringify(AppState.shifts || {})),
     fixed:  JSON.parse(JSON.stringify(AppState.fixedShifts || {})),
+    req:    JSON.parse(JSON.stringify(AppState.requests || {})),
+    daily:  JSON.parse(JSON.stringify(AppState.dailyRequirements || {})),
+    dailyC: JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
+    paid,
   };
 }
 
@@ -1903,6 +1912,10 @@ function resetShiftHistory() {
 function _applyShiftState(st) {
   AppState.shifts      = JSON.parse(JSON.stringify(st.shifts));
   AppState.fixedShifts = JSON.parse(JSON.stringify(st.fixed));
+  if (st.req)    AppState.requests              = JSON.parse(JSON.stringify(st.req));
+  if (st.daily)  AppState.dailyRequirements     = JSON.parse(JSON.stringify(st.daily));
+  if (st.dailyC) AppState.dailyRequirementsCast = JSON.parse(JSON.stringify(st.dailyC));
+  if (st.paid) (AppState.staff || []).forEach(s => { if (s.id in st.paid) s.paidLeave = st.paid[s.id]; });
   AppState.violations  = checkViolations(AppState.shifts);
   renderResultTable();
   const reportCard = document.getElementById('reportCard');
@@ -2469,6 +2482,7 @@ async function _trySurplusChange(apply, opts) {
     staff:   JSON.parse(JSON.stringify(AppState.staff)),
   };
   const restore = () => {
+    if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
     AppState.shifts = backup.shifts;
     AppState.requests = backup.req;
     AppState.fixedShifts = backup.fixed;
@@ -2480,6 +2494,8 @@ async function _trySurplusChange(apply, opts) {
   const beforeV = checkViolations(AppState.shifts);
   const before = beforeV.length;
   const bSc = scoreViolations(beforeV);
+  // 元に戻すで、この変更だけを戻せるように履歴に積む（取り消したときは履歴も捨てる）
+  if (typeof recordShiftHistory === 'function') recordShiftHistory();
   apply();
   // 周りのつじつまを、最小限の変更で合わせる
   if (o.adjust && typeof optimizeScheduleMILP === 'function') {
