@@ -3,9 +3,16 @@
    milp.worker.js を起動して解かせ、結果を AppState に反映する。
    Worker が使えない/失敗した場合は reject（呼び出し側で焼きなましにフォールバック）。
    =========================================== */
-function _milpPayload() {
+// settingsPatch: 試し計算のときだけ設定を変えて解く（AppState.settings は書き換えない）。
+// 書き換えてから戻す方式だと、計算中に自動保存が走ると変えた値が保存されてしまう。
+function _milpPayload(settingsPatch) {
+  let settings = AppState.settings;
+  if (settingsPatch) {
+    settings = Object.assign({}, AppState.settings, settingsPatch);
+    if (settingsPatch.penalties) settings.penalties = Object.assign({}, AppState.settings.penalties || {}, settingsPatch.penalties);
+  }
   return {
-    settings:              AppState.settings,
+    settings:              settings,
     shiftTypes:            AppState.shiftTypes,
     roleRequirements:      AppState.roleRequirements,
     roleRequirementsCast:  AppState.roleRequirementsCast,
@@ -63,10 +70,21 @@ function milpTrial(payload, variant, timeOverride) {
 // 同時に走らせてよいWorkerの数（画面用に1つ空ける）
 function milpParallelCount() { return _parallelCount(); }
 
+// 選んだ答えを画面の表へ反映する。opts.noApply（試し計算）のときは反映しない。
+// 試し計算の結果で本物の表を置き換えると、閉じても戻らず、次の自動保存で保存されてしまう。
+function _milpApply(best, opts) {
+  if (opts && opts.noApply) return;
+  AppState.shifts = best._shifts || AppState.shifts;
+  AppState.violations = best.violations;
+  AppState.generated = true;
+}
+
 function optimizeScheduleMILP(onProgress, opts) {
   const n = _parallelCount();
   // 微調整モードは「いまの表を最小限だけ直す」ので、ぶれが小さく並列の意味がない
-  if (n <= 1 || (opts && opts.adjustMode)) return _milpOnce(onProgress, opts, 0);
+  if (n <= 1 || (opts && opts.adjustMode)) {
+    return _milpOnce(onProgress, opts, 0).then(r => { _milpApply(r, opts); return r; });
+  }
 
   return new Promise((resolve, reject) => {
     const results = [], errors = [];
@@ -105,10 +123,8 @@ function optimizeScheduleMILP(onProgress, opts) {
           const pool = (opts && opts.improveOver)
             ? results.filter(r => scoreBetter(r.sc, opts.improveOver)) : results;
           const best = pool.length ? pool[0] : results[0];
-          // 採用した解の表を、あらためて画面へ反映する
-          AppState.shifts = best._shifts || AppState.shifts;
-          AppState.violations = best.violations;
-          AppState.generated = true;
+          // 採用した解の表を、あらためて画面へ反映する（試し計算では反映しない）
+          _milpApply(best, opts);
           best.parallel = { n, tried: results.map(r => ({ label: r._label, score: r.score, must: r.must, comp: r.sc.comp })) };
           resolve(best);
         });
@@ -144,10 +160,11 @@ function _milpOnce(onProgress, opts, variant) {
       if (m.type === 'progress') { if (/計算中/.test(m.label || '')) solving = true; onProgress && onProgress(m.pct, m.label); return; }
       if (m.type === 'done') {
         cleanup(); worker.terminate();
-        AppState.shifts = m.shifts || {}; AppState.violations = m.violations || []; AppState.generated = true;
+        // ここでは画面の表に反映しない（4通りのうち1つが終わっただけ・試し計算のこともある）。
+        // 反映は、選び終わったあとに _milpApply でまとめて行う。
         // 比べるための数（optimizer.js の scoreViolations）
         const _sc = scoreViolations(m.violations || []);
-        resolve({ _shifts: m.shifts || {}, violations: AppState.violations, score: _sc.total, must: _sc.must,
+        resolve({ _shifts: m.shifts || {}, shifts: m.shifts || {}, violations: m.violations || [], score: _sc.total, must: _sc.must,
                   mustCount: _sc.mustCount, sc: _sc,
                   success: (m.violations || []).length === 0,
                   allOptimal: m.allOptimal !== false, deep: !!m.deep, fast: !!m.fast, usedGap: !!m.usedGap,
@@ -158,7 +175,7 @@ function _milpOnce(onProgress, opts, variant) {
     };
     worker.onerror = (err) => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化Workerエラー: ' + (err.message || 'ソルバーの読込みに失敗しました'))); };
     // timeOverride: 候補をいくつも組み直して比べるときに、1回あたりの時間を短くする
-    worker.postMessage({ type: 'milp', appState: _milpPayload(), deepMode, fastMode, adjustMode, adjustK,
+    worker.postMessage({ type: 'milp', appState: _milpPayload(opts && opts.settingsPatch), deepMode, fastMode, adjustMode, adjustK,
                          timeOverride: (opts && parseInt(opts.timeOverride)) || 0,
                          variant: parseInt(variant) || 0 });
   });

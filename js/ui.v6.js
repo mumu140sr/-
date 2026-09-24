@@ -4203,25 +4203,17 @@ function showSurplusPlanModal() {
         return;
       }
       $c.disabled = true; $c.textContent = '⏳ 計算中…';
-      const keep = AppState.settings.useUpSurplus;
-      const keepP = AppState.settings.penalties ? AppState.settings.penalties.offSurplusUnused : undefined;
       try {
-        AppState.settings.useUpSurplus = true;     // 「余を残すな」と指示して解かせる
-        // 押し出しの強さ。実測では 8000 だと半分しか出ず、20000 で余ゼロまで届いた。
-        AppState.settings.penalties = AppState.settings.penalties || {};
-        AppState.settings.penalties.offSurplusUnused = 20000;
+        // 「余を残すな」と指示して解かせる。押し出しの強さは、実測では 8000 だと半分しか出ず、
+        // 20000 で余ゼロまで届いた。設定は書き換えず、この計算にだけ渡す。
+        // 試し計算なので、結果は本物の表に反映しない（noApply）。候補を拾うのにだけ使う。
         const res = await optimizeScheduleMILP(
           (pct, msg) => { $c.textContent = '⏳ ' + String(msg || '').slice(0, 22); },
-          { fastMode: true, pickBy: 'surplus' });
-        void res;
-        rows = _collectSurplusRows();
+          { fastMode: true, pickBy: 'surplus', noApply: true,
+            settingsPatch: { useUpSurplus: true, penalties: { offSurplusUnused: 20000 } } });
+        rows = _collectSurplusRows(res._shifts);
       } catch (e) {
         toast('計算に失敗しました: ' + e.message, 'error');
-      } finally {
-        // 設定は必ず元に戻す（保存された値は変えない）
-        AppState.settings.useUpSurplus = keep;
-        if (keepP === undefined) { if (AppState.settings.penalties) delete AppState.settings.penalties.offSurplusUnused; }
-        else AppState.settings.penalties.offSurplusUnused = keepP;
       }
       render();
     });
@@ -4247,8 +4239,9 @@ function showSurplusPlanModal() {
     });
   };
 
-  // いまの表から「必要人数より多く入っている場所」を拾う＝最適化が足したかった場所
-  function _collectSurplusRows() {
+  // 試し計算の表から「必要人数より多く入っている場所」を拾う＝最適化が足したかった場所
+  function _collectSurplusRows(trial) {
+    const SH = trial || AppState.shifts;
     const out = [];
     const keys = getWorkShiftKeys().filter(k => { const t = AppState.shiftTypes.find(x => x.key === k); return t && !t.isTraining; });
     getDepartmentGroups(AppState.staff).forEach(g => {
@@ -4256,7 +4249,7 @@ function showSurplusPlanModal() {
       const store = cast ? (AppState.dailyRequirementsCast || {}) : (AppState.dailyRequirements || {});
       for (let d = 1; d <= days; d++) {
         const cnt = {}; keys.forEach(k => cnt[k] = 0);
-        g.staff.forEach(s => { const v = (AppState.shifts[s.id] || {})[d]; if (cnt[v] != null) cnt[v]++; });
+        g.staff.forEach(s => { const v = (SH[s.id] || {})[d]; if (cnt[v] != null) cnt[v]++; });
         keys.forEach(k => {
           const need = getDayReq(g.reqs, g.dailyReqs || {}, k, d);
           if (cnt[k] <= need) return;
