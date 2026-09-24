@@ -2638,10 +2638,15 @@ function showSurplusResolveModal() {
   const buildReco = () => {
     const cells = listSurplusCells();
     if (!cells.length) return [];
+    // 見積もりは、押したときと同じ変更で数える（有給なら希望「有」と有給日数+1、研修なら🔒固定も）。
+    // 表だけを変えて数えていたため、「悪くなります」と出たのに押すと「変わりません」になっていた。
     const bk = {
       shifts: JSON.parse(JSON.stringify(AppState.shifts)),
       daily:  JSON.parse(JSON.stringify(AppState.dailyRequirements || {})),
       dailyC: JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
+      req:    JSON.parse(JSON.stringify(AppState.requests || {})),
+      fixed:  JSON.parse(JSON.stringify(AppState.fixedShifts || {})),
+      paid:   (AppState.staff || []).map(s => s.paidLeave),
     };
     const before = checkViolations(AppState.shifts).length;
     const beforeV0 = checkViolations(AppState.shifts);
@@ -2649,6 +2654,9 @@ function showSurplusResolveModal() {
       AppState.shifts = JSON.parse(JSON.stringify(bk.shifts));
       AppState.dailyRequirements = JSON.parse(JSON.stringify(bk.daily));
       AppState.dailyRequirementsCast = JSON.parse(JSON.stringify(bk.dailyC));
+      AppState.requests = JSON.parse(JSON.stringify(bk.req));
+      AppState.fixedShifts = JSON.parse(JSON.stringify(bk.fixed));
+      (AppState.staff || []).forEach((s, i) => { s.paidLeave = bk.paid[i]; });
     };
     const out = [];
     // 件数(n)は表示用、sd は比べ方（scoreBetter / scoreCompare。並べ替え・良し悪しに使う）
@@ -2658,7 +2666,12 @@ function showSurplusResolveModal() {
       const st = AppState.staff.find(x => x.id === c.id); if (!st) return;
       // ㋐ その人のその日を有給にする
       {
-        const n = measure(() => { AppState.shifts[c.id][c.day] = '有'; });
+        const n = measure(() => {   // 「有給にする」を押したときと同じ変更
+          AppState.requests[c.id] = AppState.requests[c.id] || {};
+          AppState.requests[c.id][c.day] = '有';
+          AppState.shifts[c.id][c.day] = '有';
+          st.paidLeave = (parseInt(st.paidLeave) || 0) + 1;
+        });
         if (n != null) out.push(entry({ kind: 'paid', id: c.id, name: c.name, day: c.day }, n));
       }
       // ㋐' 指導役のそばで研修に入れる（研修は人員にカウントしないので定数を動かさない）
@@ -2673,7 +2686,11 @@ function showSurplusResolveModal() {
             return v && isWork(v) && bandOf2(v) === bd;
           });
           if (!T) return;
-          const n = measure(() => { AppState.shifts[c.id][c.day] = t.key; });
+          const n = measure(() => {   // 「研修で入れる」を押したときと同じ変更（🔒固定も）
+            AppState.fixedShifts[c.id] = AppState.fixedShifts[c.id] || {};
+            AppState.fixedShifts[c.id][c.day] = t.key;
+            AppState.shifts[c.id][c.day] = t.key;
+          });
           if (n != null) out.push(entry({ kind: 'train', id: c.id, name: c.name, day: c.day, key: t.key,
                                           tutor: T.name }, n));
         });
@@ -2687,6 +2704,8 @@ function showSurplusResolveModal() {
           const base = (cast ? (AppState.roleRequirementsCast || {}) : AppState.roleRequirements)[k] || 0;
           store[k] = store[k] || {};
           store[k][c.day] = (store[k][c.day] != null ? store[k][c.day] : base) + 1;
+          AppState.fixedShifts[c.id] = AppState.fixedShifts[c.id] || {};   // 押したときと同じく固定も
+          AppState.fixedShifts[c.id][c.day] = k;
           AppState.shifts[c.id][c.day] = k;
         });
         if (n != null) out.push(entry({ kind: 'work', id: c.id, name: c.name, day: c.day, key: k }, n));
