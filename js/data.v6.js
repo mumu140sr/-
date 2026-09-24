@@ -180,8 +180,18 @@ const AppState = {
 };
 
 let _staffIdCounter = 1;
+// 新しいスタッフのID。いまいる人、または希望・固定・表に残っている人のIDとは重ならない番号にする。
+// 通し番号だけで付けていたため、別のPCで書き出したファイル（通し番号が入っていない）を
+// 取り込んだあとに追加すると、既にいる人と同じIDになることがあった。
 function newStaffId() {
-  return 'S' + (_staffIdCounter++).toString().padStart(3, '0');
+  const used = new Set((AppState.staff || []).map(s => s.id));
+  ['requests', 'fixedShifts', 'shifts'].forEach(k => Object.keys(AppState[k] || {}).forEach(id => used.add(id)));
+  let maxN = 0;
+  used.forEach(id => { const m = /^S(\d+)$/.exec(id || ''); if (m) maxN = Math.max(maxN, parseInt(m[1], 10)); });
+  let n = Math.max(_staffIdCounter, maxN + 1), id;
+  do { id = 'S' + String(n++).padStart(3, '0'); } while (used.has(id));
+  _staffIdCounter = n;
+  return id;
 }
 
 // ===== ユーティリティ =====
