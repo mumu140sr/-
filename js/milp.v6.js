@@ -46,7 +46,7 @@ function milpTrial(payload, variant, timeOverride) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=216'); }
+    try { worker = new Worker('js/milp.worker.js?v=217'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     const timeout = setTimeout(() => { try { worker.terminate(); } catch (_) {} reject(new Error('タイムアウト')); }, 600000);
     worker.onmessage = (e) => {
@@ -125,7 +125,7 @@ function _milpOnce(onProgress, opts, variant) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=216'); }
+    try { worker = new Worker('js/milp.worker.js?v=217'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     // 1部門あたり最大10分。部門数ぶん待てるよう十分な余裕を持たせる（誤タイムアウト防止）
     const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（30分）')); }, 1800000);
