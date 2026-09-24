@@ -1915,6 +1915,8 @@ function _applyShiftState(st) {
 }
 
 function undoShiftEdit() {
+  // 計算中は戻さない（終わった答えで上書きされ、戻した表が消える）
+  if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
   if (_undoStack.length === 0) { toast('これ以上 戻せません', 'info', 1200); return; }
   _redoStack.push(_snapshotShiftState());
   _applyShiftState(_undoStack.pop());
@@ -1922,6 +1924,7 @@ function undoShiftEdit() {
 }
 
 function redoShiftEdit() {
+  if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
   if (_redoStack.length === 0) { toast('やり直す操作がありません', 'info', 1200); return; }
   _undoStack.push(_snapshotShiftState());
   _applyShiftState(_redoStack.pop());
@@ -2445,10 +2448,13 @@ function candidateShiftsFor(staff, day) {
 // 6連勤以上になる変更は止める。どれかが増えるときは confirm で「それでも実行するか」を聞く。
 // @returns {ok:boolean, before:number, after:number, sd, message:string}
 // 作り直し（adjust）を伴うときは計算なので、ほかの計算と同時に走らないようにする
+// 確認（実行しますか？）を待つあいだも鍵を掛ける。掛けないと、答えないまま生成・月の切り替え・
+// 取り込みができ、あとで「やめる」になったときに質問の前の状態へ丸ごと戻って、その間の
+// 生成や片付けまで消えていた。
 async function trySurplusChange(apply, opts) {
   const o = opts || {};
-  if (!o.adjust) return _trySurplusChange(apply, o);
-  if (!calcBegin('余の解消')) return { ok: false, busy: true, before: 0, after: 0, sd: null,
+  if (!o.adjust && typeof o.confirm !== 'function') return _trySurplusChange(apply, o);
+  if (!calcBegin(o.adjust ? '余の解消' : '余の解消（確認待ち）')) return { ok: false, busy: true, before: 0, after: 0, sd: null,
                                        message: 'ほかの計算中のため、実行しませんでした' };
   try { return await _trySurplusChange(apply, o); } finally { calcEnd(); }
 }
@@ -2510,8 +2516,14 @@ async function _trySurplusChange(apply, opts) {
 function showSurplusResolveModal() {
   // 暗幕を張らない「動かせるパネル」にする。裏のシフト表を見ながら、
   // どこをどう直すか考えられるようにするため。
+  // 開き直すときは、古いパネルの答えていない確認を「やめる」にしてから閉じる。
+  // そのまま消すと、確認が残ったまま計算の鍵が外れなくなっていた。
+  // 確認を「やめる」にしたときは、元に戻す処理が終わってから開き直す。
   const old = document.getElementById('surplusPanel');
-  if (old) old.remove();
+  if (old) {
+    const hadPending = typeof old._closePanel === 'function' ? old._closePanel() : (old.remove(), false);
+    if (hadPending) { setTimeout(showSurplusResolveModal, 0); return; }
+  }
   const modal = document.createElement('div');
   modal.id = 'surplusPanel';
   modal.style.cssText = 'position:fixed;right:24px;top:80px;width:min(820px,calc(100vw - 48px));z-index:10050';
@@ -2548,6 +2560,16 @@ function showSurplusResolveModal() {
   // 答えを待っている確認。パネルを ✕ で閉じたら「やめる」として答え、変更を元に戻す。
   // 答えないまま閉じると、計算の鍵が外れずアプリが固まり、答えていない変更も表に残っていた。
   let pendingAsk = null, panelClosed = false;
+  // パネルを閉じる（✕・開き直し）。答えていない確認は「やめる」にする。確認があれば true
+  modal._closePanel = () => {
+    panelClosed = true;
+    const had = !!pendingAsk;
+    if (pendingAsk) pendingAsk(false);
+    modal.remove();
+    // 元に戻す処理（答えを受け取った側）が終わってから画面を描き直す
+    setTimeout(() => refreshAllUI(), 0);
+    return had;
+  };
   const askWorsen = (sd, up) => new Promise(resolve0 => {
     if (panelClosed) return resolve0(false);     // 計算中に閉じられていたら、聞かずにやめる
     const resolve = (v) => { pendingAsk = null; resolve0(v); };
@@ -3306,13 +3328,7 @@ function showSurplusResolveModal() {
 
   const bind = () => {
     const $ = (id) => modal.querySelector('#' + id);
-    $('surplusX').addEventListener('click', () => {
-      panelClosed = true;
-      if (pendingAsk) pendingAsk(false);           // 答えていない確認は「やめる」
-      modal.remove();
-      // 元に戻す処理（答えを受け取った側）が終わってから画面を描き直す
-      setTimeout(() => refreshAllUI(), 0);
-    });
+    $('surplusX').addEventListener('click', () => { modal._closePanel(); });
 
     if ($('planSearch')) $('planSearch').addEventListener('click', () => { planQueue = null; planRows = null; runPlanSearch(false); });
     if ($('planMore'))   $('planMore').addEventListener('click',   () => { runPlanSearch(true); });
