@@ -2150,10 +2150,12 @@ function calcPrevMonthEndFromShifts(shifts, days) {
       // 半休も出勤として数える（検査の連勤と同じ）。数えないと「早早早早半」が0連勤になっていた。
       const half = typeof isHalfWork === 'function' && isHalfWork(v);
       if (!isWork(v) && !half) break;        // 休みが出たら連勤は途切れる
-      if (!lastBand) lastBand = isLate(v) ? '遅' : '早';  // 月末に一番近い勤務の時間帯
+      // 月末に一番近い勤務の時間帯。半休は「―」（どちらでもない）にする。検査では、半休の翌日は
+      // 遅→早にも時間帯切替にもならないので、「早」として引き継ぐと翌月1日の遅番が切替に数えられていた。
+      if (!lastBand) lastBand = half ? '半' : (isLate(v) ? '遅' : '早');
       cons++;
     }
-    out[s.id] = { cons, lastShift: cons > 0 ? lastBand : '' };
+    out[s.id] = { cons, lastShift: cons > 0 && lastBand !== '半' ? lastBand : '' };
   });
   return out;
 }
