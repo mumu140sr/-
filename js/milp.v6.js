@@ -38,8 +38,12 @@ function _milpTrack(worker, onAbort) {
   _milpRunning.add(h);
   return () => _milpRunning.delete(h);
 }
+// 中止した回数。計算を始めたときの値と、終わったときの値が違えば中止されたとみなし、
+// 先に終わっていた答えがあっても使わない（4本のうち1本だけ終わっていた場合など）。
+let _milpCancelSeq = 0;
 /** 動いている数理最適化をすべて止める。止めたものがあれば true */
 function cancelMILP() {
+  _milpCancelSeq++;
   const any = _milpRunning.size > 0;
   Array.from(_milpRunning).forEach(h => { _milpRunning.delete(h); h.abort(); });
   return any;
@@ -130,8 +134,12 @@ function _milpApply(best, opts) {
 function optimizeScheduleMILP(onProgress, opts) {
   const n = _parallelCount();
   // 微調整モードは「いまの表を最小限だけ直す」ので、ぶれが小さく並列の意味がない
+  const seq = _milpCancelSeq;
   if (n <= 1 || (opts && opts.adjustMode)) {
-    return _milpOnce(onProgress, opts, 0).then(r => { _milpApply(r, opts); return r; });
+    return _milpOnce(onProgress, opts, 0).then(r => {
+      if (seq !== _milpCancelSeq) throw new Error(MILP_CANCEL_MSG);
+      _milpApply(r, opts); return r;
+    });
   }
 
   return new Promise((resolve, reject) => {
@@ -161,6 +169,8 @@ function optimizeScheduleMILP(onProgress, opts) {
         .finally(() => {
           done++; say();
           if (done < n) return;
+          // 途中で中止されたら、先に終わっていた答えも使わない
+          if (seq !== _milpCancelSeq) { reject(new Error(MILP_CANCEL_MSG)); return; }
           if (!results.length) { reject(errors[0] || new Error('数理最適化に失敗しました')); return; }
           // 一番エラーが少ないものを採用。同点なら「証明できた」方を優先する。
           if (pickBySurplus) results.sort((a, b) => countRest(a._shifts) - countRest(b._shifts) || better(a, b));
