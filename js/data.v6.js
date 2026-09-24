@@ -186,6 +186,8 @@ let _staffIdCounter = 1;
 function newStaffId() {
   const used = new Set((AppState.staff || []).map(s => s.id));
   ['requests', 'fixedShifts', 'shifts'].forEach(k => Object.keys(AppState[k] || {}).forEach(id => used.add(id)));
+  // 行事の対象にだけ残っているID（削除したスタッフ）も使わない。重なると新しい人が行事の対象になっていた。
+  (AppState.events || []).forEach(ev => (ev.staffIds || []).forEach(id => used.add(id)));
   let maxN = 0;
   used.forEach(id => { const m = /^S(\d+)$/.exec(id || ''); if (m) maxN = Math.max(maxN, parseInt(m[1], 10)); });
   let n = Math.max(_staffIdCounter, maxN + 1), id;
