@@ -959,6 +959,10 @@ function setupResultPanel() {
       const orig  = btnRepair.textContent;
       btnRepair.disabled = true;
       btnRepair.textContent = '⏳ 修復中...';
+      // 自動修正は証明ありで解くので最大10分かかる。計算中はほかの計算を始められないので、
+      // その場で止められるようにする（止めたら表は元のまま）。
+      const $stop = document.getElementById('btnCancelRepair');
+      if ($stop) { $stop.style.display = 'inline-block'; $stop.onclick = () => { if (typeof cancelMILP === 'function') cancelMILP(); }; }
       if ($area) $area.style.display = 'block';
       if ($bar)  $bar.style.width = '0%';
       if ($text) $text.textContent = 'エラー箇所を修復中...';
@@ -1002,6 +1006,8 @@ function setupResultPanel() {
         else toast('修復中にエラーが発生しました: ' + e.message, 'error');
       } finally {
         calcEnd();
+        const $stop2 = document.getElementById('btnCancelRepair');
+        if ($stop2) $stop2.style.display = 'none';
         btnRepair.disabled = false;
         btnRepair.textContent = orig;
         // 数秒後に進捗表示を隠す（結果は表とレポートに残る）

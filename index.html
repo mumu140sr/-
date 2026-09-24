@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=220" />
+<link rel="stylesheet" href="css/style.css?v=221" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -20,7 +20,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v220</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v221</span>
   </div>
   <div class="header-actions">
     <button id="btnTheme" class="btn btn-ghost btn-theme" aria-label="テーマ切替" title="明暗を切り替え">🌙</button>
@@ -334,6 +334,7 @@
           <div id="repairBar" style="width:0%;height:100%;background:#667eea;transition:width .2s"></div>
         </div>
         <div id="repairText" style="font-size:13px;color:#4a5568;margin-top:6px"></div>
+        <button id="btnCancelRepair" class="btn" style="display:none;margin-top:6px;background:#e74c3c;color:#fff">⏹ 中止</button>
       </div>
       <!-- 凡例：シフト種別から動的生成 -->
       <div class="legend" id="shiftLegend"></div>
@@ -368,12 +369,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=220"></script>
-<script src="js/optimizer.v6.js?v=220"></script>
-<script src="js/worker-client.v6.js?v=220"></script>
-<script src="js/ai-explain.v6.js?v=220"></script>
-<script src="js/ui.v6.js?v=220"></script>
-<script src="js/milp.v6.js?v=220"></script>
-<script src="js/app.v6.js?v=220"></script>
+<script src="js/data.v6.js?v=221"></script>
+<script src="js/optimizer.v6.js?v=221"></script>
+<script src="js/worker-client.v6.js?v=221"></script>
+<script src="js/ai-explain.v6.js?v=221"></script>
+<script src="js/ui.v6.js?v=221"></script>
+<script src="js/milp.v6.js?v=221"></script>
+<script src="js/app.v6.js?v=221"></script>
 </body>
 </html>
