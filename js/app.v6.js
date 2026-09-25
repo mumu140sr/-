@@ -1054,70 +1054,110 @@ function setupResultPanel() {
       }
 
       if (!calcBegin('エラーの自動修正')) return;
-      // 修復前の状態を履歴に積む → 気に入らなければ Ctrl+Z で戻せる
-      if (typeof recordShiftHistory === 'function') recordShiftHistory();
-
-      // シフト表タブ内の進捗バーを使う（⑤自動生成のバーは別タブで見えないため）
-      const $area = document.getElementById('repairProgress');
-      const $bar  = document.getElementById('repairBar');
-      const $text = document.getElementById('repairText');
-      const orig  = btnRepair.textContent;
-      btnRepair.disabled = true;
-      btnRepair.textContent = '⏳ 修復中...';
-      // 自動修正は証明ありで解くので最大10分かかる。計算中はほかの計算を始められないので、
-      // その場で止められるようにする（止めたら表は元のまま）。
-      const $stop = document.getElementById('btnCancelRepair');
-      if ($stop) { $stop.style.display = 'inline-block'; $stop.onclick = () => { if (typeof cancelMILP === 'function') cancelMILP(); }; }
-      if ($area) $area.style.display = 'block';
-      if ($bar)  $bar.style.width = '0%';
-      if ($text) $text.textContent = 'エラー箇所を修復中...';
-
-      const before = AppState.violations.length;
-      const beforeSc = scoreViolations(AppState.violations);
-      const backup = JSON.parse(JSON.stringify(AppState.shifts));
-      try {
-        if (typeof optimizeScheduleMILP !== 'function') throw new Error('数理最適化モジュール未読込（再読込してください）');
-        // 🔒で固定したセルは保持し、それ以外を数理最適化で最適化し直す（悪化しない保証つき）
-        const res = await optimizeScheduleMILP((pct, msg) => {
-          if ($bar)  $bar.style.width = pct + '%';
-          if ($text) $text.textContent = '数理最適化で修復中: ' + msg;
-        }, { improveOver: beforeSc });
-        const after = res.violations.length;
-        const afterSc = scoreViolations(res.violations);
-        // 基本の判定（scoreBetter: どの🚨も増えず、どれかが減る）で採否を決める。
-        // 件数だけだと、🚨が増えても合計が減れば「修復した」と採用してしまっていた。
-        if (scoreBetter(afterSc, beforeSc)) {
-          if (typeof noteEdits === 'function') noteEdits('自動修正', backup);   // 手直しとは分けて数える
-          const words = _diffWords(_scoreDiff(beforeSc, afterSc));
-          if ($bar) $bar.style.width = '100%';
-          renderResultTable();
-          document.getElementById('reportCard').style.display = 'block';
-          renderReport({ success: res.success, score: after, violations: res.violations });
-          if ($text) $text.textContent = `修復完了: ${scoreSummary(beforeSc)} → ${scoreSummary(afterSc)}`;
-          toast(`✅ 数理最適化で${words}（🔒は保持）`, 'success', 6000);
-        } else {
-          // 改善なし → 完全に元へ戻す（悪化させない）
-          AppState.shifts = backup; AppState.violations = checkViolations(backup);
-          if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-          renderResultTable();
-          if ($text) $text.textContent = `これ以上は改善できませんでした（${scoreSummary(beforeSc)}）`;
-          toast('これ以上は数理最適化でも減らせませんでした。関係する🔒を解除すると改善する場合があります', 'info', 6000);
+      // 答えの案を、早く出せるもの（変えるマスが少ないもの）から順に計算して並べ、利用者が選んで反映する。
+      // 計算はすべて試し計算（noApply）で、選ぶまで本物の表と保存データは書き換えない。
+      // 以前は、ひと月を一から解き直した答えをそのまま反映していたため、🚨3件を直すのに
+      // 131マスが変わり、早番と遅番の行き来が 9→16 に増えることがあった。
+      const baseShifts = JSON.parse(JSON.stringify(AppState.shifts));
+      const fp0 = (typeof contentFingerprint === 'function') ? contentFingerprint() : '';
+      const beforeV = AppState.violations.slice();
+      const beforeSc = scoreViolations(beforeV);
+      const SPECS = [
+        { label: '少しだけ直す（10マスまで）', k: 10 },
+        { label: 'ほどほどに直す（25マスまで）', k: 25 },
+        { label: 'しっかり直す（50マスまで）', k: 50 },
+        { label: '全部直す（表を解き直す・最大10分）', k: 0 },
+      ];
+      const cands = [], skipped = [];
+      let stopped = false, running = true;
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay show';
+      modal.style.zIndex = 10050;
+      modal.innerHTML = `<div class="modal-content" style="max-width:980px;width:calc(100vw - 32px)">
+          <div class="modal-header"><h3 style="margin:0">🛠 自動修正の案（${escapeHtml(scoreSummary(beforeSc))}）</h3><button class="modal-close" id="rcClose">✕</button></div>
+          <div class="modal-body">
+            <div class="hint" style="margin-bottom:8px">変えるマスが少ない案から順に計算して並べます。どれも、選ぶまで表は変わりません。
+              🚨がどの種類も増えない案だけを出します。変えるマスは、休み↔余の書き替えを除いた数です。</div>
+            <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:13px"><thead>${CAND_HEAD}</thead><tbody id="rcRows"></tbody></table></div>
+            <div id="rcStatus" style="margin-top:8px"></div>
+            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn" id="rcStop" style="background:#e74c3c;color:#fff">⏹ 中止（出ている案は選べます）</button>
+              <button class="btn" id="rcCancel">反映しないで閉じる</button>
+            </div>
+          </div></div>`;
+      document.body.appendChild(modal);
+      const $rows = modal.querySelector('#rcRows'), $st = modal.querySelector('#rcStatus');
+      const stop = () => { if (!running) return; stopped = true; if (typeof cancelMILP === 'function') cancelMILP(); };
+      const close = () => { stop(); modal.remove(); };
+      modal.querySelector('#rcStop').addEventListener('click', stop);
+      modal.querySelector('#rcCancel').addEventListener('click', close);
+      modal.querySelector('#rcClose').addEventListener('click', close);
+      const redraw = () => {
+        $rows.innerHTML = cands.map((c, i) => candRowHtml(c.label, c.st, c.sec,
+          `<button class="btn btn-primary" data-rcgo="${i}" ${running ? 'disabled title="計算中です。⏹ 中止するか、終わるのを待ってから選んでください"' : ''}>反映</button>`)).join('')
+          || (running ? '' : '<tr><td colspan="7" class="hint" style="padding:8px">🚨を減らせる案は見つかりませんでした。関係する🔒を解除すると直せる場合があります。</td></tr>');
+        $rows.innerHTML += skipped.map(t => `<tr><td colspan="7" class="hint" style="padding:4px 8px;border-top:1px dashed var(--border)">${escapeHtml(t)}</td></tr>`).join('');
+        $rows.querySelectorAll('[data-rcgo]').forEach(b => b.addEventListener('click', () => applyCand(cands[+b.dataset.rcgo])));
+      };
+      const applyCand = (c) => {
+        if (!c || running) return;
+        if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+        // 案を作ったあとに表などが変わっていたら、古い案のまま反映しない
+        if (fp0 && typeof contentFingerprint === 'function' && contentFingerprint() !== fp0) {
+          toast('表が変わったため、この案は使えません。もう一度「エラーを自動修正」を押してください', 'error', 6000); return;
         }
+        if (typeof recordShiftHistory === 'function') recordShiftHistory();   // 気に入らなければ ↩ で戻せる
+        AppState.shifts = JSON.parse(JSON.stringify(c.shifts));
+        AppState.violations = checkViolations(AppState.shifts);
+        if (typeof noteEdits === 'function') noteEdits('自動修正', baseShifts);   // 手直しとは分けて数える
+        renderResultTable();
+        document.getElementById('reportCard').style.display = 'block';
+        renderReport({ success: AppState.violations.length === 0, score: AppState.violations.length, violations: AppState.violations });
         saveToStorage();
-      } catch (e) {
-        console.error(e);
-        AppState.shifts = backup; AppState.violations = checkViolations(backup);
-        if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-        if (/^cancel/.test(e.message || '')) toast('自動修正を中止しました（表は元のままです）', 'info');
-        else toast('修復中にエラーが発生しました: ' + e.message, 'error');
+        toast(`✅ 「${c.label}」を反映しました（${scoreSummary(beforeSc)} → ${scoreSummary(c.st.a)}・${c.st.cells.length}マス）`, 'success', 6000);
+        modal.remove();
+      };
+      const $stop2 = document.getElementById('btnCancelRepair');
+      if ($stop2) { $stop2.style.display = 'inline-block'; $stop2.onclick = stop; }
+      btnRepair.disabled = true;
+      try {
+        for (const sp of SPECS) {
+          if (stopped || !modal.isConnected) break;
+          const t0 = Date.now();
+          $st.innerHTML = `<span class="hint">⏳ 「${escapeHtml(sp.label)}」を計算しています…</span>`;
+          let r;
+          try {
+            r = await optimizeScheduleMILP((pct, msg) => {
+              const sec = Math.round((Date.now() - t0) / 1000);
+              $st.innerHTML = `<span class="hint">⏳ 「${escapeHtml(sp.label)}」を計算しています…（${sec}秒）</span>`;
+            }, sp.k ? { adjustMode: true, adjustK: sp.k, fastMode: true, noApply: true }
+                    : { improveOver: beforeSc, noApply: true });
+          } catch (e) {
+            if (/^cancel/.test(e.message || '') || stopped) break;
+            skipped.push(`${sp.label}: 計算に失敗しました（${escapeHtml(e.message || '')}）`); redraw();
+            continue;
+          }
+          const sec = Math.round((Date.now() - t0) / 1000);
+          const st = candStats(baseShifts, r._shifts || r.shifts, beforeV, r.violations);
+          // 🚨がどの種類も増えず、⛔ も悪くならず、🚨か⛔が減った案だけを出す
+          const ok = !st.compUp && scoreBetter(st.a, beforeSc) && (st.a.must < beforeSc.must || st.a.comp < beforeSc.comp);
+          // 前の案より🚨が減っていない案は出さない（同じ直り方で、変えるマスが多いだけ）
+          const dup = cands.some(c => scoreCompare(st.a, c.st.a) >= 0);
+          if (ok && !dup) { cands.push({ label: sp.label, st, sec, shifts: r._shifts || r.shifts }); redraw(); }
+          else { skipped.push(`${sp.label}（${sec}秒）: ${!ok ? '🚨を減らせないか、どれかの🚨が増えるため出しません' : '前の案より🚨が減らないため出しません（変えるマスが増えるだけ）'}`); redraw(); }
+          if (st.a.must === 0 && st.a.comp === 0 && ok) break;   // 🚨が0件になったら、それ以上は計算しない
+        }
       } finally {
+        running = false;
         calcEnd();
-        const $stop2 = document.getElementById('btnCancelRepair');
         if ($stop2) $stop2.style.display = 'none';
         btnRepair.disabled = false;
-        btnRepair.textContent = orig;
-        // 数秒後に進捗表示を隠す（結果は表とレポートに残る）
-        setTimeout(() => { if ($area) $area.style.display = 'none'; }, 4000);
+        if (modal.isConnected) {
+          modal.querySelector('#rcStop').style.display = 'none';
+          $st.innerHTML = stopped ? '<span class="hint">中止しました。出ている案から選べます。</span>'
+                                  : '<span class="hint">計算が終わりました。反映する案を選んでください。</span>';
+          redraw();
+        }
       }
     });
   }

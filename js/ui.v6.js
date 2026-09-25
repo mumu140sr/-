@@ -2380,6 +2380,62 @@ function _editVsum(vs) {
   o.sur = sur;
   return o;
 }
+// ===== 答えの案を並べて、反映するかを選ぶ（自動修正・余の解消のつじつま合わせ） =====
+// 変わるマス・⛔・🚨（種類ごと）・早番と遅番の行き来・ほかの🟡を、反映する前に見せる。
+const _IKI3 = new Set(['category-switch', 'bad-rest', 'band-switch']);
+/** 2つの表の違うマス。休み↔余・公休の書き替え（どちらも休み）は数えない */
+function candCellChanges(a, b) {
+  const out = [];
+  const offish = (v) => !v || v === '休' || v === '公' || v === '余';
+  (AppState.staff || []).forEach(s => {
+    const x = (a || {})[s.id] || {}, y = (b || {})[s.id] || {};
+    new Set([...Object.keys(x), ...Object.keys(y)]).forEach(d => {
+      const f = x[d] || '', t = y[d] || '';
+      if (f === t || (offish(f) && offish(t))) return;
+      out.push({ id: s.id, name: s.name, day: +d, from: f, to: t });
+    });
+  });
+  return out.sort((p, q) => p.day - q.day || String(p.name).localeCompare(String(q.name)));
+}
+/** 反映する前と後を比べる数 */
+function candStats(beforeShifts, afterShifts, beforeV, afterV) {
+  const bV = beforeV || checkViolations(beforeShifts), aV = afterV || checkViolations(afterShifts);
+  const cnt = (vs) => { let iki = 0, oth = 0; vs.forEach(v => { const m = getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type);
+    if (m) return; if (_IKI3.has(v.type)) iki++; else oth++; }); return { iki, oth }; };
+  const b = scoreViolations(bV), a = scoreViolations(aV), cb = cnt(bV), ca = cnt(aV);
+  return { b, a, ikiB: cb.iki, ikiA: ca.iki, othB: cb.oth, othA: ca.oth,
+           compUp: compWorsened(bV, aV).length > 0, cells: candCellChanges(beforeShifts, afterShifts), aV };
+}
+/** 🚨の種類ごとの増減（増えた種類は赤く） */
+function candMustText(st) {
+  const lab = (k) => (typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k;
+  const keys = new Set([...Object.keys(st.b.byMust || {}), ...Object.keys(st.a.byMust || {})]);
+  const parts = [];
+  keys.forEach(k => { const f = (st.b.byMust || {})[k] || 0, t = (st.a.byMust || {})[k] || 0;
+    if (f !== t) parts.push(`<span style="${t > f ? 'color:var(--danger);font-weight:700' : ''}">${escapeHtml(lab(k))} ${f}→${t}</span>`); });
+  return parts.join('、');
+}
+function candCellsText(cells, max) {
+  const n = max || 12;
+  const t = cells.slice(0, n).map(c => `${escapeHtml(c.name)} ${c.day}日 ${escapeHtml(c.from || '空')}→${escapeHtml(c.to || '空')}`).join('、');
+  return t + (cells.length > n ? ` ほか${cells.length - n}件` : '');
+}
+/** 案の1行（表の行）。btnHtml: 反映などのボタン */
+function candRowHtml(label, st, sec, btnHtml) {
+  const arrow = (a, b, bad) => `${a}→${b}` + (b > a && bad ? ' ⚠️' : '');
+  return `<tr>
+    <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>${escapeHtml(label)}</b>${sec != null ? `<div class="hint">${sec}秒</div>` : ''}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${st.a.comp > st.b.comp ? '<b style="color:var(--danger)">' : ''}⛔ ${st.b.comp}→${st.a.comp}${st.a.comp > st.b.comp ? '</b>' : ''}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>🚨 ${st.b.must}→${st.a.must}件</b><div class="hint">${candMustText(st)}</div></td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);text-align:center"><b>${st.cells.length}</b>マス</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">行き来 ${arrow(st.ikiB, st.ikiA, true)}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">ほかの🟡 ${arrow(st.othB, st.othA, false)}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border)">${btnHtml || ''}</td>
+  </tr>
+  <tr><td colspan="7" class="hint" style="padding:0 8px 6px">${st.cells.length ? '変わるマス: ' + candCellsText(st.cells) : '変わるマスはありません'}</td></tr>`;
+}
+const CAND_HEAD = '<tr><th style="text-align:left;padding:4px 8px">案</th><th style="text-align:left;padding:4px 8px">⛔ 6連勤以上</th><th style="text-align:left;padding:4px 8px">🚨</th><th style="padding:4px 8px">変わるマス</th><th style="text-align:left;padding:4px 8px">早番と遅番の行き来</th><th style="text-align:left;padding:4px 8px">ほかの🟡</th><th></th></tr>';
+
 /** 生成した直後の表を控える（生成・途中から作り直しのあと） */
 function genBaseTake() {
   AppState.genBase = {
@@ -2845,10 +2901,37 @@ async function _trySurplusChange(apply, opts) {
   const bSc = scoreViolations(beforeV);
   apply();
   mid = captureChangeBase();          // ここまでが、この変更そのもので変えた所
-  // 周りのつじつまを、最小限の変更で合わせる
-  if (o.adjust && typeof optimizeScheduleMILP === 'function') {
+  // 周りのつじつまを、最小限の変更で合わせる。変更そのもので🚨・⛔・連勤の超過日数が悪くならないときは
+  // 合わせない（合わせる必要が無いのに、計算の上の数だけを減らそうとして、ほかの人のマスを
+  // 20マス近く動かし、早番と遅番の行き来を増やしていた）。
+  const midV = checkViolations(AppState.shifts);
+  const needAdjust = scoreWorsened(scoreViolations(midV), bSc).some(x => x.key !== 'soft') || compWorsened(beforeV, midV).length > 0;
+  if (o.adjust && needAdjust && typeof optimizeScheduleMILP === 'function') {
     try { await optimizeScheduleMILP(() => {}, { adjustMode: true, adjustK: (o.k || 24), fastMode: true }); }
     catch (_) { /* 調整できなくてもそのまま検証する */ }
+  }
+  // つじつま合わせでほかのマスも動いたときは、反映する前に「つじつま合わせあり」と
+  // 「変更だけ（つじつま合わせなし）」を並べて見せ、選んでもらう（以前はつじつま合わせが
+  // 解けずに何もしていなかったので、ほかの人のマスが動くのは新しい動きになる）。
+  let chosen = false;
+  if (o.adjust && typeof o.chooseAdjust === 'function') {
+    const adjCells = changesBetween(mid, captureChangeBase()).filter(c => c[0] === 'shifts' && c[3] !== c[4]);
+    if (adjCells.length) {
+      const withShifts = JSON.parse(JSON.stringify(AppState.shifts));
+      _applyChangeList(adjCells, 'undo');
+      const woShifts = JSON.parse(JSON.stringify(AppState.shifts));
+      _applyChangeList(adjCells, 'redo');
+      const withSt = candStats(base0.shifts, withShifts, beforeV);
+      const woSt = candStats(base0.shifts, woShifts, beforeV);
+      const adjList = candCellChanges(mid.shifts, withShifts);
+      // つじつま合わせで🚨・⛔が「変更だけ」より良くならないなら、合わせない（マスが動くだけ）
+      const helps = !withSt.compUp && scoreCompare(withSt.a, woSt.a) < 0 &&
+                    (withSt.a.comp < woSt.a.comp || withSt.a.under < woSt.a.under || withSt.a.must < woSt.a.must || withSt.a.over < woSt.a.over);
+      const pick = helps ? await o.chooseAdjust({ withSt, woSt, adjList }) : 'without';
+      if (!pick) { restore(); return { ok: false, before, after: before, sd: null, cancelled: true, message: '実行しませんでした' }; }
+      if (pick === 'without') _applyChangeList(adjCells, 'undo');
+      chosen = true;
+    }
   }
   changes = collectChanges();         // 確認を待つ前に、この変更で変えた所を覚えておく
   AppState.violations = checkViolations(AppState.shifts);
@@ -2865,6 +2948,12 @@ async function _trySurplusChange(apply, opts) {
   // どれかが増える（🚨の種類・連勤の超過日数・🟡）ときは、取り消さずに本人へ確認する。
   // 合計件数では判断しない（合計が減っても🚨が増えることがある）。
   const up = scoreWorsened(aSc, bSc);
+  if (up.length && chosen) {   // 並べた案を見て選んだので、あらためては聞かない
+    recordDeltaHistory(changes);
+    noteEditList('余の解消', changes);
+    autoSave();
+    return { ok: true, before, after, sd, worsened: true, hadCritical: up.some(x => x.key !== 'soft'), message: words };
+  }
   if (up.length) {
     const hadCritical = up.some(x => x.key !== 'soft');
     const go = (typeof o.confirm === 'function')
@@ -2998,6 +3087,29 @@ function showSurplusResolveModal() {
       </div>`;
     $m.querySelector('#worsenYes').addEventListener('click', () => resolve(true));
     $m.querySelector('#worsenNo').addEventListener('click', () => resolve(false));
+  });
+
+  // つじつま合わせでほかのマスも動いたとき、「あり」と「変更だけ」を並べて選んでもらう
+  const askAdjust = ({ withSt, woSt, adjList }) => new Promise(resolve0 => {
+    if (panelClosed) return resolve0(false);
+    const resolve = (v) => { pendingAsk = null; resolve0(v); };
+    pendingAsk = resolve;
+    const $m = modal.querySelector('#resolveMsg');
+    if (!$m) return resolve(confirm(`つじつま合わせで ${adjList.length}マス 変わります。実行しますか？`) ? 'with' : false);
+    $m.style.display = 'block';
+    $m.style.background = 'var(--surface)';
+    $m.style.border = '1px solid var(--border)';
+    $m.innerHTML = `<div style="font-size:14px;margin-bottom:4px"><b>つじつま合わせで変わるマス：${adjList.length}件</b></div>
+      <div class="hint" style="margin-bottom:6px">${candCellsText(adjList, 20)}</div>
+      <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead>${CAND_HEAD}</thead><tbody>
+        ${candRowHtml('つじつま合わせあり', withSt, null, `<button class="btn btn-primary" id="adjWith" ${withSt.compUp ? 'disabled title="6連勤以上になるため選べません"' : ''}>これで実行</button>`)}
+        ${candRowHtml('変更だけ（つじつま合わせなし）', woSt, null, `<button class="btn" id="adjWithout" ${woSt.compUp ? 'disabled title="6連勤以上になるため選べません"' : ''}>これで実行</button>`)}
+      </tbody></table></div>
+      <div style="margin-top:8px"><button id="adjNo" class="btn">やめる</button></div>`;
+    const bw = $m.querySelector('#adjWith'), bo = $m.querySelector('#adjWithout');
+    if (bw) bw.addEventListener('click', () => resolve('with'));
+    if (bo) bo.addEventListener('click', () => resolve('without'));
+    $m.querySelector('#adjNo').addEventListener('click', () => resolve(false));
   });
 
   // 誰を選ぶかの判断材料として、今月の有給数と余の数を名前の横に出す
@@ -3559,7 +3671,7 @@ function showSurplusResolveModal() {
         AppState.fixedShifts[T.id] = AppState.fixedShifts[T.id] || {};
         AppState.fixedShifts[T.id][d] = row.tk;
       }
-    }, { adjust: true, k: 32, confirm: askWorsen });
+    }, { adjust: true, k: 32, confirm: askWorsen, chooseAdjust: askAdjust });
     busy(false);
     say(r.ok ? `${r.hadCritical ? '🚨' : r.worsened ? '⚠️' : '✅'} ${d}日 ${escapeHtml(T.name)}（${escapeHtml(row.tk)}）のそばに ${escapeHtml(L.name)}（${escapeHtml(row.lk)}）を入れました（${r.message}）。${diffText(r)}`
              : `↩ ${d}日の指定を取り消しました。${r.message}`, r.ok && !r.worsened);
@@ -3940,7 +4052,7 @@ function showSurplusResolveModal() {
         AppState.fixedShifts[id][d] = key;                                     // その人をその日に固定
         AppState.shifts[id] = AppState.shifts[id] || {};
         AppState.shifts[id][d] = key;
-      }, { adjust: true, k: 24, confirm: askWorsen });
+      }, { adjust: true, k: 24, confirm: askWorsen, chooseAdjust: askAdjust });
       busy(false);
       say(r.ok ? `${r.hadCritical ? '🚨' : r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。${diffText(r)}`
                : `↩ ${escapeHtml(s.name)} ${d}日 の「${escapeHtml(key)}」を取り消しました。${r.message}`, r.ok && !r.worsened);
