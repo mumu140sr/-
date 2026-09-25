@@ -179,6 +179,7 @@ function setupSettingsPanel() {
       // 日ごとのスキル指定も日付つきなので片付ける。スキルの種類と目標人数（skills）は残す。
       const ds = {}; Object.keys(AppState.dailySkills || {}).forEach(k => { ds[k] = {}; }); AppState.dailySkills = ds;
       AppState.violations = []; AppState.generated = false;
+      AppState.genBase = null; AppState.editLog = [];   // 生成直後の控えと記録も前の月のもの
       if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 前の月の表へ戻せないように
     }
     refreshAllUI();
@@ -2074,6 +2075,7 @@ function updateHistoryButtons() {
 // 固定マス（🔒）も手直し前のものを使う（入れ替えで🔒も動くため、手直し後の🔒で
 // 数えると、良くなったのに「悪くなりました」と出ることがあった）。
 function refreshAfterManualEdit(doneMsg, before) {
+  if (before && before.shifts && typeof noteEdits === 'function') noteEdits('手', before.shifts);
   let prevV = AppState.violations || [];
   if (before && before.shifts) {
     const nowFixed = AppState.fixedShifts;
@@ -2226,6 +2228,118 @@ function setupAllColumnResizers() {
   enableColumnResize(document.getElementById('resultTable'), 'result');
 }
 
+// ===== 生成から変えたマス =====
+// 生成した直後の表を控え（genBase）、そのあとに変えたマスを記録する（editLog）。
+// 物差しは「生成直後の表」との正味の違い（元に戻したマスは数えない）。記録には、
+// 何で変えたか（手・自動修正・余の解消・修正案）を残し、手直しと分けて数える。
+// 控えと記録は保存データと書き出しに入る（生成直後と手直し後を1つのファイルで比べられる）。
+const _IKI_TYPES = new Set(['category-switch', 'bad-rest', 'band-switch']);   // 早番と遅番の行き来
+function _editVsum(vs) {
+  const o = { must: 0, soft: 0, iki: 0, byType: {} };
+  (vs || []).forEach(v => {
+    const m = getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type);
+    if (m) o.must++; else { o.soft++; if (_IKI_TYPES.has(v.type)) o.iki++; }
+    o.byType[v.type] = (o.byType[v.type] || 0) + 1;
+  });
+  let sur = 0; for (const id in (AppState.shifts || {})) for (const d in AppState.shifts[id]) if (AppState.shifts[id][d] === '余') sur++;
+  o.sur = sur;
+  return o;
+}
+/** 生成した直後の表を控える（生成・途中から作り直しのあと） */
+function genBaseTake() {
+  AppState.genBase = {
+    at: new Date().toISOString(),
+    version: ((document.getElementById('appVersion') || {}).textContent || '').trim(),
+    month: AppState.settings.targetMonth,
+    shifts: JSON.parse(JSON.stringify(AppState.shifts || {})),
+    fixed: JSON.parse(JSON.stringify(AppState.fixedShifts || {})),
+    vsum: _editVsum(AppState.violations || checkViolations(AppState.shifts)),
+  };
+  AppState.editLog = [];
+  renderEditSummary();
+}
+/** 操作の前後の表を比べて、変わったマスを記録する（src: 手・自動修正・余の解消・修正案） */
+function noteEdits(src, beforeShifts) {
+  if (!AppState.genBase || !beforeShifts) return;
+  const at = new Date().toISOString(), log = AppState.editLog || (AppState.editLog = []);
+  const ids = new Set([...Object.keys(beforeShifts), ...Object.keys(AppState.shifts || {})]);
+  ids.forEach(id => {
+    const a = beforeShifts[id] || {}, b = (AppState.shifts || {})[id] || {};
+    new Set([...Object.keys(a), ...Object.keys(b)]).forEach(d => {
+      if ((a[d] || '') !== (b[d] || '')) log.push({ sid: id, day: +d, from: a[d] || '', to: b[d] || '', src, at });
+    });
+  });
+  if (log.length > 3000) log.splice(0, log.length - 3000);
+  renderEditSummary();
+}
+/** 変えた所の一覧（_applyChangeList の形）から、表のマスだけを記録する */
+function noteEditList(src, list) {
+  if (!AppState.genBase) return;
+  const at = new Date().toISOString(), log = AppState.editLog || (AppState.editLog = []);
+  (list || []).filter(c => c[0] === 'shifts').forEach(c => log.push({ sid: c[1], day: +c[2], from: c[3] || '', to: c[4] || '', src, at }));
+  renderEditSummary();
+}
+/** 生成直後の表と今の表の正味の違い。何で変えたかは、そのマスを最後に変えた記録から取る */
+function editDiff() {
+  const base = (AppState.genBase || {}).shifts; if (!base) return [];
+  const last = {};
+  (AppState.editLog || []).forEach(e => { last[e.sid + '|' + e.day] = e.src; });
+  const out = [];
+  (AppState.staff || []).forEach(s => {
+    const a = base[s.id] || {}, b = (AppState.shifts || {})[s.id] || {};
+    new Set([...Object.keys(a), ...Object.keys(b)]).forEach(d => {
+      if ((a[d] || '') !== (b[d] || '')) out.push({ sid: s.id, name: s.name, day: +d, from: a[d] || '', to: b[d] || '', src: last[s.id + '|' + d] || '手' });
+    });
+  });
+  return out.sort((x, y) => x.day - y.day || String(x.sid).localeCompare(String(y.sid)));
+}
+let _editMarks = false;
+function renderEditSummary() {
+  const box = document.getElementById('editSummary');
+  if (!box) return;
+  const g = AppState.genBase;
+  if (!g || g.month !== AppState.settings.targetMonth) { box.innerHTML = ''; return; }
+  const diff = editDiff();
+  const by = {}; diff.forEach(x => { by[x.src] = (by[x.src] || 0) + 1; });
+  const now = _editVsum(AppState.violations || []), was = g.vsum || {};
+  const arrow = (a, b) => `${a ?? '-'}→${b}`;
+  box.innerHTML = `<div class="hint" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span>✏️ 生成から変えたマス：<b>${diff.length}件</b>${diff.length ? '（' + Object.keys(by).map(k => `${escapeHtml(k)} ${by[k]}`).join('・') + '）' : ''}</span>
+      <span>🚨 ${arrow(was.must, now.must)} ／ 🟡 ${arrow(was.soft, now.soft)}（うち早番と遅番の行き来 ${arrow(was.iki, now.iki)}）／ 余 ${arrow(was.sur, now.sur)}</span>
+      ${diff.length ? '<button class="btn" id="editListBtn" style="padding:2px 10px">一覧</button>' : ''}
+      ${diff.length ? `<label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="editMarkCb" ${_editMarks ? 'checked' : ''}>表に印</label>` : ''}
+    </div>`;
+  const lb = document.getElementById('editListBtn');
+  if (lb) lb.addEventListener('click', showEditList);
+  const cb = document.getElementById('editMarkCb');
+  if (cb) cb.addEventListener('change', () => { _editMarks = cb.checked; applyEditMarks(); });
+  applyEditMarks();
+}
+function applyEditMarks() {
+  document.querySelectorAll('.result-table td.edit-mark').forEach(td => { td.classList.remove('edit-mark'); td.style.boxShadow = ''; });
+  if (!_editMarks) return;
+  editDiff().forEach(x => {
+    const td = document.querySelector(`.result-table td[data-sid="${x.sid}"][data-day="${x.day}"]`);
+    if (td) { td.classList.add('edit-mark'); td.style.boxShadow = 'inset 0 0 0 2px #b7791f'; }
+  });
+}
+function showEditList() {
+  const diff = editDiff();
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.style.zIndex = 10050;
+  modal.innerHTML = `<div class="modal-content" style="max-width:640px">
+      <div class="modal-header"><h3 style="margin:0">✏️ 生成から変えたマス（${diff.length}件）</h3><button class="modal-close" id="elClose">✕</button></div>
+      <div class="modal-body" style="max-height:60vh;overflow:auto">
+        <table class="calendar-table" style="width:100%"><thead><tr><th>日</th><th>人</th><th>生成したとき</th><th>今</th><th>何で変えたか</th></tr></thead>
+        <tbody>${diff.map(x => `<tr><td>${x.day}日</td><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.from || '（空）')}</td><td>${escapeHtml(x.to || '（空）')}</td><td>${escapeHtml(x.src)}</td></tr>`).join('')}</tbody></table>
+      </div></div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.querySelector('#elClose').addEventListener('click', close);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+}
+
 // 各テーブルの描画後に列幅調整を有効化する（描画関数をラップして自動適用）
 ['renderRoleTable', 'renderStaffTable', 'renderResultTable'].forEach((fn) => {
   const orig = window[fn];
@@ -2233,6 +2347,7 @@ function setupAllColumnResizers() {
   window[fn] = function (...args) {
     const r = orig.apply(this, args);
     try { setupAllColumnResizers(); } catch (_) {}
+    if (fn === 'renderResultTable') { try { renderEditSummary(); } catch (_) {} }
     return r;
   };
 });
@@ -2622,10 +2737,12 @@ async function _trySurplusChange(apply, opts) {
       : confirm(`この変更で ${words}。\nそれでも実行しますか？`);
     if (!go) { restore(); return { ok: false, before, after, sd, cancelled: true, message: `${words}ため取り消しました` }; }
     recordDeltaHistory(changes);   // 元に戻すで、この変更だけを戻せるように
+    noteEditList('余の解消', changes);
     autoSave();
     return { ok: true, before, after, sd, worsened: true, hadCritical, message: words };
   }
   recordDeltaHistory(changes);
+  noteEditList('余の解消', changes);
   autoSave();
   return { ok: true, before, after, sd, message: words };
 }
@@ -3547,7 +3664,7 @@ function showSurplusResolveModal() {
         }
         const sgn = _diffSign(_scoreDiff(bSc, aSc));
         // 元に戻すで、作り直し（表・🔒固定・必要人数+1）を一緒に戻せるようにする
-        recordDeltaHistory(changesOfChangeAndCalc(histBase, histMid));
+        { const ch = changesOfChangeAndCalc(histBase, histMid); recordDeltaHistory(ch); noteEditList('余の解消', ch); }
         say(`${sgn <= 0 ? '✅' : '⚠️'} ${escapeHtml(_diffWords(_scoreDiff(bSc, aSc)))}。${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.tutor)}さんのそばに入れて作り直しました（余 ${listSurplusCells().length}コマ）。`, true);
       } catch (e) {
         // 中止・失敗のときは、固定と必要人数の変更も元に戻す（作り直していない表に変更だけ残さない）

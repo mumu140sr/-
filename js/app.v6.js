@@ -83,6 +83,7 @@ function exportAppData() {
       skills: AppState.skills, dailySkills: AppState.dailySkills,
       staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
       specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
+      genBase: AppState.genBase || null, editLog: AppState.editLog || [],   // 生成直後の表と、変えたマスの記録
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -113,6 +114,7 @@ async function exportAppDataSure() {
         skills: AppState.skills, dailySkills: AppState.dailySkills,
         staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
         specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
+        genBase: AppState.genBase || null, editLog: AppState.editLog || [],
       };
       const h = await window.showSaveFilePicker({ suggestedName: `シフト設定_${month}.json`,
         types: [{ description: 'シフト設定', accept: { 'application/json': ['.json'] } }] });
@@ -173,6 +175,9 @@ function setupHeaderActions() {
           ['settings','shiftTypes','roleRequirements','roleRequirementsCast','dailyRequirements',
            'dailyRequirementsCast','skills','dailySkills','staff','requests','fixedShifts',
            'specialDays','events','shifts'].forEach(k => { if (d[k] !== undefined) AppState[k] = d[k]; });
+          // 生成直後の控えと変えたマスの記録（入っていないファイルなら空にする）
+          AppState.genBase = d.genBase || null;
+          AppState.editLog = Array.isArray(d.editLog) ? d.editLog : [];
           AppState.generated = !!(d.shifts && Object.keys(d.shifts).length);
           AppState.violations = AppState.generated ? checkViolations(AppState.shifts) : [];
           if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 取り込む前の表には戻さない
@@ -440,6 +445,9 @@ function setupGeneratePanel() {
                                          : cutOff ? '｜⏱ 時間内でいちばん良い答え（最良とは確認できていません）'
                                                   : '｜✅ これ以上良い組み合わせは無いと確認済み');
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
+      // 生成した直後の表を控える（途中から作り直したときも撮り直す）。
+      // このあと手などで変えたマスを「生成から変えたマス」として数える。
+      if (typeof genBaseTake === 'function') genBaseTake();
       $report.style.display = 'block';
       try {
         renderReport({ success: res.success, score: res.score, violations: res.violations,
@@ -904,11 +912,13 @@ function renderFixPlans(root) {
         if (!p) return;
         if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
         if (typeof recordShiftHistory === 'function') recordShiftHistory();
+        const beforeFix = JSON.parse(JSON.stringify(AppState.shifts));
         p.steps.forEach(m => {
           const t = AppState.shifts[m.aId][m.day];
           AppState.shifts[m.aId][m.day] = AppState.shifts[m.bId][m.day];
           AppState.shifts[m.bId][m.day] = t;
         });
+        if (typeof noteEdits === 'function') noteEdits('修正案', beforeFix);
         AppState.violations = checkViolations(AppState.shifts);
         if (typeof autoSave === 'function') autoSave();
         if (typeof refreshAllUI === 'function') refreshAllUI();
@@ -1030,6 +1040,7 @@ function setupResultPanel() {
         // 基本の判定（scoreBetter: どの🚨も増えず、どれかが減る）で採否を決める。
         // 件数だけだと、🚨が増えても合計が減れば「修復した」と採用してしまっていた。
         if (scoreBetter(afterSc, beforeSc)) {
+          if (typeof noteEdits === 'function') noteEdits('自動修正', backup);   // 手直しとは分けて数える
           const words = _diffWords(_scoreDiff(beforeSc, afterSc));
           if ($bar) $bar.style.width = '100%';
           renderResultTable();
