@@ -3536,10 +3536,11 @@ function showSurplusResolveModal() {
     const lkeys = learnerKeys(L, band);
     if (!lkeys.length) return [];
     const castL = getStaffDepartment(L) === 'cast';
-    // 希望休（希望に休み・有給など）と🔒固定の日は、空いていても入れない（本人の希望・固定を上書きしていた）
+    // 希望休・④の希望（「遅」の指定など）・🔒固定がある日は、空いていても入れない（本人の希望・固定を
+    // 🔒で上書きしていた）。教わる人も指導役も、余の使い道の🎓と同じく staffDayState が 'free' の日だけ
     const keepOff = (id, d) => {
-      const rq = (AppState.requests[id] || {})[d];
-      return (!!rq && isOff(rq)) || !!(AppState.fixedShifts[id] || {})[d] || cellOf(id, d) === '☆';
+      const st = AppState.staff.find(x => x.id === id);
+      return !st || staffDayState(st, d) !== 'free' || cellOf(id, d) === '☆';
     };
     const rows = [];
     for (let d = 1; d <= days; d++) {
@@ -3551,7 +3552,7 @@ function showSurplusResolveModal() {
       let T = null, vt = '', mode = null, tkeysFree = [];
       for (const t of tutors) {                       // ① すでにその時間帯にいる人を優先
         const v = cellOf(t.id, d);
-        if (v && isWork(v) && bandOf(v) === band) { T = t; vt = v; mode = 'already'; break; }
+        if (v && isWork(v) && bandOf(v) === band && !keepOff(t.id, d)) { T = t; vt = v; mode = 'already'; break; }
       }
       if (!T) for (const t of tutors) {               // ② いなければ、その時間帯に入れる人
         const v = cellOf(t.id, d);
