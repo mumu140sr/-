@@ -3163,12 +3163,17 @@ function showSurplusResolveModal() {
     const lkeys = learnerKeys(L, band);
     if (!lkeys.length) return [];
     const castL = getStaffDepartment(L) === 'cast';
+    // 希望休（希望に休み・有給など）と🔒固定の日は、空いていても入れない（本人の希望・固定を上書きしていた）
+    const keepOff = (id, d) => {
+      const rq = (AppState.requests[id] || {})[d];
+      return (!!rq && isOff(rq)) || !!(AppState.fixedShifts[id] || {})[d] || cellOf(id, d) === '☆';
+    };
     const rows = [];
     for (let d = 1; d <= days; d++) {
       const vl = cellOf(idL, d);
       // 教わる人が空いている日だけが対象
       const freeL = !vl || vl === '余' || isPublicOff(vl);
-      if (!freeL) continue;
+      if (!freeL || keepOff(idL, d)) continue;
       // 候補のうち、その日その時間帯にいる人を探す（いなければ入れられる人を探す）
       let T = null, vt = '', mode = null, tkeysFree = [];
       for (const t of tutors) {                       // ① すでにその時間帯にいる人を優先
@@ -3178,7 +3183,7 @@ function showSurplusResolveModal() {
       if (!T) for (const t of tutors) {               // ② いなければ、その時間帯に入れる人
         const v = cellOf(t.id, d);
         const kf = candidateShiftsFor(t, 1).filter(k => bandOf(k) === band);
-        if ((!v || v === '余' || isPublicOff(v)) && kf.length) { T = t; vt = v; mode = 'both'; tkeysFree = kf; break; }
+        if ((!v || v === '余' || isPublicOff(v)) && !keepOff(t.id, d) && kf.length) { T = t; vt = v; mode = 'both'; tkeysFree = kf; break; }
       }
       if (!mode) continue;
       const idT = T.id;
@@ -3235,7 +3240,7 @@ function showSurplusResolveModal() {
     }
     const top = pairRows.slice(0, 8);
     $r.innerHTML = `<div class="hint" style="margin-bottom:6px">
-        ${escapeHtml(L.name || '')}を<b>${bandLabel(selPair.band)}</b>に入れられる日（エラーが増えにくい順）</div>`
+        ${escapeHtml(L.name || '')}を<b>${bandLabel(selPair.band)}</b>に入れられる日（エラーが増えにくい順。希望休・🔒固定の日は出しません）</div>`
       + top.map(r => {
           const tag = previewLine(r);
           const note = isTrainKey(r.lk) ? '<span class="hint">（研修なので人員にはカウントされず、定数も増えません）</span>' : '';
