@@ -3583,8 +3583,11 @@ function showSurplusResolveModal() {
                    btn.dataset.rkind === x.kind && btn.dataset.rkey === String(x.key || '');
       // 一覧を作ったあとに表が変わっていたら、古い一覧のまま実行しない（手で直したマスを上書きしていた）
       if (!same || stateFp() !== recoFp || cellOf(x.id, x.day) !== '余') {
+        // 🎓も古ければ、ここで一緒に探し直す（見張りがあとから別の知らせで上書きしないように）
+        const pairToo = !!(pairRows && pairArgs && stateFp() !== pairFp);
+        if (pairToo) { pairRows = findPairDays(pairArgs[0], pairArgs[1], pairArgs[2]); pairFp = stateFp(); }
         recoCache = null; recoHoldUntil = Date.now() + 2000; render();
-        say('🔄 表が変わっていたので、おすすめを数え直しました。新しい一覧を確かめてから、もう一度お選びください。', false);
+        say(`🔄 表が変わっていたので、おすすめ${pairToo ? 'と🎓の入れられる日' : ''}を数え直しました。新しい一覧を確かめてから、もう一度お選びください。`, false);
 
         return;
       }
