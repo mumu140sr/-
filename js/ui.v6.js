@@ -3767,11 +3767,6 @@ function showSurplusResolveModal() {
       const histBase = captureChangeBase();   // 作り直しで変えた所を、元に戻すの履歴に積むため
       busy(true);
       say(`⏳ ${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.key)} に固定して作り直しています…`, true, true);
-      // 作り直した結果が6連勤以上を増やすなら、元に戻す（⛔ で止める）
-      const bkAll = { shifts: JSON.parse(JSON.stringify(AppState.shifts)),
-                      fixed: JSON.parse(JSON.stringify(AppState.fixedShifts)),
-                      daily: JSON.parse(JSON.stringify(AppState.dailyRequirements || {})),
-                      dailyC: JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})) };
       const bV0 = checkViolations(AppState.shifts);
       const bSc = scoreViolations(bV0);
       AppState.fixedShifts[x.id] = AppState.fixedShifts[x.id] || {};
@@ -3790,21 +3785,18 @@ function showSurplusResolveModal() {
         await optimizeScheduleMILP(null, { fastMode: true });
         AppState.violations = checkViolations(AppState.shifts);
         const aSc = scoreViolations(AppState.violations);
+        // 作り直した結果が6連勤以上を増やすなら、元に戻す（⛔ で止める。戻すのは下の catch）。
         // ほかの所と同じ判定（新しくできた・伸びた・つながった、または本数が増えた）
-        if (_diffOfLists(bV0, AppState.violations).compUp) {
-          AppState.shifts = bkAll.shifts; AppState.fixedShifts = bkAll.fixed;
-          AppState.dailyRequirements = bkAll.daily; AppState.dailyRequirementsCast = bkAll.dailyC;
-          AppState.violations = checkViolations(AppState.shifts);
+        if (_diffOfLists(bV0, AppState.violations).compUp)
           throw new Error('⛔ 作り直すと6連勤以上（コンプラ違反）になるため、元に戻しました');
-        }
         const sgn = _diffSign(_scoreDiff(bSc, aSc));
         // 元に戻すで、作り直し（表・🔒固定・必要人数+1）を一緒に戻せるようにする
         { const ch = changesOfChangeAndCalc(histBase, histMid); recordDeltaHistory(ch); noteEditList('余の解消', ch); }
         say(`${sgn <= 0 ? '✅' : '⚠️'} ${escapeHtml(_diffWords(_scoreDiff(bSc, aSc)))}。${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.tutor)}さんのそばに入れて作り直しました（余 ${listSurplusCells().length}コマ）。`, true);
       } catch (e) {
-        // 中止・失敗のときは、固定と必要人数の変更も元に戻す（作り直していない表に変更だけ残さない）
-        AppState.shifts = bkAll.shifts; AppState.fixedShifts = bkAll.fixed;
-        AppState.dailyRequirements = bkAll.daily; AppState.dailyRequirementsCast = bkAll.dailyC;
+        // ⛔・中止・失敗のときは、作り直しで変えた所（固定・必要人数+1・計算で動いた表のマス）だけを戻す。
+        // 丸ごと戻していたため、計算中に利用者が入れた日ごとの必要人数なども消えていた
+        _applyChangeList(changesOfChangeAndCalc(histBase, histMid), 'undo');
         AppState.violations = checkViolations(AppState.shifts);
         say((/^cancel/.test(e.message || '') ? '中止しました。元に戻しました。' : '作り直しに失敗しました: ' + escapeHtml(e.message)), false);
       } finally { calcEnd(); }
