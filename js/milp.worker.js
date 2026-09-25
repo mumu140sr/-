@@ -133,7 +133,7 @@ self.addEventListener('message', async (e) => {
         });
         post(20 + Math.floor((gi / groups.length) * 60),
              `【${g.label || g.key}】いまの表を最小限だけ直しています…`);
-        const s2 = solver.solve(MILP.composeLP(m.parts, { neighbor: { ones, k: adjustK } }),
+        const s2 = solver.solve(MILP.composeLP(m.parts, { neighbor: { ones, k: adjustK, only: /^[xy]_/ } }),
                                 Object.assign({}, opts, { time_limit: Math.min(20, opts.time_limit) }));   // 微調整は20秒上限
         if (MILP.solutionIsValid(s2, m.parts, [])) {
           // 近くだけ（K マスまで）を探したので、Optimal でも全体の最良の証明ではない

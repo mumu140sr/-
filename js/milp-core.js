@@ -777,7 +777,10 @@
     if (o.neighbor && o.neighbor.ones) {
       const ones = o.neighbor.ones, k = o.neighbor.k || 60;
       const plus = [], minus = [];
-      parts.bin.forEach(nm => { (ones[nm] ? minus : plus).push(nm); });
+      // only: 数える変数を絞る（微調整では表のマスと有給だけ）。早遅の切り替えの目印（bd_）や
+      // 連休の目印（prb_）まで数えると、いまの表でも上限を超えてしまい、解けずに何もしなかった。
+      const inScope = o.neighbor.only ? (nm => o.neighbor.only.test(nm)) : (() => true);
+      parts.bin.forEach(nm => { if (inScope(nm)) (ones[nm] ? minus : plus).push(nm); });
       // 1 の個数は「決定変数の中で」数える。罰点変数まで数えると右辺が
       // 小さくなりすぎ、いまの答えすら条件を満たせなくなる。
       const n1 = minus.length;
