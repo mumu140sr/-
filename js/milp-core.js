@@ -763,7 +763,27 @@
     } else {
       entries = parts.objEntries;
     }
-    const objStr = entries.length ? entries.map(e => `${e.w} ${e.name}`).join(' + ') : '0 z_dummy';
+    let objStr = entries.length ? entries.map(e => `${e.w} ${e.name}`).join(' + ') : '0 z_dummy';
+    // tieChange: 同じ件数なら、変えるマスが少ない答えを選ぶ（1マス=1点。ルールの重みは数千点なので、
+    // 件数を減らすことが先になる）。微調整の🚨の段で、持ち分のマスを使い切って表を大きく動かしていた。
+    if (o.tieChange && !o.minChange && o.neighbor && o.neighbor.ones) {
+      const ones = o.neighbor.ones;
+      const inScope = o.neighbor.only ? (nm => o.neighbor.only.test(nm)) : (() => true);
+      const terms = [];
+      parts.bin.forEach(nm => { if (inScope(nm)) terms.push(ones[nm] ? `- 1 ${nm}` : `+ 1 ${nm}`); });
+      if (terms.length) objStr = (objStr === '0 z_dummy' ? '' : objStr + ' ') + terms.join(' ');
+      objStr = objStr.replace(/^\+ /, '');
+    }
+    // minChange: いまの答え（neighbor.ones）から変えるマスの数を最小にする（微調整の「変えるマスを少なく」の段）
+    if (o.minChange && o.neighbor && o.neighbor.ones) {
+      const ones = o.neighbor.ones;
+      const inScope = o.neighbor.only ? (nm => o.neighbor.only.test(nm)) : (() => true);
+      const terms = [];
+      parts.bin.forEach(nm => { if (inScope(nm)) terms.push(ones[nm] ? `- 1 ${nm}` : `+ 1 ${nm}`); });
+      // minChange.keep: 変えるマスより先に守りたいルール（件数1につき w マスぶんの重み）
+      ((o.minChange && o.minChange.keep) || []).forEach(kp => (parts.slackByType[kp.type] || []).forEach(nm => terms.push(`+ ${kp.w} ${nm}`)));
+      if (terms.length) objStr = terms.join(' ').replace(/^\+ /, '');
+    }
     const extra = [];
     // 呼び出し側から直接足したい条件（部分再最適化などで使う）
     (o.extraCons || []).forEach(line => { if (line) extra.push(line); });
@@ -775,7 +795,7 @@
     // いまの答え自体が必ず条件を満たすので、解が見つからないことが無くなる。
     // 探す範囲も狭いので速い。
     if (o.neighbor && o.neighbor.ones) {
-      const ones = o.neighbor.ones, k = o.neighbor.k || 60;
+      const ones = o.neighbor.ones, k = (o.neighbor.k != null) ? o.neighbor.k : 60;   // 0 も「1マスも変えない」として使う（|| だと0が60になっていた）
       const plus = [], minus = [];
       // only: 数える変数を絞る（微調整では表のマスと有給だけ）。早遅の切り替えの目印（bd_）や
       // 連休の目印（prb_）まで数えると、いまの表でも上限を超えてしまい、解けずに何もしなかった。

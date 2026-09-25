@@ -87,6 +87,7 @@ self.addEventListener('message', async (e) => {
     // 段階最適化を使うか（既定ON。設定でOFFにすると従来どおり一括で解く）
     const tiered = (incoming.settings || {}).tieredOptimize !== false;
     const tierLog = [];      // 各段で達成した件数（画面に出す）
+    let adjustRejected = '';  // 微調整の答えを検査で捨てたとき、その理由（増えた🚨の種類）
     for (const g of groups) {
       post(20 + Math.floor((gi / groups.length) * 60),
            `【${g.label || g.key}】を数理最適化で計算中...` +
@@ -133,12 +134,69 @@ self.addEventListener('message', async (e) => {
         });
         post(20 + Math.floor((gi / groups.length) * 60),
              `【${g.label || g.key}】いまの表を最小限だけ直しています…`);
-        const s2 = solver.solve(MILP.composeLP(m.parts, { neighbor: { ones, k: adjustK, only: /^[xy]_/ } }),
-                                Object.assign({}, opts, { time_limit: Math.min(20, opts.time_limit) }));   // 微調整は20秒上限
-        if (MILP.solutionIsValid(s2, m.parts, [])) {
+        // 変えてよいのは K マスまで（表のマスと有給だけを数える）。その中で、次の順に解く。
+        //   ① ⛔・🚨の段（生成と同じ順）を、段ごとに減らして上限として固定する
+        //   ② 早番と遅番の行き来（連勤中の時間帯切替・遅→休→早・切り替えの回数）は、いまの件数より
+        //      増やさない（🚨を減らすのにどうしても要るときだけ、そのぶん増えてよい）
+        //   ③ 変えるマスをできるだけ少なくする
+        //   ④ ほかの🟡の段を、変えるマスを増やさずに減らす
+        // 重みの合計を1回で減らすだけでは、🚨が増える答えも返していた。
+        const only = /^[xy]_/;
+        const nbK = { ones, k: adjustK, only };
+        const tPer = Math.max(2, Math.min(8, Math.floor(opts.time_limit / 8)));
+        // 止めどころは差0（速い生成の「2000点・2%以内なら止める」を使うと、1マス=1点の
+        // 「変えるマスを少なく」が効かず、持ち分のマスを使い切った答えでも「最適」で止まっていた）
+        const topt = (sec) => Object.assign({}, opts, { time_limit: sec, mip_rel_gap: 0, mip_abs_gap: 0 });
+        const isMustT = (ty) => ty === 'comp-cons' || getRuleLevel(ty) === 'must' || (typeof MUST_TYPES_OPT !== 'undefined' && MUST_TYPES_OPT.has(ty));
+        const IKI = ['category-switch', 'bad-rest', 'band-switch'];
+        const has = (ty) => (m.parts.slackByType[ty] || []).length > 0;
+        const tiersA = TIER_LIST.filter(t => (t.types || []).some(has));
+        // 段の中の🚨の種類だけを、段の順に解く（🚨と🟡が同じ段にあることがある）
+        const mustTiers = tiersA.map(t => ({ types: (t.types || []).filter(ty => isMustT(ty) && has(ty)) })).filter(t => t.types.length);
+        const softTypes = [];
+        tiersA.forEach(t => (t.types || []).forEach(ty => { if (!isMustT(ty) && IKI.indexOf(ty) < 0 && has(ty) && softTypes.indexOf(ty) < 0) softTypes.push(ty); }));
+        const ikiTypes = IKI.filter(ty => has(ty) && !isMustT(ty));
+        // いまの表そのもの（K=0）で、各ルールの件数を数えておく
+        const s0 = solver.solve(MILP.composeLP(m.parts, { types: [], neighbor: { ones, k: 0, only } }), topt(tPer));
+        const cur = MILP.solutionIsValid(s0, m.parts, []) ? s0 : null;
+        const budgets = [];
+        let sol = cur;
+        const step = (types, extra) => {
+          const s2 = solver.solve(MILP.composeLP(m.parts, Object.assign({ types, budgets, neighbor: nbK, tieChange: true }, extra || {})), topt(tPer));
+          return MILP.solutionIsValid(s2, m.parts, budgets) ? s2 : null;
+        };
+        // ①
+        for (const t of mustTiers) {
+          const s2 = step(t.types);
+          if (s2) sol = s2;
+          if (sol) budgets.push({ names: MILP.slackNames(m.parts, t.types), max: MILP.slackTotal(sol, m.parts, t.types) });
+        }
+        // ②③ 変えるマスをできるだけ少なくする。ただし早番と遅番の行き来は、それより先に守る
+        //    （1件増やすくらいなら、ほかのマスを最大 IKI_W マスまで余分に変える）。
+        //    行き来を別の段で上限にする形は、その段が時間切れになると緩い上限（切り替え223など）が
+        //    そのまま固定され、かえって増えていた。計算で数えるのは、希望・🔒で決まっていない分だけ。
+        const IKI_W = 50;
+        let kUsed = adjustK;
+        if (sol) {
+          const s3 = solver.solve(MILP.composeLP(m.parts, { budgets, neighbor: nbK,
+                                    minChange: { keep: ikiTypes.map(type => ({ type, w: IKI_W })) } }), topt(tPer * 2));
+          if (MILP.solutionIsValid(s3, m.parts, budgets)) {
+            sol = s3;
+            let n = 0; m.parts.bin.forEach(nm => { if (!only.test(nm)) return; const on = sol.Columns[nm] && sol.Columns[nm].Primal > 0.5; if (!!ones[nm] !== on) n++; });
+            kUsed = n;
+            // 行き来はここで決まった件数を上限にして、次の段で増やさない
+            ikiTypes.forEach(ty => budgets.push({ names: MILP.slackNames(m.parts, [ty]), max: MILP.slackTotal(sol, m.parts, [ty]) }));
+          }
+        }
+        // ④
+        if (sol && softTypes.length) {
+          const s4 = solver.solve(MILP.composeLP(m.parts, { types: softTypes, budgets, neighbor: { ones, k: kUsed, only } }), topt(tPer));
+          if (MILP.solutionIsValid(s4, m.parts, budgets)) sol = s4;
+        }
+        if (sol && sol !== cur) {
           // 近くだけ（K マスまで）を探したので、Optimal でも全体の最良の証明ではない
           allOptimal = false;
-          MILP.applyGroupSolution(m, s2, shifts);
+          MILP.applyGroupSolution(m, sol, shifts);
           gi++;
           continue;
         }
@@ -369,6 +427,19 @@ self.addEventListener('message', async (e) => {
       MILP.applyGroupSolution(m, sol, shifts);
       gi++;
     }
+    // 微調整の答えは、画面と同じ検査で確かめる。計算の上では🚨を増やさない約束でも、段が時間切れに
+    // なると緩い上限が残り、検査では🚨（早遅バランスのずれなど）が増えることがあった。
+    // 🚨のどれかの種類・⛔・連勤の超過日数が、出発点の表より悪くなるなら、出発点の表に戻す。
+    if (adjust) {
+      try {
+        const vS = checkViolations(seedShifts), vN = checkViolations(shifts);
+        const worse = scoreWorsened(scoreViolations(vN), scoreViolations(vS)).filter(x => x.key !== 'soft');
+        if (worse.length || compWorsened(vS, vN).length) {
+          Object.keys(seedShifts).forEach(id => { shifts[id] = Object.assign({}, seedShifts[id]); });
+          adjustRejected = worse.map(x => x.key).join(',') || 'comp';
+        }
+      } catch (_) {}
+    }
     post(85, '仕上げ中：公休を整理中...');
     AppState.shifts = shifts;
     try { if (typeof markSurplusRest === 'function') markSurplusRest(shifts); }
@@ -396,7 +467,7 @@ self.addEventListener('message', async (e) => {
         tierLog.push(`${t.label}: ${n}件`);
       });
     }
-    self.postMessage({ type: 'done', shifts, violations, allOptimal, deep, fast, usedGap, tiered, tierLog, variant, variantLabel: VARLABEL });
+    self.postMessage({ type: 'done', shifts, violations, allOptimal, deep, fast, usedGap, tiered, tierLog, variant, variantLabel: VARLABEL, adjustRejected });
   } catch (err) {
     self.postMessage({ type: 'error', message: (err && err.message) || String(err) });
   }
