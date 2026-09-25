@@ -5049,14 +5049,27 @@ function analyzeLowerBound() {
       }
 
       // (4) 遅番の翌日が早番（休みなしの遅→早）
+      // 半休は検査と同じく出勤・早番として数える（「遅責 → 半休」も遅→早になる。数えていなかった）。
+      // 前月末が遅番で、1日が早番（半休）の希望なら、それも遅→早になる。
       if (AppState.settings.forbidLateEarly !== false) {
+        const wk = (x) => !!x && (isWork(x) || isHalfWork(x));
+        const earlyish = (x) => isEarlyCategory(x) || isHalfWork(x);
         g.staff.forEach(s => {
+          const pe = (typeof getPrevMonthEnd === 'function') ? getPrevMonthEnd(s) : {};
+          const b1 = confirmOf(s, 1);
+          if ((pe.cons || 0) >= 1 && pe.lastShift && isLate(pe.lastShift) && wk(b1) && earlyish(b1)) {
+            res.reasons.push({
+              kind: 'req-le', day: 0, staffId: s.id, cells: [1],
+              fix: `1日を休みにするか、遅番に変えてください`,
+              text: `${pfx}${s.name}さん: 前月末が遅番で、1日「${b1}」なので、休みを挟まずに遅番→早番になります`,
+            });
+          }
           for (let d = 1; d < days; d++) {
             const a = confirmOf(s, d), b = confirmOf(s, d + 1);
-            if (!a || !b || !isWork(a) || !isWork(b)) continue;
-            if (isLate(a) && isEarlyCategory(b)) {
+            if (!wk(a) || !wk(b)) continue;
+            if (isLate(a) && earlyish(b)) {
               res.reasons.push({
-                kind: 'req-le', day: d, staffId: s.id,
+                kind: 'req-le', day: d, staffId: s.id, cells: [d, d + 1],
                 fix: `${d}日か${d + 1}日のどちらかを休みにするか、時間帯を揃えてください`,
                 text: `${pfx}${s.name}さん: ${d}日「${a}」の翌日 ${d + 1}日「${b}」で、休みを挟まずに遅番→${isTraining(b) ? '研修' : '早番'}になります`,
               });
@@ -5279,7 +5292,8 @@ function analyzeLowerBound() {
           const rq = (AppState.requests[s.id] || {})[d];
           const fx = (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(s.id, d) : null;
           const v = fx || rq || '';
-          working = !!(v && isWork(v) && !isTraining(v));
+          // 半休も出勤として数える（検査の連勤と同じ。数えないと半休で連勤が切れていた）
+          working = !!(v && (isWork(v) || isHalfWork(v)) && !isTraining(v));
         }
         if (working) { if (!run) runStart = d; run++; continue; }
         if (run) {

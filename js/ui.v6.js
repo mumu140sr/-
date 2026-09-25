@@ -1463,6 +1463,7 @@ function renderCalendar() {
       span.className     = 'shift-cell ' + getShiftClass(selectedMark);
       span.style.cssText = getShiftStyle(selectedMark);
       autoSave();
+      scheduleRequestAlerts();
     });
     // ダブルクリック（削除）
     td.addEventListener('dblclick', () => {
@@ -1474,8 +1475,142 @@ function renderCalendar() {
       span.className     = 'shift-cell s-empty';
       span.style.cssText = '';
       autoSave();
+      scheduleRequestAlerts();
     });
   });
+  scheduleRequestAlerts();
+}
+
+// ===== 希望だけで必ず🚨になるもの（④で希望を入れたその場で知らせる） =====
+// 生成前チェック（analyzeLowerBound）の理由のうち、希望・固定だけで決まり、必ず🚨になるもの
+// だけを出す。計算はしない（すぐ分かるものだけ）。直し方の提案で変えるのは、シフトの種類の
+// 希望と希望休（休）だけ。半休・有給・🔒固定は動かさない。提案は、その変更で理由が消え、
+// 最低エラー数が増えないことを確かめてから出す。
+const REQ_ALERT_TYPE = {
+  'req-le': 'late-early', 'fixed-cons': 'consecutive', 'req-role': 'role-mismatch', 'req-over': 'overstaff',
+  'req-solo': 'resp-duplicate', 'event-req': 'event-absent', 'special-req': 'special-day',
+  'req-offcount': 'off-count', 'paid-short': 'paid', 'day': 'understaff', 'role': 'understaff',
+};
+function _reqIsMust(kind) {
+  const t = REQ_ALERT_TYPE[kind];
+  return !!t && (getRuleLevel(t) === 'must' || (typeof MUST_TYPES_OPT !== 'undefined' && MUST_TYPES_OPT.has(t)));
+}
+const _reqKey = (r) => [r.kind, r.staffId || '', r.day || 0, r.role || '', r.from || ''].join('|');
+// 希望だけを変えて試す（試したあとは必ず元に戻す）
+function _tryRequestChange(changes, lb0, reason) {
+  const bk = changes.map(c => (AppState.requests[c.id] || {})[c.day]);
+  try {
+    changes.forEach(c => {
+      AppState.requests[c.id] = AppState.requests[c.id] || {};
+      if (c.to === '') delete AppState.requests[c.id][c.day]; else AppState.requests[c.id][c.day] = c.to;
+    });
+    const lb = analyzeLowerBound();
+    const gone = !lb.reasons.some(r => _reqKey(r) === _reqKey(reason));
+    return gone && lb.minErrors < lb0.minErrors;
+  } finally {
+    changes.forEach((c, i) => { if (bk[i] === undefined) delete AppState.requests[c.id][c.day]; else AppState.requests[c.id][c.day] = bk[i]; });
+  }
+}
+// 1つの理由について、変えてよい希望（シフトの種類・休）だけで直せる案を最大3つ
+function requestFixOptions(reason, lb0) {
+  const s = (AppState.staff || []).find(x => x.id === reason.staffId);
+  const req = (id, d) => (AppState.requests[id] || {})[d] || '';
+  const fixed = (id, d) => (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(id, d) : null;
+  const movable = (v) => v && v !== '半' && v !== '有';                 // 半休・有給は動かさない
+  const name = (id) => ((AppState.staff || []).find(x => x.id === id) || {}).name || '';
+  const cands = [];
+  const add = (changes) => { if (changes.length) cands.push(changes); };
+  if (reason.kind === 'req-le' && s) {
+    (reason.cells || []).forEach(d => {
+      const v = req(s.id, d);
+      if (!movable(v) || fixed(s.id, d) && !req(s.id, d)) return;
+      if (isWork(v)) {
+        // 反対の時間帯の、担当できるシフトに変える（例: 遅責→早責）
+        const wantEarly = isLate(v);
+        const same = v.replace(/^遅/, '早').replace(/^早/, wantEarly ? '早' : '遅');
+        const alts = (s.allowedShifts || []).filter(k => !isTraining(k) && (wantEarly ? isEarlyCategory(k) : isLate(k)));
+        const to = alts.includes(same) ? same : alts[0];
+        if (to) add([{ id: s.id, day: d, from: v, to }]);
+      }
+      add([{ id: s.id, day: d, from: v, to: '休' }]);
+    });
+  } else if (reason.kind === 'fixed-cons' && s) {
+    const m = /(\d+)日〜(\d+)日/.exec(reason.fix || reason.text || '');
+    if (m) {
+      const from = +m[1], to = +m[2], mid = (from + to) / 2;
+      const days = [];
+      for (let d = from; d <= to; d++) { const v = req(s.id, d); if (movable(v) && isWork(v)) days.push(d); }
+      days.sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid));
+      days.forEach(d => add([{ id: s.id, day: d, from: req(s.id, d), to: '休' }]));
+    }
+  } else if ((reason.kind === 'day' || reason.kind === 'role') && reason.day) {
+    // その日に休み希望を出している人の、希望休を外す
+    (AppState.staff || []).forEach(x => { if (req(x.id, reason.day) === '休') add([{ id: x.id, day: reason.day, from: '休', to: '' }]); });
+  }
+  const out = [];
+  for (const ch of cands) {
+    if (out.length >= 3) break;
+    if (out.some(o => JSON.stringify(o) === JSON.stringify(ch))) continue;
+    if (_tryRequestChange(ch, lb0, reason)) out.push(ch);
+  }
+  return out.map(ch => ({ changes: ch,
+    text: ch.map(c => `${name(c.id)}さん ${c.day}日「${c.from}」→ ${c.to ? '「' + c.to + '」' : '希望なし'}`).join('、') }));
+}
+/** 希望だけで必ず🚨になるものの一覧（理由だけ。直し方の案はあとから1件ずつ足す） */
+function requestCertainMusts() {
+  const lb = analyzeLowerBound();
+  return { lb, items: lb.reasons.filter(r => _reqIsMust(r.kind)).map(r => ({ reason: r, options: null })) };
+}
+let _reqAlertSeq = 0;
+let _reqAlertTimer = null;
+function scheduleRequestAlerts() { clearTimeout(_reqAlertTimer); _reqAlertTimer = setTimeout(renderRequestAlerts, 150); }
+function renderRequestAlerts() {
+  const box = document.getElementById('reqAlerts');
+  if (!box || !AppState.staff || !AppState.staff.length) return;
+  let res;
+  try { res = requestCertainMusts(); } catch (e) { box.innerHTML = ''; return; }
+  // 表のマスに印を付ける
+  document.querySelectorAll('#calendarTable td.req-alert').forEach(td => { td.classList.remove('req-alert'); td.style.outline = ''; });
+  res.items.forEach(it => {
+    const r = it.reason; if (!r.staffId) return;
+    const cells = r.cells || (r.day ? [r.day] : []);
+    cells.forEach(d => { const td = document.querySelector(`#calendarTable td[data-sid="${r.staffId}"][data-day="${d}"]`);
+      if (td) { td.classList.add('req-alert'); td.style.outline = '2px solid var(--danger)'; } });
+  });
+  if (!res.items.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div style="border:1px solid color-mix(in srgb, var(--danger) 45%, transparent);background:color-mix(in srgb, var(--danger) 10%, var(--surface));border-radius:10px;padding:10px 14px">
+      <div style="font-weight:700;margin-bottom:6px">🚨 希望だけで、必ずエラーになるものが ${res.items.length}件 あります</div>
+      <div class="hint" style="margin-bottom:6px">生成しても消えません。下の案のどれかに変えるか、そのまま生成してください（半休・有給・🔒固定は動かしていません）。</div>
+      ${res.items.map((it, i) => `<div style="padding:6px 0;${i ? 'border-top:1px solid var(--border)' : ''}">
+          <div>🚨 ${escapeHtml(it.reason.text)}</div>
+          <div data-reqopts="${i}"><div class="hint" style="margin:4px 0 0 16px">直し方を調べています…</div></div>
+        </div>`).join('')}
+    </div>`;
+  // 直し方の案は、1件ずつ少しあとで調べて足す（🚨の一覧はすぐに出すため）。
+  // 途中でまた希望が変わったら、古い調べものは捨てる。
+  const seq = ++_reqAlertSeq;
+  res.items.forEach((it, i) => setTimeout(() => {
+    if (seq !== _reqAlertSeq) return;
+    it.options = requestFixOptions(it.reason, res.lb);
+    const slot = box.querySelector(`[data-reqopts="${i}"]`); if (!slot) return;
+    slot.innerHTML = it.options.length
+      ? it.options.map((o, j) => `<div style="margin:4px 0 0 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="hint">案${j + 1}:</span><span>${escapeHtml(o.text)}</span>
+          <button class="btn" data-reqfix="${i}:${j}" style="padding:2px 10px">この案にする</button></div>`).join('')
+      : `<div class="hint" style="margin:4px 0 0 16px">${escapeHtml(it.reason.fix || '希望の入れ方を見直してください')}（変えてよい希望だけでは直せません）</div>`;
+    slot.querySelectorAll('[data-reqfix]').forEach(bindFix);
+  }, 30 * (i + 1)));
+  function bindFix(btn) { btn.addEventListener('click', () => {
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+    const [i, j] = btn.dataset.reqfix.split(':').map(Number);
+    const o = ((res.items[i] || {}).options || [])[j]; if (!o) return;
+    o.changes.forEach(c => {
+      AppState.requests[c.id] = AppState.requests[c.id] || {};
+      if (c.to === '') delete AppState.requests[c.id][c.day]; else AppState.requests[c.id][c.day] = c.to;
+    });
+    autoSave(); renderCalendar();
+    toast('希望を変えました: ' + o.text, 'success', 5000);
+  }); }
 }
 
 // ===== ⑥ シフト表 =====
