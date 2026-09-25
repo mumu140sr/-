@@ -2940,14 +2940,16 @@ function showSurplusResolveModal() {
   const fpTimer = setInterval(() => {
     if (!modal.isConnected) { clearInterval(fpTimer); return; }
     const canSwap = !pendingAsk && !mouseOnPanel && !(typeof calcBusy === 'function' && calcBusy());
+    // パネルの外で変わったときだけここに来る（パネル自身の実行は render で黙って数え直す）
+    let pairNew = false;
     if (canSwap && pairRows && pairArgs && stateFp() !== pairFp) {
       pairRows = findPairDays(pairArgs[0], pairArgs[1], pairArgs[2]); pairFp = stateFp(); renderPairRows();
-      say('🔄 表が変わったので、🎓の入れられる日を探し直しました。', false);
+      pairNew = true;
     }
     if (canSwap && recoCache !== null && stateFp() !== recoFp) {
       recoCache = null; recoHoldUntil = Date.now() + RECO_HOLD_MS; render();
-      say('🔄 表が変わったので、おすすめが変わりました。新しい一覧を確かめてから押してください。', false);
-    }
+      say(`🔄 表が変わったので、おすすめ${pairNew ? 'と🎓の入れられる日' : ''}が変わりました。新しい一覧を確かめてから押してください。`, false);
+    } else if (pairNew) say('🔄 表が変わったので、🎓の入れられる日を探し直しました。', false);
     // 押せない理由が無くなったら押せるようにする（2秒たった・確認に答えた・計算が終わった）
     const blocked = recoBlocked();
     modal.querySelectorAll('[data-reco]').forEach(b => { b.disabled = blocked; });
@@ -3191,7 +3193,14 @@ function showSurplusResolveModal() {
 
   const render = () => {
     const list = listSurplusCells();
-    if (recoDirty) { recoCache = null; recoDirty = false; }
+    if (recoDirty) {
+      recoCache = null; recoDirty = false;
+      // パネル自身が表を変えたあとは、🎓の候補も👑と同じく黙って探し直す
+      // （見張りの「表が変わったので探し直しました」が、実行した結果の知らせを上書きしていた）
+      if (pairRows && pairArgs && stateFp() !== pairFp) {
+        pairRows = findPairDays(pairArgs[0], pairArgs[1], pairArgs[2]); pairFp = stateFp();
+      }
+    }
     const total = list.length;
     // 余の内訳（誰に何コマ）
     const byStaff = {};
@@ -3517,7 +3526,10 @@ function showSurplusResolveModal() {
     // 候補を探したあとに表が変わっていたら、古い候補のまま入れない（探し直して知らせる）
     if (pairRows && pairArgs && stateFp() !== pairFp) {
       pairRows = findPairDays(pairArgs[0], pairArgs[1], pairArgs[2]); pairFp = stateFp(); renderPairRows();
-      say('🔄 表が変わっていたので、入れられる日を探し直しました。もう一度お選びください。', false);
+      // 👑も同じときに数え直す（見張りがあとから別の知らせで上書きしないように）
+      const recoToo = recoCache !== null && stateFp() !== recoFp;
+      if (recoToo) { recoCache = null; recoHoldUntil = Date.now() + RECO_HOLD_MS; render(); }
+      say(`🔄 表が変わっていたので、入れられる日${recoToo ? 'とおすすめ' : ''}を探し直しました。もう一度お選びください。`, false);
       return;
     }
     const row = (pairRows || []).find(x => x.d === d);
