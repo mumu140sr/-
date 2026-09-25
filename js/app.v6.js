@@ -202,6 +202,52 @@ function setupHeaderActions() {
   });
 }
 
+// 日ごとの人数の余裕（出られる人数 − 必要人数）。余裕0の日は、出られる人が全員出勤になる。
+// 余裕が少ない日を先に文で出し、全部の日は表（開いて見る）で出す。
+function renderDayMarginsHtml() {
+  const groups = (typeof analyzeDayMargins === 'function') ? analyzeDayMargins() : [];
+  if (!groups.length) return '';
+  const nm = (id) => ((AppState.staff || []).find(x => x.id === id) || {}).name || '';
+  const bandL = { early: '早番', late: '遅番' };
+  const multi = groups.length > 1;
+  const cell = (c) => {
+    const bg = c.margin < 0 ? 'color-mix(in srgb, var(--danger) 22%, var(--surface))'
+             : c.margin === 0 ? 'color-mix(in srgb, #d69e2e 24%, var(--surface))' : '';
+    return `<td style="text-align:center;padding:2px 10px;border:1px solid var(--border);${bg ? 'background:' + bg : ''}" title="出られる ${c.avail}人 ／ 必要 ${c.need}人">${c.margin > 0 ? '+' : ''}${c.margin}</td>`;
+  };
+  const html = groups.map(g => {
+    const skNames = [];
+    g.days.forEach(r => r.skills.forEach(k => { const key = k.name + '|' + k.band; if (!skNames.includes(key)) skNames.push(key); }));
+    const lines = [];
+    g.days.forEach(r => {
+      const parts = [['全体', r.total], ['早番帯', r.early], ['遅番帯', r.late]]
+        .concat(r.skills.map(k => [`${bandL[k.band]}で「${k.name}」ができる人`, k]));
+      parts.forEach(([lab, c]) => {
+        if (c.margin > 0 || !(c.need > 0)) return;
+        const who = c.ids.map(nm).filter(Boolean).join('・');
+        const extra = c.min != null && c.avail < c.min ? `（最低 ${c.min}人 に届かないため、必ずエラー）` : '';
+        lines.push(c.margin < 0
+          ? `🚨 ${r.day}日 ${lab}: 出られる ${c.avail}人 ／ 必要 ${c.need}人（${-c.margin}人 足りません）${extra}`
+          : `⚠️ ${r.day}日 ${lab}: 出られる ${c.avail}人 ／ 必要 ${c.need}人（余裕0人）→ ${who} は必ず出勤になります`);
+      });
+    });
+    const th = (t) => `<th style="padding:2px 8px;border:1px solid var(--border);position:sticky;top:0;background:var(--surface)">${t}</th>`;
+    const head = `<tr>${th('日')}${th('全体')}${th('早番帯')}${th('遅番帯')}${skNames.map(k => { const [n, b] = k.split('|'); return th(`${escapeHtml(n)}（${bandL[b]}）`); }).join('')}</tr>`;
+    const body = g.days.map(r => `<tr><td style="padding:2px 8px;border:1px solid var(--border)">${r.day}日</td>${cell(r.total)}${cell(r.early)}${cell(r.late)}${skNames.map(k => {
+      const c = r.skills.find(x => x.name + '|' + x.band === k); return c ? cell(c) : '<td></td>'; }).join('')}</tr>`).join('');
+    return `${multi ? `<div style="font-weight:600;margin-top:6px">【${escapeHtml(g.label)}】</div>` : ''}
+      <div style="font-size:13px;line-height:1.8">${lines.length ? lines.map(escapeHtml).join('<br>') : '余裕が0人以下の日はありません。'}</div>
+      <details style="margin-top:6px"><summary class="hint" style="cursor:pointer">すべての日の余裕を表で見る</summary>
+        <div style="overflow-x:auto;max-height:40vh;overflow-y:auto;margin-top:6px"><table class="day-margin-table" style="border-collapse:collapse;font-size:12px;width:auto"><thead>${head}</thead><tbody>${body}</tbody></table></div>
+      </details>`;
+  }).join('');
+  return `<div style="padding:12px 14px;border-radius:10px;margin:0 0 14px;border:1px solid var(--border);background:var(--surface-2, var(--surface))">
+      <b style="font-size:14px">📅 日ごとの人数の余裕（出られる人数 − 必要人数）</b>
+      <div class="hint" style="margin:2px 0 6px">休み・有給・半休の希望、休みの🔒固定の日は「出られない」に数えています。余裕0人の日は、出られる人が全員出勤になり、その前後の連勤などが決まってしまいます。早番帯・遅番帯は、その時間帯に入れる人の数です（両方できる人は両方に数えます）。スキルは、その時間帯に入れる保有者の人数 − 目標人数です。</div>
+      ${html}
+    </div>`;
+}
+
 // 実現性チェック（生成前）: 各エラーが「避けられる/避けられない」かを判定して表示
 function showFeasibilityModal() {
   if (!AppState.staff.length || !AppState.settings.targetMonth) {
@@ -282,6 +328,7 @@ function showFeasibilityModal() {
       これらのエラーは出ることがあります。その下は参考情報です。
     </p>
     ${verdict}
+    ${renderDayMarginsHtml()}
     ${notes}
     <div id="fixPlanBox"></div>
     ${body}

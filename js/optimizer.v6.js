@@ -4803,6 +4803,56 @@ function maxSkillInBand(g, sk, bandKeys, d) {
   return { max, blocker };
 }
 
+/**
+ * 日ごとの人数の余裕（生成前チェック 3-1①）。計算はせず、希望・固定・担当できるシフトだけで数える。
+ *   全体・早番帯・遅番帯: 出られる人数 − 必要人数。0 なら、出られる人は全員その日（その時間帯）に出勤になる。
+ *   スキル: その時間帯に入れる保有者の人数 − 目標人数（最低ラインを下回ると必ずエラー）。
+ * 休み・有給・半休の希望、休みの🔒固定、研修の日は「出られない」に数える。
+ * @returns {Array<{label, days: Array<{day, total, early, late, skills}>}>}
+ *   total/early/late: { avail, need, margin, ids }（ids は出られる人。余裕0の日に「必ず出勤」の人として出す）
+ *   skills: [{ name, band, avail, need, min, margin, ids }]
+ */
+function analyzeDayMargins() {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const out = [];
+  if (!AppState.staff.length || !days) return out;
+  const shiftKeys = getWorkShiftKeys().filter(k => {
+    const t = AppState.shiftTypes.find(x => x.key === k);
+    return t && !t.isTraining;
+  });
+  const inBand = (k, band) => band === 'early' ? isEarlyCategory(k) : isLate(k);
+  getDepartmentGroups(AppState.staff).forEach(g => {
+    const rows = [];
+    for (let d = 1; d <= days; d++) {
+      // その人がその日に入れるシフト（出られなければ空）
+      const keysOf = (s) => {
+        const st = staffDayState(s, d);
+        if (st === 'off' || st === 'training') return [];
+        if (st.indexOf('fixed:') === 0) { const k = st.slice(6); return shiftKeys.includes(k) ? [k] : []; }
+        return (s.allowedShifts || []).filter(k => shiftKeys.includes(k));
+      };
+      const ks = {}; g.staff.forEach(s => { ks[s.id] = keysOf(s); });
+      const count = (pred) => {
+        const need = shiftKeys.filter(pred).reduce((a, k) => a + getDayReq(g.reqs, g.dailyReqs || {}, k, d), 0);
+        const ids = g.staff.filter(s => ks[s.id].some(pred)).map(s => s.id);
+        return { avail: ids.length, need, margin: ids.length - need, ids };
+      };
+      const row = { day: d, total: count(() => true),
+                    early: count(k => inBand(k, 'early')), late: count(k => inBand(k, 'late')), skills: [] };
+      (AppState.skills || []).forEach(sk => {
+        const { need, min } = getDaySkillReq(sk, d);
+        if (!(need > 0) && !(min > 0)) return;
+        const band = (sk.target || 'late') === 'early' ? 'early' : 'late';
+        const ids = g.staff.filter(s => (s.skills || []).includes(sk.name) && ks[s.id].some(k => inBand(k, band))).map(s => s.id);
+        row.skills.push({ name: sk.name, band, avail: ids.length, need, min, margin: ids.length - need, ids });
+      });
+      rows.push(row);
+    }
+    out.push({ label: g.label, days: rows });
+  });
+  return out;
+}
+
 function analyzeLowerBound() {
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const res = { possible: true, minErrors: 0, reasons: [], capacity: [] };
