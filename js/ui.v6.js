@@ -3188,7 +3188,12 @@ function showSurplusResolveModal() {
       let T = null, vt = '', mode = null, tkeysFree = [];
       for (const t of tutors) {                       // ① すでにその時間帯にいる人を優先
         const v = cellOf(t.id, d);
-        if (v && isWork(v) && bandOf(v) === band && !keepOff(t.id, d)) { T = t; vt = v; mode = 'already'; break; }
+        // 出勤済みの指導役は、🔒・④の指定が表と同じシフトなら残す（押しても同じシフトを🔒し直すだけで、
+        // 何も上書きしない）。1人目を🎓で入れると指導役に🔒が付くので、2人目を探すときに消えていた。
+        // あとから入れた希望休の日と、④・🔒と表でシフトが違う日は外す。
+        const stT = staffDayState(t, d);
+        const tutorOk = stT === 'free' || stT === 'fixed:' + v;
+        if (v && isWork(v) && bandOf(v) === band && tutorOk && cellOf(t.id, d) !== '☆') { T = t; vt = v; mode = 'already'; break; }
       }
       if (!T) for (const t of tutors) {               // ② いなければ、その時間帯に入れる人
         const v = cellOf(t.id, d);
