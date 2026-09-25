@@ -1,4 +1,6 @@
 // 試験用の月の詰め合わせを作る（名前を伏せた土台 base.json から、条件を少しずつ変える）。
+// 土台は実際の希望をそのまま使っているので、リポジトリには入れない（.gitignore）。
+// 入れるのは、条件を変え、スタッフの並び順と ID をばらばらにした18通りだけ。
 // 特定の月に合わせた直しにならないよう、直しはこの詰め合わせ全部で悪くならないことを
 // 確かめてから入れる（CLAUDE.md「測り方」）。
 //
@@ -12,6 +14,7 @@
 //   並べ替え   希望を足す・減らす日の選び方（乱数の種）
 // 乱数の種は固定なので、何度作っても同じものができる。
 // 使い方: node tools/suite/make_suite.js [土台.json] [出力フォルダ]
+//   土台は anonymize.js で手元に作る（リポジトリには無い）。
 const fs = require('fs');
 const path = require('path');
 const BASE = process.argv[2] || path.join(__dirname, 'base.json');
@@ -131,10 +134,40 @@ function makeCase(base, row, idx) {
     }
   }
 
+  shuffleStaff(D, rng(7919 * (idx + 1) + 31));
+
   const tag = [NAMES.days[fDays - 1], NAMES.req[fReq - 1], NAMES.skill[fSkill - 1], NAMES.staff[fStaff - 1],
                NAMES.sp[fSp - 1], NAMES.hp[fHp - 1], '種' + fSeed].join('・');
   D._suite = { id: 'case' + String(idx + 1).padStart(2, '0'), tag };
   return D;
+}
+
+// スタッフの並び順と ID をばらばらにする（通しごとに別の並び）。並び順と役職がそのままだと、
+// お店の人が見れば誰の希望か分かるため。名前は並べ替えたあとの順に A〜 を振り直し、
+// ID は並びと関係のない番号にする。希望・固定・行事の ID も付け替える。
+// 同じ役職の人どうしが入れ替わっただけだと役職の並びが元のままになるので、
+// 半分以上の位置で役職が元と違うまで並べ直す。
+function shuffleStaff(D, R) {
+  const role = (s) => s.positionType + '/' + s.department;
+  const orig = D.staff.map(role);
+  let order;
+  for (let tries = 0; tries < 1000; tries++) {
+    order = D.staff.slice();
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(R() * (i + 1)); [order[i], order[j]] = [order[j], order[i]];
+    }
+    if (order.filter((s, i) => role(s) !== orig[i]).length * 2 >= order.length) break;
+  }
+  const used = new Set(), map = {};
+  order.forEach(s => {
+    let n; do { n = 100 + Math.floor(R() * 900); } while (used.has(n));
+    used.add(n); map[s.id] = 'S' + n;
+  });
+  const remap = (o) => { const r = {}; for (const id in (o || {})) if (map[id]) r[map[id]] = o[id]; return r; };
+  D.requests = remap(D.requests);
+  D.fixedShifts = remap(D.fixedShifts);
+  D.events = (D.events || []).map(e => Object.assign({}, e, { staffIds: (e.staffIds || []).map(id => map[id]).filter(Boolean) }));
+  D.staff = order.map((s, i) => Object.assign({}, s, { id: map[s.id], name: String.fromCharCode(65 + i), note: '' }));
 }
 
 const base = JSON.parse(fs.readFileSync(BASE, 'utf8'));

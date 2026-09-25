@@ -4,3 +4,6 @@ mydata*.json
 シフト表_*
 *.xlsx
 *.csv
+
+# 試験用の詰め合わせの土台（10月の希望をそのまま使っている）は公開しない
+tools/suite/base.json
