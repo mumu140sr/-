@@ -1066,7 +1066,7 @@ function setupResultPanel() {
         { label: '少しだけ直す（10マスまで）', k: 10 },
         { label: 'ほどほどに直す（25マスまで）', k: 25 },
         { label: 'しっかり直す（50マスまで）', k: 50 },
-        { label: '全部直す（表を解き直す・最大10分）', k: 0 },
+        { label: '全部直す（表を作り直す・行き来が減ることが多い・最大10分）', k: 0 },
       ];
       const cands = [], skipped = [];
       let stopped = false, running = true;
@@ -1121,8 +1121,10 @@ function setupResultPanel() {
       if ($stop2) { $stop2.style.display = 'inline-block'; $stop2.onclick = stop; }
       btnRepair.disabled = true;
       try {
+        let reached0 = false;
         for (const sp of SPECS) {
           if (stopped || !modal.isConnected) break;
+          if (reached0 && sp.k) continue;
           const t0 = Date.now();
           $st.innerHTML = `<span class="hint">⏳ 「${escapeHtml(sp.label)}」を計算しています…</span>`;
           let r;
@@ -1141,11 +1143,14 @@ function setupResultPanel() {
           const st = candStats(baseShifts, r._shifts || r.shifts, beforeV, r.violations);
           // 🚨がどの種類も増えず、⛔ も悪くならず、🚨か⛔が減った案だけを出す
           const ok = !st.compUp && scoreBetter(st.a, beforeSc) && (st.a.must < beforeSc.must || st.a.comp < beforeSc.comp);
-          // 前の案より🚨が減っていない案は出さない（同じ直り方で、変えるマスが多いだけ）
-          const dup = cands.some(c => scoreCompare(st.a, c.st.a) >= 0);
+          // 前の案より🚨が減っていない案は出さない（同じ直り方で、変えるマスが多いだけ）。
+          // ただし「全部直す」は並べたままにする（表を作り直すので行き来が減ることが多く、
+          // 行き来を減らしたい月はこれを選べるようにする。利用者の希望）。
+          const dup = sp.k && cands.some(c => scoreCompare(st.a, c.st.a) >= 0);
           if (ok && !dup) { cands.push({ label: sp.label, st, sec, shifts: r._shifts || r.shifts }); redraw(); }
           else { skipped.push(`${sp.label}（${sec}秒）: ${!ok ? '🚨を減らせないか、どれかの🚨が増えるため出しません' : '前の案より🚨が減らないため出しません（変えるマスが増えるだけ）'}`); redraw(); }
-          if (st.a.must === 0 && st.a.comp === 0 && ok) break;   // 🚨が0件になったら、それ以上は計算しない
+          // 🚨が0件になったら、残りのマスの上限の案は計算しない（「全部直す」だけは計算する）
+          if (st.a.must === 0 && st.a.comp === 0 && ok) reached0 = true;
         }
       } finally {
         running = false;
