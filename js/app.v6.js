@@ -1157,7 +1157,8 @@ function setupResultPanel() {
           else {
             // 外した理由は、増えたもの（公休の不足 1→2日 など）を書く
             const upL = scoreWorsened(st.a, beforeSc).filter(x => x.key !== 'soft');
-            const lab = (k) => k === 'comp' ? '⛔6連勤以上' : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
+            const lab = (k) => k === 'comp' ? '⛔6連勤以上' : k === 'over' ? '連勤の超過日数' : k === 'bsOver' ? '切り替えの超過回数'
+              : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
             const unit = (k) => (k === 'over' || k === 'offShort') ? '日' : k === 'bsOver' ? '回' : '件';
             const why = ok ? '前の案より🚨が減らないため出しません（変えるマスが増えるだけ）'
               : st.compUp ? '6連勤以上ができる・伸びる・つながるため出しません'
