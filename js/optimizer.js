@@ -3460,7 +3460,7 @@ function scoreViolations(vs) {
     }
     if (v.type === 'consecutive') { r.over += (v.over || 0); if (v.compliance) r.comp++; }
     if (v.type === 'understaff') r.under++;
-    // 公休が足りない日数。件数は「足りない人数」なので、連勤（回数と超過日数）と同じく日数も見る
+    // 公休の足りない日数の合計（offShort）。件数は「足りない人数」なので、連勤（回数と超過日数）と同じく日数も見る
     if (v.type === 'off-count' && (getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type))) r.offShort += (v.short || 0);
     // 早遅の切り替えを「絶対」にしているときは、超えた回数も連勤の超過日数と同じように見る
     if (v.type === 'band-switch' && getRuleLevel('band-switch') === 'must') r.bsOver += (v.over || 0);
@@ -3481,8 +3481,9 @@ function scoreBetter(a, b) {
     if (x > y) return false;
     if (x < y) less = true;
   }
-  // 公休の不足日数も、連勤の超過日数と同じく増やさない（人数が減っても、1人に寄せて日数が増えたら改善ではない。
-  // 利用者の判断 2026年9月26日）
+  // 公休の足りない日数の合計も、連勤の超過日数と同じく増やさない（利用者の判断 2026年9月26日）。
+  // はじくのは「足りない日数の合計が増える案」。合計が同じまま足りない人数が減る案（1人に寄せる案を含む）は、
+  // 連勤（回数が減り超過日数が同じ）と同じく改善のまま。
   if (a.over > b.over || a.comp > b.comp || (a.bsOver || 0) > (b.bsOver || 0) || (a.offShort || 0) > (b.offShort || 0)) return false;
   if (a.over < b.over || a.comp < b.comp || (a.bsOver || 0) < (b.bsOver || 0) || (a.offShort || 0) < (b.offShort || 0)) less = true;
   if (less) return true;
@@ -3513,9 +3514,11 @@ function compWorsened(beforeVs, afterVs) {
 
 // 順番を付ける必要がある所（4通りから選ぶ、候補を並べる）の並べ方。小さいほど良い。
 //   ① 6連勤以上の回数 ② 人員不足 ③ 🚨の件数（連勤は回数） ④ 連勤の超過日数
+//   ④'' 公休の足りない日数の合計（利用者の判断 2026年9月26日。連勤の超過日数のすぐあと）
 //   ④' 早遅の切り替えの超過回数（「絶対」のときだけ。「なるべく」なら⑤の🟡に1人1件で入る） ⑤ 🟡の件数
 function scoreCompare(a, b) {
   return (a.comp - b.comp) || (a.under - b.under) || (a.must - b.must) || (a.over - b.over)
+      || ((a.offShort || 0) - (b.offShort || 0))
       || ((a.bsOver || 0) - (b.bsOver || 0)) || (a.soft - b.soft);
 }
 // 画面に出す要約（件数と超過日数を分けて出す）

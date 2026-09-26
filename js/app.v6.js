@@ -1141,8 +1141,10 @@ function setupResultPanel() {
           }
           const sec = Math.round((Date.now() - t0) / 1000);
           const st = candStats(baseShifts, r._shifts || r.shifts, beforeV, r.violations);
-          // 🚨がどの種類も増えず、⛔ も悪くならず、🚨か⛔が減った案だけを出す
-          const ok = !st.compUp && scoreBetter(st.a, beforeSc) && (st.a.must < beforeSc.must || st.a.comp < beforeSc.comp);
+          // 🚨がどの種類も増えず、⛔ も悪くならず、🚨・⛔・連勤の超過日数・公休の足りない日数のどれかが減った案だけを出す
+          // 連勤の超過日数・公休の足りない日数だけが減る案も出す（件数が同じでも日数が減れば改善）
+          const ok = !st.compUp && scoreBetter(st.a, beforeSc) && (st.a.must < beforeSc.must || st.a.comp < beforeSc.comp ||
+                     st.a.over < beforeSc.over || (st.a.offShort || 0) < (beforeSc.offShort || 0));
           // 前の案より🚨が減っていない案は出さない（同じ直り方で、変えるマスが多いだけ）。
           // ただし「全部直す」は並べたままにする（表を作り直すので行き来が減ることが多く、
           // 行き来を減らしたい月はこれを選べるようにする。利用者の希望）。
