@@ -3192,7 +3192,9 @@ function showSurplusResolveModal() {
         // 何も上書きしない）。1人目を🎓で入れると指導役に🔒が付くので、2人目を探すときに消えていた。
         // あとから入れた希望休の日と、④・🔒と表でシフトが違う日は外す。
         const stT = staffDayState(t, d);
-        const tutorOk = stT === 'free' || stT === 'fixed:' + v;
+        // 研修中の人は指導役にしない（利用者の判断）。表で研修シフトの日は、🔒・④の有無にかかわらず外す
+        // （1人目を入れると指導役に🔒研が付き、2人目のときだけ消えるずれがあった）。
+        const tutorOk = !isTrainKey(v) && (stT === 'free' || stT === 'fixed:' + v);
         if (v && isWork(v) && bandOf(v) === band && tutorOk && cellOf(t.id, d) !== '☆') { T = t; vt = v; mode = 'already'; break; }
       }
       if (!T) for (const t of tutors) {               // ② いなければ、その時間帯に入れる人
