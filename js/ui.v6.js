@@ -3198,7 +3198,8 @@ function showSurplusResolveModal() {
           const T = (AppState.staff || []).find(x => {
             if (x.id === c.id || pri2(x) >= pri2(st)) return false;
             const v = (AppState.shifts[x.id] || {})[c.day] || '';
-            return v && isWork(v) && bandOf2(v) === bd;
+            // 研修中の人は、そばにいる人（教える側）にしない（🔒・④の有無にかかわらず。利用者の判断）
+            return v && isWork(v) && !isTraining(v) && bandOf2(v) === bd;
           });
           if (!T) return;
           const n = measure(() => {   // 「研修で入れる」を押したときと同じ変更（🔒固定も）
@@ -3739,7 +3740,8 @@ function showSurplusResolveModal() {
         const tutorAt = (bd) => (AppState.staff || []).find(x => {
           if (x.id === L.id || pri2(x) >= pri2(L)) return false;
           const vt = cellOf(x.id, d);
-          return vt && isWork(vt) && bandOf2(vt) === bd;
+          // 研修中の人は、そばにいる人（教える側）にしない（🔒・④の有無にかかわらず。利用者の判断）
+          return vt && isWork(vt) && !isTraining(vt) && bandOf2(vt) === bd;
         });
         // ㋐ 定数+1で入れる
         candidateShiftsFor(L, d).forEach(k => {
