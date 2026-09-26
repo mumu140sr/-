@@ -304,6 +304,7 @@ const VIOLATION_LABEL = {
   'understaff':        '人員不足',
   'overstaff':         '定数オーバー',
   'off-count':         '公休数不足',
+  'offShort':          '公休の不足日数',
   'paid':              '有給が消化できない',
   'consecutive':       '連勤超過',
   'band-switch':       '早遅の切り替え回数',
@@ -3074,7 +3075,7 @@ function checkViolations(shifts) {
     const diff = offCount - (s.maxOff || 0);
     if (!isCast && diff < 0) {
       violations.push({
-        staffId: s.id, day: 0, type: 'off-count',
+        staffId: s.id, day: 0, type: 'off-count', short: -diff,   // 足りない日数（比べ方で使う）
         message: `🚨 公休数 ${offCount}日（目標${s.maxOff}日, 差${diff}）`,
         action:  '公休数を増やしてください',
       });
@@ -3447,7 +3448,7 @@ function findCapabilityBottlenecks() {
  *   count / total … 全部の件数（表示用） / mustCount … must と同じ（表示用）
  */
 function scoreViolations(vs) {
-  const r = { comp: 0, under: 0, must: 0, over: 0, bsOver: 0, soft: 0, count: 0, byMust: {} };
+  const r = { comp: 0, under: 0, must: 0, over: 0, bsOver: 0, offShort: 0, soft: 0, count: 0, byMust: {} };
   (vs || []).forEach(v => {
     if (!v) return;
     r.count++;
@@ -3459,6 +3460,8 @@ function scoreViolations(vs) {
     }
     if (v.type === 'consecutive') { r.over += (v.over || 0); if (v.compliance) r.comp++; }
     if (v.type === 'understaff') r.under++;
+    // 公休が足りない日数。件数は「足りない人数」なので、連勤（回数と超過日数）と同じく日数も見る
+    if (v.type === 'off-count' && (getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type))) r.offShort += (v.short || 0);
     // 早遅の切り替えを「絶対」にしているときは、超えた回数も連勤の超過日数と同じように見る
     if (v.type === 'band-switch' && getRuleLevel('band-switch') === 'must') r.bsOver += (v.over || 0);
   });
@@ -3478,8 +3481,10 @@ function scoreBetter(a, b) {
     if (x > y) return false;
     if (x < y) less = true;
   }
-  if (a.over > b.over || a.comp > b.comp || (a.bsOver || 0) > (b.bsOver || 0)) return false;
-  if (a.over < b.over || a.comp < b.comp || (a.bsOver || 0) < (b.bsOver || 0)) less = true;
+  // 公休の不足日数も、連勤の超過日数と同じく増やさない（人数が減っても、1人に寄せて日数が増えたら改善ではない。
+  // 利用者の判断 2026年9月26日）
+  if (a.over > b.over || a.comp > b.comp || (a.bsOver || 0) > (b.bsOver || 0) || (a.offShort || 0) > (b.offShort || 0)) return false;
+  if (a.over < b.over || a.comp < b.comp || (a.bsOver || 0) < (b.bsOver || 0) || (a.offShort || 0) < (b.offShort || 0)) less = true;
   if (less) return true;
   return a.soft < b.soft;
 }
@@ -3491,6 +3496,7 @@ function scoreWorsened(a, b) {
   keys.forEach(k => { const x = a.byMust[k] || 0, y = b.byMust[k] || 0; if (x > y) out.push({ key: k, from: y, to: x }); });
   if (a.over > b.over) out.push({ key: 'over', from: b.over, to: a.over });
   if ((a.bsOver || 0) > (b.bsOver || 0)) out.push({ key: 'bsOver', from: b.bsOver || 0, to: a.bsOver });
+  if ((a.offShort || 0) > (b.offShort || 0)) out.push({ key: 'offShort', from: b.offShort || 0, to: a.offShort });
   if (a.soft > b.soft) out.push({ key: 'soft', from: b.soft, to: a.soft });
   return out;
 }
@@ -3519,6 +3525,7 @@ function scoreSummary(r) {
   if (r.comp) parts.push(`⛔コンプラ違反 ${r.comp}件`);
   parts.push(`🚨${r.must - r.comp}件`);
   if (r.over) parts.push(`連勤の超過 ${r.over}日`);
+  if (r.offShort) parts.push(`公休の不足 ${r.offShort}日`);
   if (r.bsOver) parts.push(`切り替えの超過 ${r.bsOver}回`);
   parts.push(`🟡${r.soft}件`);
   return parts.join('・');

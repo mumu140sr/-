@@ -2232,7 +2232,7 @@ function refreshAfterManualEdit(doneMsg, before) {
   if (up.length) {
     const lab = (k) => k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? '🟡'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
-    warns.push('⚠ 悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${x.key === 'over' ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('・'));
+    warns.push('⚠ 悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${(x.key === 'over' || x.key === 'offShort') ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('・'));
   }
   if (warns.length) {
     toast((doneMsg ? doneMsg + '。' : '') + warns.join(' ／ '), warns.some(w => w.startsWith('⛔')) ? 'error' : 'warning', 8000);
@@ -3695,7 +3695,7 @@ function showSurplusResolveModal() {
     if (!up.length) return '';
     const lab = (k) => k === 'comp' ? '⛔コンプラ違反' : k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? '🟡'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
-    return `<br><span class="hint">増えたもの：${up.map(x => escapeHtml(lab(x.key)) + ` ${x.from}→${x.to}${x.key === 'over' ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('、')}</span>`;
+    return `<br><span class="hint">増えたもの：${up.map(x => escapeHtml(lab(x.key)) + ` ${x.from}→${x.to}${(x.key === 'over' || x.key === 'offShort') ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('、')}</span>`;
   };
 
   const busy = (on) => modal.querySelectorAll('button, select').forEach(el => {
@@ -4661,6 +4661,7 @@ function _diffWords(d) {
   // 🚨は⛔（6連勤以上）を除いた件数で出す（⛔は別に出す）
   if (a.must - a.comp !== b.must - b.comp) ch.push(`🚨 ${b.must - b.comp}→${a.must - a.comp}件`);
   if (a.over !== b.over) ch.push(`連勤の超過 ${b.over}→${a.over}日`);
+  if ((a.offShort || 0) !== (b.offShort || 0)) ch.push(`公休の不足 ${b.offShort || 0}→${a.offShort || 0}日`);
   if ((a.bsOver || 0) !== (b.bsOver || 0)) ch.push(`切り替えの超過 ${b.bsOver || 0}→${a.bsOver || 0}回`);
   if (a.soft !== b.soft) ch.push(`🟡 ${b.soft}→${a.soft}件`);
   const sg = _diffSign(d);
@@ -4668,7 +4669,7 @@ function _diffWords(d) {
              : sg < 0 ? '良くなります' : sg === 0 ? '変わりません'
              : sg === 1 ? '悪くなります' : '減るものと増えるものがあります';
   // 🚨の種類が入れ替わっただけ（件数は同じ）のときも分かるように、増えた種類を出す
-  const up = scoreWorsened(a, b).filter(x => x.key !== 'comp' && x.key !== 'over' && x.key !== 'bsOver' && x.key !== 'soft')
+  const up = scoreWorsened(a, b).filter(x => x.key !== 'comp' && x.key !== 'over' && x.key !== 'bsOver' && x.key !== 'offShort' && x.key !== 'soft')
     .map(x => `${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[x.key]) || x.key} +${x.to - x.from}`);
   if (sg === 2 && up.length) ch.push('増える🚨: ' + up.join('・'));
   return ch.length ? `${head}（${ch.join('・')}）` : head;
