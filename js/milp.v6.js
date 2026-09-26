@@ -66,7 +66,7 @@ const CALC_BUTTONS = ['btnGenerate', 'btnGenerateFast', 'btnWizard', 'btnRepair'
 function calcBusy() { return !!_calcOwner; }
 // ⏹ 中止ボタンがあるのは、生成と自動修正だけ。ほかの計算では中止を案内しない
 // （ボタンが無いのに「⏹ 中止を押して」と案内していた）。確認待ちは、答えるよう案内する。
-const CALC_HAS_STOP = new Set(['生成', 'エラーの自動修正']);
+const CALC_HAS_STOP = new Set(['生成', 'エラーの自動修正', '希望の変え方を確かめる', '余の解消']);
 function calcBusyToast() {
   if (typeof toast !== 'function') return;
   const what = _calcOwner || '計算';

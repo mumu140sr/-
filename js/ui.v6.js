@@ -2918,8 +2918,18 @@ async function _trySurplusChange(apply, opts) {
   const midV = checkViolations(AppState.shifts);
   const needAdjust = scoreWorsened(scoreViolations(midV), bSc).some(x => x.key !== 'soft') || compWorsened(beforeV, midV).length > 0;
   if (o.adjust && needAdjust && typeof optimizeScheduleMILP === 'function') {
+    // 最大25秒ほどかかるので、経過秒数と ⏹ 中止を出す（o.onAdjustTick）。中止したら変更ごと取り消す。
+    const t0 = Date.now();
+    const tick = setInterval(() => { if (typeof o.onAdjustTick === 'function') o.onAdjustTick(Math.round((Date.now() - t0) / 1000)); }, 1000);
+    if (typeof o.onAdjustTick === 'function') o.onAdjustTick(0);
     try { await optimizeScheduleMILP(() => {}, { adjustMode: true, adjustK: (o.k || 24), fastMode: true }); }
-    catch (_) { /* 調整できなくてもそのまま検証する */ }
+    catch (e) {
+      if (/^cancel/.test((e && e.message) || '')) {
+        clearInterval(tick); restore();
+        return { ok: false, cancelled: true, before, after: before, sd: null, message: 'つじつま合わせを中止しました' };
+      }
+      /* 調整できなくてもそのまま検証する */
+    } finally { clearInterval(tick); }
   }
   // つじつま合わせでほかのマスも動いたときは、反映する前に「つじつま合わせあり」と
   // 「変更だけ（つじつま合わせなし）」を並べて見せ、選んでもらう（以前はつじつま合わせが
@@ -3115,6 +3125,12 @@ function showSurplusResolveModal() {
     $m.querySelector('#worsenNo').addEventListener('click', () => resolve(false));
   });
 
+  // つじつま合わせの計算中の表示（経過秒数と ⏹ 中止）。⏹ はパネルの中のどこで押されても効くように、パネルで受ける。
+  const adjustTick = (sec) => say(`⏳ 周りのつじつまを合わせています…（${sec}秒・最大25秒ほど）
+      <button class="btn" data-adjstop="1" style="margin-left:8px;padding:1px 10px;background:#e74c3c;color:#fff">⏹ 中止</button>`, true, true);
+  modal.addEventListener('click', (e) => {
+    if (e.target && e.target.closest && e.target.closest('[data-adjstop]') && typeof cancelMILP === 'function') cancelMILP();
+  });
   // つじつま合わせでほかのマスも動いたとき、「あり」と「変更だけ」を並べて選んでもらう
   const askAdjust = ({ withSt, woSt, adjList }) => new Promise(resolve0 => {
     if (panelClosed) return resolve0(false);
@@ -3706,7 +3722,7 @@ function showSurplusResolveModal() {
         AppState.fixedShifts[T.id] = AppState.fixedShifts[T.id] || {};
         AppState.fixedShifts[T.id][d] = row.tk;
       }
-    }, { adjust: true, k: 32, confirm: askWorsen, chooseAdjust: askAdjust });
+    }, { adjust: true, k: 32, confirm: askWorsen, chooseAdjust: askAdjust, onAdjustTick: adjustTick });
     busy(false);
     say(r.ok ? `${r.hadCritical ? '🚨' : r.worsened ? '⚠️' : '✅'} ${d}日 ${escapeHtml(T.name)}（${escapeHtml(row.tk)}）のそばに ${escapeHtml(L.name)}（${escapeHtml(row.lk)}）を入れました（${r.message}）。${diffText(r)}`
              : `↩ ${d}日の指定を取り消しました。${r.message}`, r.ok && !r.worsened);
@@ -4091,7 +4107,7 @@ function showSurplusResolveModal() {
         AppState.fixedShifts[id][d] = key;                                     // その人をその日に固定
         AppState.shifts[id] = AppState.shifts[id] || {};
         AppState.shifts[id][d] = key;
-      }, { adjust: true, k: 24, confirm: askWorsen, chooseAdjust: askAdjust });
+      }, { adjust: true, k: 24, confirm: askWorsen, chooseAdjust: askAdjust, onAdjustTick: adjustTick });
       busy(false);
       say(r.ok ? `${r.hadCritical ? '🚨' : r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。${diffText(r)}`
                : `↩ ${escapeHtml(s.name)} ${d}日 の「${escapeHtml(key)}」を取り消しました。${r.message}`, r.ok && !r.worsened);

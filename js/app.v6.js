@@ -267,23 +267,40 @@ function renderWishFixBox(modal) {
       <div id="wfOut" style="margin-top:8px;font-size:13px;line-height:1.7"></div></div>`;
   const $out = box.querySelector('#wfOut'), $go = box.querySelector('#wfGo'), $stop = box.querySelector('#wfStop');
   let stopped = false;
-  $stop.addEventListener('click', () => { stopped = true; if (typeof cancelMILP === 'function') cancelMILP(); });
+  const stopNow = () => { stopped = true; if (typeof cancelMILP === 'function') cancelMILP(); };
+  $stop.addEventListener('click', stopNow);
+  let running = false;
+  modal._stopCalc = () => { if (running) stopNow(); };   // 画面を閉じたら計算も止める
   $go.addEventListener('click', async () => {
     if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
     if (!calcBegin('希望の変え方を確かめる')) return;
-    stopped = false; $go.disabled = true; $stop.style.display = 'inline-block';
+    stopped = false; running = true; $go.disabled = true; $stop.style.display = 'inline-block';
     const fp0 = (typeof contentFingerprint === 'function') ? contentFingerprint() : '';
     const lines = [];
     const show = (extra) => { $out.innerHTML = lines.join('') + (extra || ''); };
+    // 同じ変更（同じ希望の組み合わせ）の計算は使い回す（別の🚨の案として同じ変更が出ることがある）
+    const cache = {};
+    let done = 0, total = 1, secSum = 0;
+    const progress = () => {
+      const avg = done ? secSum / done : 65;
+      return `（全部で${total}回・いま${Math.min(done + 1, total)}回目・あと約${Math.max(1, Math.round((total - done) * avg / 60))}分）`;
+    };
     const trial = async (patch) => {
+      const key = JSON.stringify((patch || []).slice().sort((a, b) => (a.id + a.day).localeCompare(b.id + b.day)));
+      if (cache[key]) return Object.assign({}, cache[key], { cached: true });
       const t0 = Date.now();
       const r = await optimizeScheduleMILP(null, { fastMode: true, noApply: true, requestsPatch: patch || null });
-      return { r, sc: scoreViolations(r.violations || []), sec: Math.round((Date.now() - t0) / 1000) };
+      const sec = Math.round((Date.now() - t0) / 1000);
+      done++; secSum += sec;
+      return (cache[key] = { r, sc: scoreViolations(r.violations || []), sec });
     };
     try {
-      show('<span class="hint">⏳ いまの希望で試しに作っています…（約1分）</span>');
+      show(`<span class="hint">⏳ いまの希望で試しに作っています…${progress()}</span>`);
       const base = await trial(null);
       const targets = wishFixCandidates(base.r.violations || [], (typeof analyzeDayMargins === 'function') ? analyzeDayMargins() : []);
+      // 全部で何回計算するか（同じ変更は1回と数える）
+      { const keys = new Set(); targets.forEach(t => t.cands.forEach(c => keys.add(JSON.stringify(c.changes.map(x => ({ id: x.id, day: x.day, to: x.to }))
+          .sort((a, b) => (a.id + a.day).localeCompare(b.id + b.day)))))); total = 1 + keys.size; }
       lines.push(`<div>いまの希望で作ると: <b>${escapeHtml(scoreSummary(base.sc))}</b>（${base.sec}秒）</div>`);
       if (!targets.length) {
         const n = (base.r.violations || []).filter(v => WISH_MUST_TYPES.indexOf(v.type) >= 0 &&
@@ -299,17 +316,19 @@ function renderWishFixBox(modal) {
         let any = false;
         for (const c of t.cands) {
           if (stopped) break;
-          show(`<div class="hint" style="margin-left:1em">⏳ 「${escapeHtml(c.text)}」を試しています…</div>`);
+          show(`<div class="hint" style="margin-left:1em">⏳ 「${escapeHtml(c.text)}」を試しています…${progress()}</div>`);
           let res;
           try { res = await trial(c.changes.map(x => ({ id: x.id, day: x.day, to: x.to }))); }
           catch (e) { if (stopped || /^cancel/.test(e.message || '')) break; continue; }
           const gone = !_wishTargetStill(res.r.violations || [], t);
-          const ok = gone && !scoreWorsened(res.sc, base.sc).some(x => x.key !== 'soft') && !compWorsened(base.r.violations || [], res.r.violations || []).length;
+          // その🚨が消え、決まり（scoreBetter: どれも増えず、どれかが減る）でも改善のときだけ ✅。
+          // 🚨が別の人・日に移っただけの案（件数は同じ）には付けない。
+          const ok = gone && scoreBetter(res.sc, base.sc) && !compWorsened(base.r.violations || [], res.r.violations || []).length;
           const idx = lines.length;
           lines.push(ok
-            ? `<div style="margin-left:1em">✅ ${escapeHtml(c.text)} → <b>${escapeHtml(scoreSummary(res.sc))}</b>（${res.sec}秒）
+            ? `<div style="margin-left:1em">✅ ${escapeHtml(c.text)} → <b>${escapeHtml(scoreSummary(res.sc))}</b>（${res.cached ? '前の計算を使いました' : res.sec + '秒'}）
                  <button class="btn" data-wf="${idx}" style="padding:1px 10px">この案にする</button></div>`
-            : `<div class="hint" style="margin-left:1em">✖ ${escapeHtml(c.text)} → ${escapeHtml(scoreSummary(res.sc))}（${gone ? 'ほかの🚨が増えるため出しません' : 'この🚨が消えないため出しません'}・${res.sec}秒）</div>`);
+            : `<div class="hint" style="margin-left:1em">✖ ${escapeHtml(c.text)} → ${escapeHtml(scoreSummary(res.sc))}（${gone ? 'ほかが増える、またはほかの🚨に移っただけのため出しません' : 'この🚨が消えないため出しません'}・${res.cached ? '前の計算を使いました' : res.sec + '秒'}）</div>`);
           if (ok) { any = true; wfApply[idx] = c; }
         }
         if (!any && !stopped) lines.push('<div class="hint" style="margin-left:1em">変えてよい希望だけでは、この🚨を消せませんでした。</div>');
@@ -319,7 +338,7 @@ function renderWishFixBox(modal) {
     } catch (e) {
       lines.push(`<div class="hint">${/^cancel/.test(e.message || '') ? '中止しました。' : '計算に失敗しました: ' + escapeHtml(e.message || '')}</div>`); show();
     } finally {
-      calcEnd(); $go.disabled = false; $stop.style.display = 'none';
+      running = false; calcEnd(); $go.disabled = false; $stop.style.display = 'none';
       $out.querySelectorAll('[data-wf]').forEach(b => b.addEventListener('click', () => {
         const c = wfApply[+b.dataset.wf]; if (!c) return;
         if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
@@ -473,7 +492,8 @@ function showFeasibilityModal() {
   document.body.appendChild(modal);
   renderFixPlans(modal);   // 「誰の何日をどう入れ替えるか」をこの画面にも出す
   renderWishFixBox(modal); // 希望の変え方を計算で確かめる（3-1②）
-  const close = () => modal.remove();
+  // 閉じたら、🧪 の計算も止める（止めずに閉じると、十数分〜30分、ほかの計算も手直しもできなくなっていた）
+  const close = () => { if (typeof modal._stopCalc === 'function') modal._stopCalc(); modal.remove(); };
   modal.querySelector('#feasClose').addEventListener('click', close);
   modal.addEventListener('click', e => { if (e.target === modal) close(); });
 }
@@ -1233,7 +1253,7 @@ function setupResultPanel() {
       const redraw = () => {
         $rows.innerHTML = cands.map((c, i) => candRowHtml(c.label, c.st, c.sec,
           `<button class="btn btn-primary" data-rcgo="${i}" ${running ? 'disabled title="計算中です。⏹ 中止するか、終わるのを待ってから選んでください"' : ''}>反映</button>`)).join('')
-          || (running ? '' : `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">🚨を減らせる案は見つかりませんでした。${
+          || (running ? '' : `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">良くなる案は見つかりませんでした。${
                 skippedUp ? '下の理由のとおり、どの案も何かが増えるため出していません。' : '関係する🔒を解除すると直せる場合があります。'}</td></tr>`);
         $rows.innerHTML += skipped.map(t => `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:4px 8px;border-top:1px dashed var(--border)">${escapeHtml(t)}</td></tr>`).join('');
         $rows.querySelectorAll('[data-rcgo]').forEach(b => b.addEventListener('click', () => applyCand(cands[+b.dataset.rcgo])));
@@ -1261,9 +1281,11 @@ function setupResultPanel() {
       btnRepair.disabled = true;
       try {
         let reached0 = false;
+        // 最初から🚨も⛔も0件なら、マスの上限の案（🚨を直すための案）は計算せず「全部直す」だけにする
+        const noMust0 = beforeSc.must === 0 && beforeSc.comp === 0;
         for (const sp of SPECS) {
           if (stopped || !modal.isConnected) break;
-          if (reached0 && sp.k) continue;
+          if ((reached0 || noMust0) && sp.k) continue;
           const t0 = Date.now();
           $st.innerHTML = `<span class="hint">⏳ 「${escapeHtml(sp.label)}」を計算しています…</span>`;
           let r;
@@ -1283,7 +1305,9 @@ function setupResultPanel() {
           // 🚨がどの種類も増えず、⛔ も悪くならず、🚨・⛔・連勤の超過日数・公休の足りない日数・切り替えの超過回数
           // （「絶対」のときだけ数える）のどれかが減った案だけを出す
           // 連勤の超過日数・公休の足りない日数だけが減る案も出す（件数が同じでも日数が減れば改善）
-          const ok = !st.compUp && scoreBetter(st.a, beforeSc) && (st.a.must < beforeSc.must || st.a.comp < beforeSc.comp ||
+          // 「全部直す」は決まり（scoreBetter）で改善なら出す（🟡だけが減る月も。以前の本番も、作り直した表が
+          // 良ければ反映していた）。マスの上限の案は、🚨・⛔・日数・回数のどれかが減るときだけ出す。
+          const ok = !st.compUp && scoreBetter(st.a, beforeSc) && (!sp.k || st.a.must < beforeSc.must || st.a.comp < beforeSc.comp ||
                      st.a.over < beforeSc.over || (st.a.offShort || 0) < (beforeSc.offShort || 0) ||
                      (st.a.bsOver || 0) < (beforeSc.bsOver || 0));
           // 前の案より🚨が減っていない案は出さない（同じ直り方で、変えるマスが多いだけ）。
@@ -1300,7 +1324,8 @@ function setupResultPanel() {
             const why = ok ? '前の案より🚨が減らないため出しません（変えるマスが増えるだけ）'
               : st.compUp ? '6連勤以上ができる・伸びる・つながるため出しません'
               : upL.length ? upL.map(x => `${lab(x.key)}が ${x.from}→${x.to}${unit(x.key)} に増える`).join('・') + 'ため出しません'
-              : '🚨・連勤の超過・公休の不足のどれも減らないため出しません';
+              : sp.k ? '🚨・連勤の超過・公休の不足のどれも減らないため出しません'
+              : '作り直した表が、いまの表より良くならないため出しません';
             if (!ok && (st.compUp || upL.length)) skippedUp = true;
             skipped.push(`${sp.label}（${sec}秒）: ${why}`); redraw();
           }

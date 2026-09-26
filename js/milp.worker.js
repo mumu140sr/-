@@ -160,6 +160,20 @@ self.addEventListener('message', async (e) => {
         const s0 = solver.solve(MILP.composeLP(m.parts, { types: [], neighbor: { ones, k: 0, only } }), topt(tPer));
         const cur = MILP.solutionIsValid(s0, m.parts, []) ? s0 : null;
         const budgets = [];
+        // 🚨の種類ごとに、最初から「いまの表より増やさない」上限を入れる。入れないと、🚨の段が種類をまたいで
+        // 交換した答え（ある種類を減らして別の種類を増やす）を作り、最後の検査で丸ごと捨てられて、小さく直す案が
+        // 出ないことが多かった（54回のうち22回。上限を入れると、そのうち11回で案が出た）。
+        // いまの表の件数は、表を固定したまま（k=0）🚨の罰点だけを最小にして数える。
+        {
+          const mustTypes = [];
+          mustTiers.forEach(t => t.types.forEach(ty => { if (mustTypes.indexOf(ty) < 0) mustTypes.push(ty); }));
+          if (mustTypes.length) {
+            const z = solver.solve(MILP.composeLP(m.parts, { types: mustTypes, neighbor: { ones, k: 0, only } }), topt(tPer));
+            if (String(z && z.Status) === 'Optimal' && MILP.solutionIsValid(z, m.parts, [], true)) {
+              mustTypes.forEach(ty => budgets.push({ names: MILP.slackNames(m.parts, [ty]), max: MILP.slackTotal(z, m.parts, [ty]) }));
+            }
+          }
+        }
         let sol = cur;
         const step = (types, extra) => {
           const s2 = solver.solve(MILP.composeLP(m.parts, Object.assign({ types, budgets, neighbor: nbK, tieChange: true }, extra || {})), topt(tPer));
