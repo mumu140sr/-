@@ -3606,7 +3606,8 @@ function findConcreteFixes(opt) {
       m._same = (n.must === baseScore.must && n.total === baseScore.total);
     }
   });
-  // 並べ方は scoreCompare（① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 🟡）
+  // 並べ方は scoreCompare（① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 公休の足りない日数
+  // ⑥ 切り替えの超過回数（絶対のとき）⑦ 🟡）
   found.sort((a, b) => scoreCompare(a._sc, b._sc));
   if (found.length >= maxResults || !o.deep) return _dedupeFixes(found, maxResults);
 

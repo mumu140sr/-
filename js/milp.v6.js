@@ -159,7 +159,8 @@ function optimizeScheduleMILP(onProgress, opts) {
     const pickBySurplus = !!(opts && opts.pickBy === 'surplus');
     const countRest = (sh) => { let n2 = 0; for (const id in (sh || {})) { const row = sh[id]; for (const d in row) if (row[d] === '余') n2++; } return n2; };
     // 並べ方は scoreCompare（optimizer.js）: ① 6連勤以上（コンプラ違反）の回数
-    // ② 人員不足 ③ 🚨の件数（連勤は回数）④ 連勤の超過日数 ⑤ 🟡の件数。
+    // ② 人員不足 ③ 🚨の件数（連勤は回数）④ 連勤の超過日数 ⑤ 公休の足りない日数
+    // ⑥ 切り替えの超過回数（絶対のとき）⑦ 🟡の件数。
     // 合計件数だけで比べると、🚨4件・合計11件が 🚨3件・合計12件に勝ってしまう。
     const better = (a, b) => scoreCompare(a.sc, b.sc);
     const say = () => {

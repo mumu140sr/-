@@ -2422,14 +2422,14 @@ function candCellsText(cells, max) {
 }
 /** 案の1行（表の行）。btnHtml: 反映などのボタン */
 function candRowHtml(label, st, sec, btnHtml) {
-  const arrow = (a, b, bad) => `${a}→${b}` + (b > a && bad ? ' ⚠️' : '');
+  const arrow = (a, b, bad, unit) => `${a}→${b}${unit || ''}` + (b > a && bad ? ' ⚠️' : '');
   return `<tr>
     <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>${escapeHtml(label)}</b>${sec != null ? `<div class="hint">${sec}秒</div>` : ''}</td>
-    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${st.a.comp > st.b.comp ? '<b style="color:var(--danger)">' : ''}⛔ ${st.b.comp}→${st.a.comp}${st.a.comp > st.b.comp ? '</b>' : ''}</td>
-    <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>🚨 ${st.b.must}→${st.a.must}件</b><div class="hint">${candMustText(st)}</div></td>
-    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.over, st.a.over, true)}日</td>
-    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.offShort || 0, st.a.offShort || 0, true)}日</td>${CAND_BS() ? `
-    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.bsOver || 0, st.a.bsOver || 0, true)}回</td>` : ''}
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${st.a.comp > st.b.comp || st.compUp ? '<b style="color:var(--danger)">' : ''}⛔ ${st.b.comp}→${st.a.comp}${st.compUp ? '（伸びる・つながるため選べません）' : ''}${st.a.comp > st.b.comp || st.compUp ? '</b>' : ''}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>🚨 ${st.b.must - st.b.comp}→${st.a.must - st.a.comp}件</b><div class="hint">${candMustText(st)}</div></td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.over, st.a.over, true, '日')}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.offShort || 0, st.a.offShort || 0, true, '日')}</td>${CAND_BS() ? `
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.bsOver || 0, st.a.bsOver || 0, true, '回')}</td>` : ''}
     <td style="padding:6px 8px;border-top:1px solid var(--border);text-align:center"><b>${st.cells.length}</b>マス</td>
     <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">行き来 ${arrow(st.ikiB, st.ikiA, true)}</td>
     <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">ほかの🟡 ${arrow(st.othB, st.othA, false)}</td>
@@ -2911,7 +2911,8 @@ async function _trySurplusChange(apply, opts) {
   const bSc = scoreViolations(beforeV);
   apply();
   mid = captureChangeBase();          // ここまでが、この変更そのもので変えた所
-  // 周りのつじつまを、最小限の変更で合わせる。変更そのもので🚨・⛔・連勤の超過日数が悪くならないときは
+  // 周りのつじつまを、最小限の変更で合わせる。変更そのもので🚨・⛔・連勤の超過日数・公休の足りない日数・
+  // 切り替えの超過回数（絶対のとき）が悪くならないときは
   // 合わせない（合わせる必要が無いのに、計算の上の数だけを減らそうとして、ほかの人のマスを
   // 20マス近く動かし、早番と遅番の行き来を増やしていた）。
   const midV = checkViolations(AppState.shifts);
@@ -2946,7 +2947,7 @@ async function _trySurplusChange(apply, opts) {
         const pick = await o.chooseAdjust({ withSt, woSt, adjList });
         if (!pick) { restore(); return { ok: false, before, after: before, sd: null, cancelled: true, message: '実行しませんでした' }; }
         if (pick === 'without') _applyChangeList(adjCells, 'undo');
-        chosen = true;   // 並べた案を見て選んだので、下の「悪くなります」はあらためて聞かない
+        chosen = true;   // 並べた案を見て選んだので、🚨の件数ではあらためて聞かない（日数・回数が増えるときは下で聞く）
       } else {
         // 選ぶ画面を出していないときは「変更だけ」にして、下の確認（悪くなりますが、よいですか）を通す。
         // chosen を真にしていたため、🚨が増える変更（遅番の翌日を早番にする など）が確認なしで入っていた。
@@ -3624,8 +3625,8 @@ function showSurplusResolveModal() {
                   add: best.after - best.before, before: best.before, after: best.after, sd: best.sd,
                   wasSurplus: (vl === '余' ? 1 : 0) + (vt === '余' ? 1 : 0) });
     }
-    // 6連勤以上になる日は出さない。並べ方は scoreCompare（① 6連勤以上 ② 人員不足
-    // ③ 🚨 ④ 連勤の超過日数 ⑤ 🟡）、同じなら指導役がすでにいる日、次に余を消せる日
+    // 6連勤以上になる日は出さない。並べ方は scoreCompare（① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数
+    // ⑤ 公休の足りない日数 ⑥ 切り替えの超過回数（絶対のとき） ⑦ 🟡）、同じなら指導役がすでにいる日、次に余を消せる日
     for (let i = rows.length - 1; i >= 0; i--) if (rows[i].sd && rows[i].sd.compUp) rows.splice(i, 1);
     rows.sort((x, y) => _diffCmp(x.sd, y.sd)
                      || (x.mode === 'already' ? 0 : 1) - (y.mode === 'already' ? 0 : 1)
@@ -4653,7 +4654,8 @@ function _trainingCandidates(learnerId, band, tutorIds) {
 
 // 「入れてみた前後」を比べる共通の物差し（optimizer.js の scoreViolations と同じ）。
 // 良し悪しは scoreBetter（どの🚨も増えず、どれかが減る）、並べ替えは scoreCompare
-// （① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 🟡）。表示は件数と超過日数を分けて出す。
+// （① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 公休の足りない日数 ⑥ 切り替えの超過回数（絶対のとき）⑦ 🟡）。
+// 表示は件数と日数を分けて出す。
 // compUp: 6連勤以上が新しくできた・伸びた・つながったか（compWorsened）。回数だけで
 // 判定すると、6連勤を7連勤に伸ばす変更などを見逃すため、分かるときは渡す。
 function _scoreDiff(before, after, compUp) {

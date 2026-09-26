@@ -1069,6 +1069,7 @@ function setupResultPanel() {
         { label: '全部直す（表を作り直す・行き来が減ることが多い・最大10分）', k: 0 },
       ];
       const cands = [], skipped = [];
+      let skippedUp = false;   // 何かが増えるために外した案があるか（🔒の解除をすすめない）
       let stopped = false, running = true;
       const modal = document.createElement('div');
       modal.className = 'modal-overlay show';
@@ -1095,7 +1096,8 @@ function setupResultPanel() {
       const redraw = () => {
         $rows.innerHTML = cands.map((c, i) => candRowHtml(c.label, c.st, c.sec,
           `<button class="btn btn-primary" data-rcgo="${i}" ${running ? 'disabled title="計算中です。⏹ 中止するか、終わるのを待ってから選んでください"' : ''}>反映</button>`)).join('')
-          || (running ? '' : '<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">🚨を減らせる案は見つかりませんでした。関係する🔒を解除すると直せる場合があります。</td></tr>');
+          || (running ? '' : `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">🚨を減らせる案は見つかりませんでした。${
+                skippedUp ? '下の理由のとおり、どの案も何かが増えるため出していません。' : '関係する🔒を解除すると直せる場合があります。'}</td></tr>`);
         $rows.innerHTML += skipped.map(t => `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:4px 8px;border-top:1px dashed var(--border)">${escapeHtml(t)}</td></tr>`).join('');
         $rows.querySelectorAll('[data-rcgo]').forEach(b => b.addEventListener('click', () => applyCand(cands[+b.dataset.rcgo])));
       };
@@ -1152,7 +1154,18 @@ function setupResultPanel() {
           // 行き来を減らしたい月はこれを選べるようにする。利用者の希望）。
           const dup = sp.k && cands.some(c => scoreCompare(st.a, c.st.a) >= 0);
           if (ok && !dup) { cands.push({ label: sp.label, st, sec, shifts: r._shifts || r.shifts }); redraw(); }
-          else { skipped.push(`${sp.label}（${sec}秒）: ${!ok ? '🚨を減らせないか、どれかの🚨が増えるため出しません' : '前の案より🚨が減らないため出しません（変えるマスが増えるだけ）'}`); redraw(); }
+          else {
+            // 外した理由は、増えたもの（公休の不足 1→2日 など）を書く
+            const upL = scoreWorsened(st.a, beforeSc).filter(x => x.key !== 'soft');
+            const lab = (k) => k === 'comp' ? '⛔6連勤以上' : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
+            const unit = (k) => (k === 'over' || k === 'offShort') ? '日' : k === 'bsOver' ? '回' : '件';
+            const why = ok ? '前の案より🚨が減らないため出しません（変えるマスが増えるだけ）'
+              : st.compUp ? '6連勤以上ができる・伸びる・つながるため出しません'
+              : upL.length ? upL.map(x => `${lab(x.key)}が ${x.from}→${x.to}${unit(x.key)} に増える`).join('・') + 'ため出しません'
+              : '🚨・連勤の超過・公休の不足のどれも減らないため出しません';
+            if (!ok && (st.compUp || upL.length)) skippedUp = true;
+            skipped.push(`${sp.label}（${sec}秒）: ${why}`); redraw();
+          }
           // 🚨が0件になったら、残りのマスの上限の案は計算しない（「全部直す」だけは計算する）
           if (st.a.must === 0 && st.a.comp === 0 && ok) reached0 = true;
         }
