@@ -5,7 +5,9 @@
    =========================================== */
 // settingsPatch: 試し計算のときだけ設定を変えて解く（AppState.settings は書き換えない）。
 // 書き換えてから戻す方式だと、計算中に自動保存が走ると変えた値が保存されてしまう。
-function _milpPayload(settingsPatch) {
+// requestsPatch: 試し計算で希望だけを変えて解く（[{ id, day, to }]、to が '' なら希望を消す）。
+// 本物の AppState.requests は書き換えない。
+function _milpPayload(settingsPatch, requestsPatch) {
   let settings = AppState.settings;
   if (settingsPatch) {
     settings = Object.assign({}, AppState.settings, settingsPatch);
@@ -22,7 +24,10 @@ function _milpPayload(settingsPatch) {
     dailySkills:           AppState.dailySkills,
     shifts:                AppState.shifts,   // 微調整のとき、いまの表を出発点にする
     staff:                 AppState.staff,
-    requests:              AppState.requests,
+    requests:              requestsPatch && requestsPatch.length ? (() => {
+                             const r = JSON.parse(JSON.stringify(AppState.requests || {}));
+                             requestsPatch.forEach(c => { r[c.id] = r[c.id] || {}; if (c.to) r[c.id][c.day] = c.to; else delete r[c.id][c.day]; });
+                             return r; })() : AppState.requests,
     fixedShifts:           AppState.fixedShifts,
     specialDays:           AppState.specialDays,
     events:                AppState.events,
@@ -243,7 +248,7 @@ function _milpOnce(onProgress, opts, variant) {
     };
     worker.onerror = (err) => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化Workerエラー: ' + (err.message || 'ソルバーの読込みに失敗しました'))); };
     // timeOverride: 候補をいくつも組み直して比べるときに、1回あたりの時間を短くする
-    worker.postMessage({ type: 'milp', appState: _milpPayload(opts && opts.settingsPatch), deepMode, fastMode, adjustMode, adjustK,
+    worker.postMessage({ type: 'milp', appState: _milpPayload(opts && opts.settingsPatch, opts && opts.requestsPatch), deepMode, fastMode, adjustMode, adjustK,
                          timeOverride: (opts && parseInt(opts.timeOverride)) || 0,
                          variant: parseInt(variant) || 0 });
   });

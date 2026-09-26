@@ -202,6 +202,141 @@ function setupHeaderActions() {
   });
 }
 
+// ===== 3-1② 希望の変え方を、計算で確かめて出す =====
+// 試しに作った表に残る🚨のうち、希望から来ているもの（連勤超過・6連勤以上・遅→早）について、
+// 希望を変える案を作り、1つずつ試しに作り直して、その🚨が消え、ほかの🚨が増えない案だけを出す。
+// 変えるのはシフトの種類の希望と休みの希望だけ（半休・有給・🔒固定は動かさない）。
+// 試し計算なので、本物の表・希望・保存データは書き換えない（requestsPatch）。
+const WISH_MUST_TYPES = ['consecutive', 'late-early'];
+function wishFixCandidates(vs, margins) {
+  const req = (id, d) => (AppState.requests[id] || {})[d] || '';
+  const fixed = (id, d) => !!(AppState.fixedShifts[id] || {})[d];
+  const movableWork = (v) => v && isWork(v) && v !== '半' && v !== '有';
+  const nameOf = (id) => ((AppState.staff || []).find(x => x.id === id) || {}).name || '';
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const mDay = {};
+  (margins || []).forEach(g => g.days.forEach(r => { mDay[r.day] = Math.min(mDay[r.day] == null ? 99 : mDay[r.day], r.total.margin); }));
+  const out = [];
+  vs.forEach(v => {
+    if (!v || WISH_MUST_TYPES.indexOf(v.type) < 0) return;
+    if (!(getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type))) return;
+    const P = v.staffId;
+    const range = v.type === 'consecutive' ? [Math.max(1, v.from), v.to] : [Math.max(1, v.day - 1), v.day];
+    const cands = [];
+    // ㋐ 本人の出勤の希望を休みにする（真ん中に近い日から）
+    const mid = (range[0] + range[1]) / 2;
+    const own = [];
+    for (let d = range[0]; d <= range[1]; d++) if (movableWork(req(P, d)) && !fixed(P, d)) own.push(d);
+    own.sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid)).forEach(d =>
+      cands.push({ changes: [{ id: P, day: d, from: req(P, d), to: '休' }],
+                   text: `${nameOf(P)}さん ${d}日「${req(P, d)}」→「休」` }));
+    // ㋑ 余裕0の日に休みの希望を出している人の休みを、前後の余裕のある日へ1日ずらす
+    //    （その日に出られる人が1人増え、本人が休めるようになる）
+    for (let d = range[0]; d <= range[1]; d++) {
+      if (mDay[d] == null || mDay[d] > 0) continue;
+      (AppState.staff || []).forEach(q => {
+        if (q.id === P || req(q.id, d) !== '休' || fixed(q.id, d)) return;
+        for (const dd of [d - 1, d + 1, d - 2, d + 2]) {
+          if (dd < 1 || dd > days || req(q.id, dd) || fixed(q.id, dd) || (mDay[dd] != null && mDay[dd] < 1)) continue;
+          if (dd >= range[0] && dd <= range[1]) continue;
+          cands.push({ changes: [{ id: q.id, day: d, from: '休', to: '' }, { id: q.id, day: dd, from: '', to: '休' }],
+                       text: `${nameOf(q.id)}さんの休みの希望を ${d}日 → ${dd}日 にずらす` });
+          break;
+        }
+      });
+    }
+    if (cands.length) out.push({ v, staffId: P, range, label: `${nameOf(P)}さん ${range[0]}〜${range[1]}日の${
+      v.type === 'late-early' ? '遅→早' : v.compliance ? '⛔' + v.len + '連勤' : v.len + '連勤'}`, cands: cands.slice(0, 3) });
+  });
+  return out;
+}
+// 試しに作った表で、その🚨（同じ人・同じ種類・日が重なる）がまだあるか
+function _wishTargetStill(vs, t) {
+  return vs.some(v => v.type === t.v.type && v.staffId === t.staffId &&
+    (v.type === 'consecutive' ? (v.from <= t.range[1] && t.range[0] <= v.to) : (v.day >= t.range[0] && v.day <= t.range[1])));
+}
+function renderWishFixBox(modal) {
+  const box = modal.querySelector('#wishFixBox');
+  if (!box) return;
+  box.innerHTML = `<div style="padding:12px 14px;border-radius:10px;margin:0 0 14px;border:1px solid var(--border)">
+      <b style="font-size:14px">🧪 希望の変え方を、計算で確かめる</b>
+      <div class="hint" style="margin:2px 0 8px">いまの希望で試しに作り、残る🚨（連勤超過・6連勤以上・遅→早）ごとに、希望を変える案を
+        1つずつ試しに作り直します。その🚨が消え、ほかの🚨が増えない案だけを出します。変えるのはシフトの種類の希望と休みの希望だけ
+        （半休・有給・🔒固定は動かしません）。表・希望は、「この案にする」を押すまで変わりません。1つの案に約1分かかります。</div>
+      <button class="btn" id="wfGo">計算で確かめる</button> <button class="btn" id="wfStop" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button>
+      <div id="wfOut" style="margin-top:8px;font-size:13px;line-height:1.7"></div></div>`;
+  const $out = box.querySelector('#wfOut'), $go = box.querySelector('#wfGo'), $stop = box.querySelector('#wfStop');
+  let stopped = false;
+  $stop.addEventListener('click', () => { stopped = true; if (typeof cancelMILP === 'function') cancelMILP(); });
+  $go.addEventListener('click', async () => {
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+    if (!calcBegin('希望の変え方を確かめる')) return;
+    stopped = false; $go.disabled = true; $stop.style.display = 'inline-block';
+    const fp0 = (typeof contentFingerprint === 'function') ? contentFingerprint() : '';
+    const lines = [];
+    const show = (extra) => { $out.innerHTML = lines.join('') + (extra || ''); };
+    const trial = async (patch) => {
+      const t0 = Date.now();
+      const r = await optimizeScheduleMILP(null, { fastMode: true, noApply: true, requestsPatch: patch || null });
+      return { r, sc: scoreViolations(r.violations || []), sec: Math.round((Date.now() - t0) / 1000) };
+    };
+    try {
+      show('<span class="hint">⏳ いまの希望で試しに作っています…（約1分）</span>');
+      const base = await trial(null);
+      const targets = wishFixCandidates(base.r.violations || [], (typeof analyzeDayMargins === 'function') ? analyzeDayMargins() : []);
+      lines.push(`<div>いまの希望で作ると: <b>${escapeHtml(scoreSummary(base.sc))}</b>（${base.sec}秒）</div>`);
+      if (!targets.length) {
+        const n = (base.r.violations || []).filter(v => WISH_MUST_TYPES.indexOf(v.type) >= 0 &&
+          (getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type))).length;
+        lines.push(`<div class="hint">${n ? `連勤超過・遅→早が ${n}件ありますが、本人の出勤の希望や、余裕0人の日の休みの希望から来ていないため、
+          希望を変える案はありません（作るたびに少し違う表になるので、生成すると消えることもあります）。`
+          : '希望から来ている🚨（連勤超過・6連勤以上・遅→早）は見つかりませんでした。'}</div>`);
+        show(); return;
+      }
+      for (const t of targets) {
+        if (stopped) break;
+        lines.push(`<div style="margin-top:6px"><b>🚨 ${escapeHtml(t.label)}</b></div>`);
+        let any = false;
+        for (const c of t.cands) {
+          if (stopped) break;
+          show(`<div class="hint" style="margin-left:1em">⏳ 「${escapeHtml(c.text)}」を試しています…</div>`);
+          let res;
+          try { res = await trial(c.changes.map(x => ({ id: x.id, day: x.day, to: x.to }))); }
+          catch (e) { if (stopped || /^cancel/.test(e.message || '')) break; continue; }
+          const gone = !_wishTargetStill(res.r.violations || [], t);
+          const ok = gone && !scoreWorsened(res.sc, base.sc).some(x => x.key !== 'soft') && !compWorsened(base.r.violations || [], res.r.violations || []).length;
+          const idx = lines.length;
+          lines.push(ok
+            ? `<div style="margin-left:1em">✅ ${escapeHtml(c.text)} → <b>${escapeHtml(scoreSummary(res.sc))}</b>（${res.sec}秒）
+                 <button class="btn" data-wf="${idx}" style="padding:1px 10px">この案にする</button></div>`
+            : `<div class="hint" style="margin-left:1em">✖ ${escapeHtml(c.text)} → ${escapeHtml(scoreSummary(res.sc))}（${gone ? 'ほかの🚨が増えるため出しません' : 'この🚨が消えないため出しません'}・${res.sec}秒）</div>`);
+          if (ok) { any = true; wfApply[idx] = c; }
+        }
+        if (!any && !stopped) lines.push('<div class="hint" style="margin-left:1em">変えてよい希望だけでは、この🚨を消せませんでした。</div>');
+      }
+      if (stopped) lines.push('<div class="hint">中止しました。出ている案から選べます。</div>');
+      show();
+    } catch (e) {
+      lines.push(`<div class="hint">${/^cancel/.test(e.message || '') ? '中止しました。' : '計算に失敗しました: ' + escapeHtml(e.message || '')}</div>`); show();
+    } finally {
+      calcEnd(); $go.disabled = false; $stop.style.display = 'none';
+      $out.querySelectorAll('[data-wf]').forEach(b => b.addEventListener('click', () => {
+        const c = wfApply[+b.dataset.wf]; if (!c) return;
+        if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+        if (fp0 && typeof contentFingerprint === 'function' && contentFingerprint() !== fp0) {
+          toast('希望や表が変わったため、この案は使えません。もう一度「計算で確かめる」を押してください', 'error', 6000); return;
+        }
+        c.changes.forEach(x => { AppState.requests[x.id] = AppState.requests[x.id] || {};
+          if (x.to) AppState.requests[x.id][x.day] = x.to; else delete AppState.requests[x.id][x.day]; });
+        autoSave(); if (typeof renderCalendar === 'function') renderCalendar();
+        toast('希望を変えました: ' + c.text, 'success', 6000);
+        b.disabled = true; b.textContent = '変えました';
+      }));
+    }
+  });
+  const wfApply = {};
+}
+
 // 日ごとの人数の余裕（出られる人数 − 必要人数）。余裕0の日は、出られる人が全員出勤になる。
 // 余裕が少ない日を先に文で出し、全部の日は表（開いて見る）で出す。
 function renderDayMarginsHtml() {
@@ -329,6 +464,7 @@ function showFeasibilityModal() {
     </p>
     ${verdict}
     ${renderDayMarginsHtml()}
+    <div id="wishFixBox"></div>
     ${notes}
     <div id="fixPlanBox"></div>
     ${body}
@@ -336,6 +472,7 @@ function showFeasibilityModal() {
   </div>`;
   document.body.appendChild(modal);
   renderFixPlans(modal);   // 「誰の何日をどう入れ替えるか」をこの画面にも出す
+  renderWishFixBox(modal); // 希望の変え方を計算で確かめる（3-1②）
   const close = () => modal.remove();
   modal.querySelector('#feasClose').addEventListener('click', close);
   modal.addEventListener('click', e => { if (e.target === modal) close(); });
