@@ -502,6 +502,8 @@ function saveToStorage() {
       events:               AppState.events,
       violations:           AppState.violations,
       generated:            AppState.generated,
+      genBase:              AppState.genBase || null,   // 生成した直後の表の控え
+      editLog:              AppState.editLog || [],     // 生成のあとに変えたマスの記録
       _staffIdCounter,
       savedAt: new Date().toISOString(),
     }));
@@ -619,6 +621,8 @@ function loadFromStorage() {
     if (AppState.generated && typeof checkViolations === 'function') {
       try { AppState.violations = checkViolations(AppState.shifts); } catch (e) { AppState.violations = []; }
     }
+    AppState.genBase = data.genBase || null;
+    AppState.editLog = Array.isArray(data.editLog) ? data.editLog : [];
     _staffIdCounter = data._staffIdCounter || (AppState.staff.length + 1);
     return true;
   } catch (e) {
@@ -636,6 +640,8 @@ function resetAll() {
   AppState.events       = [];
   AppState.violations   = [];
   AppState.generated    = false;
+  AppState.genBase      = null;
+  AppState.editLog      = [];
   AppState.shiftTypes   = getDefaultShiftTypes();
   AppState.roleRequirements = {
     '早責': 1, '遅責': 1, '早総務': 1, '遅総務': 1, '早': 2, '遅': 2,

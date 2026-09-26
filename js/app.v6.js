@@ -83,6 +83,7 @@ function exportAppData() {
       skills: AppState.skills, dailySkills: AppState.dailySkills,
       staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
       specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
+      genBase: AppState.genBase || null, editLog: AppState.editLog || [],   // 生成直後の表と、変えたマスの記録
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -113,6 +114,7 @@ async function exportAppDataSure() {
         skills: AppState.skills, dailySkills: AppState.dailySkills,
         staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
         specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
+        genBase: AppState.genBase || null, editLog: AppState.editLog || [],
       };
       const h = await window.showSaveFilePicker({ suggestedName: `シフト設定_${month}.json`,
         types: [{ description: 'シフト設定', accept: { 'application/json': ['.json'] } }] });
@@ -173,6 +175,9 @@ function setupHeaderActions() {
           ['settings','shiftTypes','roleRequirements','roleRequirementsCast','dailyRequirements',
            'dailyRequirementsCast','skills','dailySkills','staff','requests','fixedShifts',
            'specialDays','events','shifts'].forEach(k => { if (d[k] !== undefined) AppState[k] = d[k]; });
+          // 生成直後の控えと変えたマスの記録（入っていないファイルなら空にする）
+          AppState.genBase = d.genBase || null;
+          AppState.editLog = Array.isArray(d.editLog) ? d.editLog : [];
           AppState.generated = !!(d.shifts && Object.keys(d.shifts).length);
           AppState.violations = AppState.generated ? checkViolations(AppState.shifts) : [];
           if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 取り込む前の表には戻さない
@@ -195,6 +200,187 @@ function setupHeaderActions() {
       toast('リセットしました', 'info');
     }
   });
+}
+
+// ===== 3-1② 希望の変え方を、計算で確かめて出す =====
+// 試しに作った表に残る🚨のうち、希望から来ているもの（連勤超過・6連勤以上・遅→早）について、
+// 希望を変える案を作り、1つずつ試しに作り直して、その🚨が消え、ほかの🚨が増えない案だけを出す。
+// 変えるのはシフトの種類の希望と休みの希望だけ（半休・有給・🔒固定は動かさない）。
+// 試し計算なので、本物の表・希望・保存データは書き換えない（requestsPatch）。
+const WISH_MUST_TYPES = ['consecutive', 'late-early'];
+function wishFixCandidates(vs, margins) {
+  const req = (id, d) => (AppState.requests[id] || {})[d] || '';
+  const fixed = (id, d) => !!(AppState.fixedShifts[id] || {})[d];
+  const movableWork = (v) => v && isWork(v) && v !== '半' && v !== '有';
+  const nameOf = (id) => ((AppState.staff || []).find(x => x.id === id) || {}).name || '';
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const mDay = {};
+  (margins || []).forEach(g => g.days.forEach(r => { mDay[r.day] = Math.min(mDay[r.day] == null ? 99 : mDay[r.day], r.total.margin); }));
+  const out = [];
+  vs.forEach(v => {
+    if (!v || WISH_MUST_TYPES.indexOf(v.type) < 0) return;
+    if (!(getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type))) return;
+    const P = v.staffId;
+    const range = v.type === 'consecutive' ? [Math.max(1, v.from), v.to] : [Math.max(1, v.day - 1), v.day];
+    const cands = [];
+    // ㋐ 本人の出勤の希望を休みにする（真ん中に近い日から）
+    const mid = (range[0] + range[1]) / 2;
+    const own = [];
+    for (let d = range[0]; d <= range[1]; d++) if (movableWork(req(P, d)) && !fixed(P, d)) own.push(d);
+    own.sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid)).forEach(d =>
+      cands.push({ changes: [{ id: P, day: d, from: req(P, d), to: '休' }],
+                   text: `${nameOf(P)}さん ${d}日「${req(P, d)}」→「休」` }));
+    // ㋑ 余裕0の日に休みの希望を出している人の休みを、前後の余裕のある日へ1日ずらす
+    //    （その日に出られる人が1人増え、本人が休めるようになる）
+    for (let d = range[0]; d <= range[1]; d++) {
+      if (mDay[d] == null || mDay[d] > 0) continue;
+      (AppState.staff || []).forEach(q => {
+        if (q.id === P || req(q.id, d) !== '休' || fixed(q.id, d)) return;
+        for (const dd of [d - 1, d + 1, d - 2, d + 2]) {
+          if (dd < 1 || dd > days || req(q.id, dd) || fixed(q.id, dd) || (mDay[dd] != null && mDay[dd] < 1)) continue;
+          if (dd >= range[0] && dd <= range[1]) continue;
+          cands.push({ changes: [{ id: q.id, day: d, from: '休', to: '' }, { id: q.id, day: dd, from: '', to: '休' }],
+                       text: `${nameOf(q.id)}さんの休みの希望を ${d}日 → ${dd}日 にずらす` });
+          break;
+        }
+      });
+    }
+    if (cands.length) out.push({ v, staffId: P, range, label: `${nameOf(P)}さん ${range[0]}〜${range[1]}日の${
+      v.type === 'late-early' ? '遅→早' : v.compliance ? '⛔' + v.len + '連勤' : v.len + '連勤'}`, cands: cands.slice(0, 3) });
+  });
+  return out;
+}
+// 試しに作った表で、その🚨（同じ人・同じ種類・日が重なる）がまだあるか
+function _wishTargetStill(vs, t) {
+  return vs.some(v => v.type === t.v.type && v.staffId === t.staffId &&
+    (v.type === 'consecutive' ? (v.from <= t.range[1] && t.range[0] <= v.to) : (v.day >= t.range[0] && v.day <= t.range[1])));
+}
+function renderWishFixBox(modal) {
+  const box = modal.querySelector('#wishFixBox');
+  if (!box) return;
+  box.innerHTML = `<div style="padding:12px 14px;border-radius:10px;margin:0 0 14px;border:1px solid var(--border)">
+      <b style="font-size:14px">🧪 希望の変え方を、計算で確かめる</b>
+      <div class="hint" style="margin:2px 0 8px">いまの希望で試しに作り、残る🚨（連勤超過・6連勤以上・遅→早）ごとに、希望を変える案を
+        1つずつ試しに作り直します。その🚨が消え、ほかの🚨が増えない案だけを出します。変えるのはシフトの種類の希望と休みの希望だけ
+        （半休・有給・🔒固定は動かしません）。表・希望は、「この案にする」を押すまで変わりません。1つの案に約1分かかります。</div>
+      <button class="btn" id="wfGo">計算で確かめる</button> <button class="btn" id="wfStop" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button>
+      <div id="wfOut" style="margin-top:8px;font-size:13px;line-height:1.7"></div></div>`;
+  const $out = box.querySelector('#wfOut'), $go = box.querySelector('#wfGo'), $stop = box.querySelector('#wfStop');
+  let stopped = false;
+  $stop.addEventListener('click', () => { stopped = true; if (typeof cancelMILP === 'function') cancelMILP(); });
+  $go.addEventListener('click', async () => {
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+    if (!calcBegin('希望の変え方を確かめる')) return;
+    stopped = false; $go.disabled = true; $stop.style.display = 'inline-block';
+    const fp0 = (typeof contentFingerprint === 'function') ? contentFingerprint() : '';
+    const lines = [];
+    const show = (extra) => { $out.innerHTML = lines.join('') + (extra || ''); };
+    const trial = async (patch) => {
+      const t0 = Date.now();
+      const r = await optimizeScheduleMILP(null, { fastMode: true, noApply: true, requestsPatch: patch || null });
+      return { r, sc: scoreViolations(r.violations || []), sec: Math.round((Date.now() - t0) / 1000) };
+    };
+    try {
+      show('<span class="hint">⏳ いまの希望で試しに作っています…（約1分）</span>');
+      const base = await trial(null);
+      const targets = wishFixCandidates(base.r.violations || [], (typeof analyzeDayMargins === 'function') ? analyzeDayMargins() : []);
+      lines.push(`<div>いまの希望で作ると: <b>${escapeHtml(scoreSummary(base.sc))}</b>（${base.sec}秒）</div>`);
+      if (!targets.length) {
+        const n = (base.r.violations || []).filter(v => WISH_MUST_TYPES.indexOf(v.type) >= 0 &&
+          (getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type))).length;
+        lines.push(`<div class="hint">${n ? `連勤超過・遅→早が ${n}件ありますが、本人の出勤の希望や、余裕0人の日の休みの希望から来ていないため、
+          希望を変える案はありません（作るたびに少し違う表になるので、生成すると消えることもあります）。`
+          : '希望から来ている🚨（連勤超過・6連勤以上・遅→早）は見つかりませんでした。'}</div>`);
+        show(); return;
+      }
+      for (const t of targets) {
+        if (stopped) break;
+        lines.push(`<div style="margin-top:6px"><b>🚨 ${escapeHtml(t.label)}</b></div>`);
+        let any = false;
+        for (const c of t.cands) {
+          if (stopped) break;
+          show(`<div class="hint" style="margin-left:1em">⏳ 「${escapeHtml(c.text)}」を試しています…</div>`);
+          let res;
+          try { res = await trial(c.changes.map(x => ({ id: x.id, day: x.day, to: x.to }))); }
+          catch (e) { if (stopped || /^cancel/.test(e.message || '')) break; continue; }
+          const gone = !_wishTargetStill(res.r.violations || [], t);
+          const ok = gone && !scoreWorsened(res.sc, base.sc).some(x => x.key !== 'soft') && !compWorsened(base.r.violations || [], res.r.violations || []).length;
+          const idx = lines.length;
+          lines.push(ok
+            ? `<div style="margin-left:1em">✅ ${escapeHtml(c.text)} → <b>${escapeHtml(scoreSummary(res.sc))}</b>（${res.sec}秒）
+                 <button class="btn" data-wf="${idx}" style="padding:1px 10px">この案にする</button></div>`
+            : `<div class="hint" style="margin-left:1em">✖ ${escapeHtml(c.text)} → ${escapeHtml(scoreSummary(res.sc))}（${gone ? 'ほかの🚨が増えるため出しません' : 'この🚨が消えないため出しません'}・${res.sec}秒）</div>`);
+          if (ok) { any = true; wfApply[idx] = c; }
+        }
+        if (!any && !stopped) lines.push('<div class="hint" style="margin-left:1em">変えてよい希望だけでは、この🚨を消せませんでした。</div>');
+      }
+      if (stopped) lines.push('<div class="hint">中止しました。出ている案から選べます。</div>');
+      show();
+    } catch (e) {
+      lines.push(`<div class="hint">${/^cancel/.test(e.message || '') ? '中止しました。' : '計算に失敗しました: ' + escapeHtml(e.message || '')}</div>`); show();
+    } finally {
+      calcEnd(); $go.disabled = false; $stop.style.display = 'none';
+      $out.querySelectorAll('[data-wf]').forEach(b => b.addEventListener('click', () => {
+        const c = wfApply[+b.dataset.wf]; if (!c) return;
+        if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+        if (fp0 && typeof contentFingerprint === 'function' && contentFingerprint() !== fp0) {
+          toast('希望や表が変わったため、この案は使えません。もう一度「計算で確かめる」を押してください', 'error', 6000); return;
+        }
+        c.changes.forEach(x => { AppState.requests[x.id] = AppState.requests[x.id] || {};
+          if (x.to) AppState.requests[x.id][x.day] = x.to; else delete AppState.requests[x.id][x.day]; });
+        autoSave(); if (typeof renderCalendar === 'function') renderCalendar();
+        toast('希望を変えました: ' + c.text, 'success', 6000);
+        b.disabled = true; b.textContent = '変えました';
+      }));
+    }
+  });
+  const wfApply = {};
+}
+
+// 日ごとの人数の余裕（出られる人数 − 必要人数）。余裕0の日は、出られる人が全員出勤になる。
+// 余裕が少ない日を先に文で出し、全部の日は表（開いて見る）で出す。
+function renderDayMarginsHtml() {
+  const groups = (typeof analyzeDayMargins === 'function') ? analyzeDayMargins() : [];
+  if (!groups.length) return '';
+  const nm = (id) => ((AppState.staff || []).find(x => x.id === id) || {}).name || '';
+  const bandL = { early: '早番', late: '遅番' };
+  const multi = groups.length > 1;
+  const cell = (c) => {
+    const bg = c.margin < 0 ? 'color-mix(in srgb, var(--danger) 22%, var(--surface))'
+             : c.margin === 0 ? 'color-mix(in srgb, #d69e2e 24%, var(--surface))' : '';
+    return `<td style="text-align:center;padding:2px 10px;border:1px solid var(--border);${bg ? 'background:' + bg : ''}" title="出られる ${c.avail}人 ／ 必要 ${c.need}人">${c.margin > 0 ? '+' : ''}${c.margin}</td>`;
+  };
+  const html = groups.map(g => {
+    const skNames = [];
+    g.days.forEach(r => r.skills.forEach(k => { const key = k.name + '|' + k.band; if (!skNames.includes(key)) skNames.push(key); }));
+    const lines = [];
+    g.days.forEach(r => {
+      const parts = [['全体', r.total], ['早番帯', r.early], ['遅番帯', r.late]]
+        .concat(r.skills.map(k => [`${bandL[k.band]}で「${k.name}」ができる人`, k]));
+      parts.forEach(([lab, c]) => {
+        if (c.margin > 0 || !(c.need > 0)) return;
+        const who = c.ids.map(nm).filter(Boolean).join('・');
+        const extra = c.min != null && c.avail < c.min ? `（最低 ${c.min}人 に届かないため、必ずエラー）` : '';
+        lines.push(c.margin < 0
+          ? `🚨 ${r.day}日 ${lab}: 出られる ${c.avail}人 ／ 必要 ${c.need}人（${-c.margin}人 足りません）${extra}`
+          : `⚠️ ${r.day}日 ${lab}: 出られる ${c.avail}人 ／ 必要 ${c.need}人（余裕0人）→ ${who} は必ず出勤になります`);
+      });
+    });
+    const th = (t) => `<th style="padding:2px 8px;border:1px solid var(--border);position:sticky;top:0;background:var(--surface)">${t}</th>`;
+    const head = `<tr>${th('日')}${th('全体')}${th('早番帯')}${th('遅番帯')}${skNames.map(k => { const [n, b] = k.split('|'); return th(`${escapeHtml(n)}（${bandL[b]}）`); }).join('')}</tr>`;
+    const body = g.days.map(r => `<tr><td style="padding:2px 8px;border:1px solid var(--border)">${r.day}日</td>${cell(r.total)}${cell(r.early)}${cell(r.late)}${skNames.map(k => {
+      const c = r.skills.find(x => x.name + '|' + x.band === k); return c ? cell(c) : '<td></td>'; }).join('')}</tr>`).join('');
+    return `${multi ? `<div style="font-weight:600;margin-top:6px">【${escapeHtml(g.label)}】</div>` : ''}
+      <div style="font-size:13px;line-height:1.8">${lines.length ? lines.map(escapeHtml).join('<br>') : '余裕が0人以下の日はありません。'}</div>
+      <details style="margin-top:6px"><summary class="hint" style="cursor:pointer">すべての日の余裕を表で見る</summary>
+        <div style="overflow-x:auto;max-height:40vh;overflow-y:auto;margin-top:6px"><table class="day-margin-table" style="border-collapse:collapse;font-size:12px;width:auto"><thead>${head}</thead><tbody>${body}</tbody></table></div>
+      </details>`;
+  }).join('');
+  return `<div style="padding:12px 14px;border-radius:10px;margin:0 0 14px;border:1px solid var(--border);background:var(--surface-2, var(--surface))">
+      <b style="font-size:14px">📅 日ごとの人数の余裕（出られる人数 − 必要人数）</b>
+      <div class="hint" style="margin:2px 0 6px">休み・有給・半休の希望、休みの🔒固定の日は「出られない」に数えています。余裕0人の日は、出られる人が全員出勤になり、その前後の連勤などが決まってしまいます。早番帯・遅番帯は、その時間帯に入れる人の数です（両方できる人は両方に数えます）。スキルは、その時間帯に入れる保有者の人数 − 目標人数です。</div>
+      ${html}
+    </div>`;
 }
 
 // 実現性チェック（生成前）: 各エラーが「避けられる/避けられない」かを判定して表示
@@ -277,6 +463,8 @@ function showFeasibilityModal() {
       これらのエラーは出ることがあります。その下は参考情報です。
     </p>
     ${verdict}
+    ${renderDayMarginsHtml()}
+    <div id="wishFixBox"></div>
     ${notes}
     <div id="fixPlanBox"></div>
     ${body}
@@ -284,6 +472,7 @@ function showFeasibilityModal() {
   </div>`;
   document.body.appendChild(modal);
   renderFixPlans(modal);   // 「誰の何日をどう入れ替えるか」をこの画面にも出す
+  renderWishFixBox(modal); // 希望の変え方を計算で確かめる（3-1②）
   const close = () => modal.remove();
   modal.querySelector('#feasClose').addEventListener('click', close);
   modal.addEventListener('click', e => { if (e.target === modal) close(); });
@@ -440,6 +629,9 @@ function setupGeneratePanel() {
                                          : cutOff ? '｜⏱ 時間内でいちばん良い答え（最良とは確認できていません）'
                                                   : '｜✅ これ以上良い組み合わせは無いと確認済み');
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
+      // 生成した直後の表を控える（途中から作り直したときも撮り直す）。
+      // このあと手などで変えたマスを「生成から変えたマス」として数える。
+      if (typeof genBaseTake === 'function') genBaseTake();
       $report.style.display = 'block';
       try {
         renderReport({ success: res.success, score: res.score, violations: res.violations,
@@ -904,11 +1096,13 @@ function renderFixPlans(root) {
         if (!p) return;
         if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
         if (typeof recordShiftHistory === 'function') recordShiftHistory();
+        const beforeFix = JSON.parse(JSON.stringify(AppState.shifts));
         p.steps.forEach(m => {
           const t = AppState.shifts[m.aId][m.day];
           AppState.shifts[m.aId][m.day] = AppState.shifts[m.bId][m.day];
           AppState.shifts[m.bId][m.day] = t;
         });
+        if (typeof noteEdits === 'function') noteEdits('修正案', beforeFix);
         AppState.violations = checkViolations(AppState.shifts);
         if (typeof autoSave === 'function') autoSave();
         if (typeof refreshAllUI === 'function') refreshAllUI();
@@ -997,69 +1191,133 @@ function setupResultPanel() {
       }
 
       if (!calcBegin('エラーの自動修正')) return;
-      // 修復前の状態を履歴に積む → 気に入らなければ Ctrl+Z で戻せる
-      if (typeof recordShiftHistory === 'function') recordShiftHistory();
-
-      // シフト表タブ内の進捗バーを使う（⑤自動生成のバーは別タブで見えないため）
-      const $area = document.getElementById('repairProgress');
-      const $bar  = document.getElementById('repairBar');
-      const $text = document.getElementById('repairText');
-      const orig  = btnRepair.textContent;
-      btnRepair.disabled = true;
-      btnRepair.textContent = '⏳ 修復中...';
-      // 自動修正は証明ありで解くので最大10分かかる。計算中はほかの計算を始められないので、
-      // その場で止められるようにする（止めたら表は元のまま）。
-      const $stop = document.getElementById('btnCancelRepair');
-      if ($stop) { $stop.style.display = 'inline-block'; $stop.onclick = () => { if (typeof cancelMILP === 'function') cancelMILP(); }; }
-      if ($area) $area.style.display = 'block';
-      if ($bar)  $bar.style.width = '0%';
-      if ($text) $text.textContent = 'エラー箇所を修復中...';
-
-      const before = AppState.violations.length;
-      const beforeSc = scoreViolations(AppState.violations);
-      const backup = JSON.parse(JSON.stringify(AppState.shifts));
-      try {
-        if (typeof optimizeScheduleMILP !== 'function') throw new Error('数理最適化モジュール未読込（再読込してください）');
-        // 🔒で固定したセルは保持し、それ以外を数理最適化で最適化し直す（悪化しない保証つき）
-        const res = await optimizeScheduleMILP((pct, msg) => {
-          if ($bar)  $bar.style.width = pct + '%';
-          if ($text) $text.textContent = '数理最適化で修復中: ' + msg;
-        }, { improveOver: beforeSc });
-        const after = res.violations.length;
-        const afterSc = scoreViolations(res.violations);
-        // 基本の判定（scoreBetter: どの🚨も増えず、どれかが減る）で採否を決める。
-        // 件数だけだと、🚨が増えても合計が減れば「修復した」と採用してしまっていた。
-        if (scoreBetter(afterSc, beforeSc)) {
-          const words = _diffWords(_scoreDiff(beforeSc, afterSc));
-          if ($bar) $bar.style.width = '100%';
-          renderResultTable();
-          document.getElementById('reportCard').style.display = 'block';
-          renderReport({ success: res.success, score: after, violations: res.violations });
-          if ($text) $text.textContent = `修復完了: ${scoreSummary(beforeSc)} → ${scoreSummary(afterSc)}`;
-          toast(`✅ 数理最適化で${words}（🔒は保持）`, 'success', 6000);
-        } else {
-          // 改善なし → 完全に元へ戻す（悪化させない）
-          AppState.shifts = backup; AppState.violations = checkViolations(backup);
-          if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-          renderResultTable();
-          if ($text) $text.textContent = `これ以上は改善できませんでした（${scoreSummary(beforeSc)}）`;
-          toast('これ以上は数理最適化でも減らせませんでした。関係する🔒を解除すると改善する場合があります', 'info', 6000);
+      // 答えの案を、早く出せるもの（変えるマスが少ないもの）から順に計算して並べ、利用者が選んで反映する。
+      // 計算はすべて試し計算（noApply）で、選ぶまで本物の表と保存データは書き換えない。
+      // 以前は、ひと月を一から解き直した答えをそのまま反映していたため、🚨3件を直すのに
+      // 131マスが変わり、早番と遅番の行き来が 9→16 に増えることがあった。
+      const baseShifts = JSON.parse(JSON.stringify(AppState.shifts));
+      const fp0 = (typeof contentFingerprint === 'function') ? contentFingerprint() : '';
+      const beforeV = AppState.violations.slice();
+      const beforeSc = scoreViolations(beforeV);
+      const SPECS = [
+        { label: '少しだけ直す（10マスまで）', k: 10 },
+        { label: 'ほどほどに直す（25マスまで）', k: 25 },
+        { label: 'しっかり直す（50マスまで）', k: 50 },
+        { label: '全部直す（表を作り直す・行き来が減ることが多い・最大10分）', k: 0 },
+      ];
+      const cands = [], skipped = [];
+      let skippedUp = false;   // 何かが増えるために外した案があるか（🔒の解除をすすめない）
+      let stopped = false, running = true;
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay show';
+      modal.style.zIndex = 10050;
+      modal.innerHTML = `<div class="modal-content" style="max-width:980px;width:calc(100vw - 32px)">
+          <div class="modal-header"><h3 style="margin:0">🛠 自動修正の案（${escapeHtml(scoreSummary(beforeSc))}）</h3><button class="modal-close" id="rcClose">✕</button></div>
+          <div class="modal-body">
+            <div class="hint" style="margin-bottom:8px">変えるマスが少ない案から順に計算して並べます。どれも、選ぶまで表は変わりません。
+              🚨がどの種類も増えない案だけを出します。変えるマスは、休み↔余の書き替えを除いた数です。</div>
+            <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:13px"><thead>${candHead()}</thead><tbody id="rcRows"></tbody></table></div>
+            <div id="rcStatus" style="margin-top:8px"></div>
+            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn" id="rcStop" style="background:#e74c3c;color:#fff">⏹ 中止（出ている案は選べます）</button>
+              <button class="btn" id="rcCancel">反映しないで閉じる</button>
+            </div>
+          </div></div>`;
+      document.body.appendChild(modal);
+      const $rows = modal.querySelector('#rcRows'), $st = modal.querySelector('#rcStatus');
+      const stop = () => { if (!running) return; stopped = true; if (typeof cancelMILP === 'function') cancelMILP(); };
+      const close = () => { stop(); modal.remove(); };
+      modal.querySelector('#rcStop').addEventListener('click', stop);
+      modal.querySelector('#rcCancel').addEventListener('click', close);
+      modal.querySelector('#rcClose').addEventListener('click', close);
+      const redraw = () => {
+        $rows.innerHTML = cands.map((c, i) => candRowHtml(c.label, c.st, c.sec,
+          `<button class="btn btn-primary" data-rcgo="${i}" ${running ? 'disabled title="計算中です。⏹ 中止するか、終わるのを待ってから選んでください"' : ''}>反映</button>`)).join('')
+          || (running ? '' : `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">🚨を減らせる案は見つかりませんでした。${
+                skippedUp ? '下の理由のとおり、どの案も何かが増えるため出していません。' : '関係する🔒を解除すると直せる場合があります。'}</td></tr>`);
+        $rows.innerHTML += skipped.map(t => `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:4px 8px;border-top:1px dashed var(--border)">${escapeHtml(t)}</td></tr>`).join('');
+        $rows.querySelectorAll('[data-rcgo]').forEach(b => b.addEventListener('click', () => applyCand(cands[+b.dataset.rcgo])));
+      };
+      const applyCand = (c) => {
+        if (!c || running) return;
+        if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+        // 案を作ったあとに表などが変わっていたら、古い案のまま反映しない
+        if (fp0 && typeof contentFingerprint === 'function' && contentFingerprint() !== fp0) {
+          toast('表が変わったため、この案は使えません。もう一度「エラーを自動修正」を押してください', 'error', 6000); return;
         }
+        if (typeof recordShiftHistory === 'function') recordShiftHistory();   // 気に入らなければ ↩ で戻せる
+        AppState.shifts = JSON.parse(JSON.stringify(c.shifts));
+        AppState.violations = checkViolations(AppState.shifts);
+        if (typeof noteEdits === 'function') noteEdits('自動修正', baseShifts);   // 手直しとは分けて数える
+        renderResultTable();
+        document.getElementById('reportCard').style.display = 'block';
+        renderReport({ success: AppState.violations.length === 0, score: AppState.violations.length, violations: AppState.violations });
         saveToStorage();
-      } catch (e) {
-        console.error(e);
-        AppState.shifts = backup; AppState.violations = checkViolations(backup);
-        if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
-        if (/^cancel/.test(e.message || '')) toast('自動修正を中止しました（表は元のままです）', 'info');
-        else toast('修復中にエラーが発生しました: ' + e.message, 'error');
+        toast(`✅ 「${c.label}」を反映しました（${scoreSummary(beforeSc)} → ${scoreSummary(c.st.a)}・${c.st.cells.length}マス）`, 'success', 6000);
+        modal.remove();
+      };
+      const $stop2 = document.getElementById('btnCancelRepair');
+      if ($stop2) { $stop2.style.display = 'inline-block'; $stop2.onclick = stop; }
+      btnRepair.disabled = true;
+      try {
+        let reached0 = false;
+        for (const sp of SPECS) {
+          if (stopped || !modal.isConnected) break;
+          if (reached0 && sp.k) continue;
+          const t0 = Date.now();
+          $st.innerHTML = `<span class="hint">⏳ 「${escapeHtml(sp.label)}」を計算しています…</span>`;
+          let r;
+          try {
+            r = await optimizeScheduleMILP((pct, msg) => {
+              const sec = Math.round((Date.now() - t0) / 1000);
+              $st.innerHTML = `<span class="hint">⏳ 「${escapeHtml(sp.label)}」を計算しています…（${sec}秒）</span>`;
+            }, sp.k ? { adjustMode: true, adjustK: sp.k, fastMode: true, noApply: true }
+                    : { improveOver: beforeSc, noApply: true });
+          } catch (e) {
+            if (/^cancel/.test(e.message || '') || stopped) break;
+            skipped.push(`${sp.label}: 計算に失敗しました（${escapeHtml(e.message || '')}）`); redraw();
+            continue;
+          }
+          const sec = Math.round((Date.now() - t0) / 1000);
+          const st = candStats(baseShifts, r._shifts || r.shifts, beforeV, r.violations);
+          // 🚨がどの種類も増えず、⛔ も悪くならず、🚨・⛔・連勤の超過日数・公休の足りない日数・切り替えの超過回数
+          // （「絶対」のときだけ数える）のどれかが減った案だけを出す
+          // 連勤の超過日数・公休の足りない日数だけが減る案も出す（件数が同じでも日数が減れば改善）
+          const ok = !st.compUp && scoreBetter(st.a, beforeSc) && (st.a.must < beforeSc.must || st.a.comp < beforeSc.comp ||
+                     st.a.over < beforeSc.over || (st.a.offShort || 0) < (beforeSc.offShort || 0) ||
+                     (st.a.bsOver || 0) < (beforeSc.bsOver || 0));
+          // 前の案より🚨が減っていない案は出さない（同じ直り方で、変えるマスが多いだけ）。
+          // ただし「全部直す」は並べたままにする（表を作り直すので行き来が減ることが多く、
+          // 行き来を減らしたい月はこれを選べるようにする。利用者の希望）。
+          const dup = sp.k && cands.some(c => scoreCompare(st.a, c.st.a) >= 0);
+          if (ok && !dup) { cands.push({ label: sp.label, st, sec, shifts: r._shifts || r.shifts }); redraw(); }
+          else {
+            // 外した理由は、増えたもの（公休の不足 1→2日 など）を書く
+            const upL = scoreWorsened(st.a, beforeSc).filter(x => x.key !== 'soft');
+            const lab = (k) => k === 'comp' ? '⛔6連勤以上' : k === 'over' ? '連勤の超過日数' : k === 'bsOver' ? '切り替えの超過回数'
+              : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
+            const unit = (k) => (k === 'over' || k === 'offShort') ? '日' : k === 'bsOver' ? '回' : '件';
+            const why = ok ? '前の案より🚨が減らないため出しません（変えるマスが増えるだけ）'
+              : st.compUp ? '6連勤以上ができる・伸びる・つながるため出しません'
+              : upL.length ? upL.map(x => `${lab(x.key)}が ${x.from}→${x.to}${unit(x.key)} に増える`).join('・') + 'ため出しません'
+              : '🚨・連勤の超過・公休の不足のどれも減らないため出しません';
+            if (!ok && (st.compUp || upL.length)) skippedUp = true;
+            skipped.push(`${sp.label}（${sec}秒）: ${why}`); redraw();
+          }
+          // 🚨が0件になったら、残りのマスの上限の案は計算しない（「全部直す」だけは計算する）
+          if (st.a.must === 0 && st.a.comp === 0 && ok) reached0 = true;
+        }
       } finally {
+        running = false;
         calcEnd();
-        const $stop2 = document.getElementById('btnCancelRepair');
         if ($stop2) $stop2.style.display = 'none';
         btnRepair.disabled = false;
-        btnRepair.textContent = orig;
-        // 数秒後に進捗表示を隠す（結果は表とレポートに残る）
-        setTimeout(() => { if ($area) $area.style.display = 'none'; }, 4000);
+        if (modal.isConnected) {
+          modal.querySelector('#rcStop').style.display = 'none';
+          $st.innerHTML = stopped ? '<span class="hint">中止しました。出ている案から選べます。</span>'
+                                  : '<span class="hint">計算が終わりました。反映する案を選んでください。</span>';
+          redraw();
+        }
       }
     });
   }

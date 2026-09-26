@@ -5,7 +5,9 @@
    =========================================== */
 // settingsPatch: 試し計算のときだけ設定を変えて解く（AppState.settings は書き換えない）。
 // 書き換えてから戻す方式だと、計算中に自動保存が走ると変えた値が保存されてしまう。
-function _milpPayload(settingsPatch) {
+// requestsPatch: 試し計算で希望だけを変えて解く（[{ id, day, to }]、to が '' なら希望を消す）。
+// 本物の AppState.requests は書き換えない。
+function _milpPayload(settingsPatch, requestsPatch) {
   let settings = AppState.settings;
   if (settingsPatch) {
     settings = Object.assign({}, AppState.settings, settingsPatch);
@@ -22,7 +24,10 @@ function _milpPayload(settingsPatch) {
     dailySkills:           AppState.dailySkills,
     shifts:                AppState.shifts,   // 微調整のとき、いまの表を出発点にする
     staff:                 AppState.staff,
-    requests:              AppState.requests,
+    requests:              requestsPatch && requestsPatch.length ? (() => {
+                             const r = JSON.parse(JSON.stringify(AppState.requests || {}));
+                             requestsPatch.forEach(c => { r[c.id] = r[c.id] || {}; if (c.to) r[c.id][c.day] = c.to; else delete r[c.id][c.day]; });
+                             return r; })() : AppState.requests,
     fixedShifts:           AppState.fixedShifts,
     specialDays:           AppState.specialDays,
     events:                AppState.events,
@@ -111,7 +116,7 @@ function milpTrial(payload, variant, timeOverride) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=231'); }
+    try { worker = new Worker('js/milp.worker.js?v=228'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     const untrack = _milpTrack(worker, () => { clearTimeout(timeout); reject(new Error(MILP_CANCEL_MSG)); });
     const timeout = setTimeout(() => { untrack(); try { worker.terminate(); } catch (_) {} reject(new Error('タイムアウト')); }, 600000);
@@ -159,7 +164,8 @@ function optimizeScheduleMILP(onProgress, opts) {
     const pickBySurplus = !!(opts && opts.pickBy === 'surplus');
     const countRest = (sh) => { let n2 = 0; for (const id in (sh || {})) { const row = sh[id]; for (const d in row) if (row[d] === '余') n2++; } return n2; };
     // 並べ方は scoreCompare（optimizer.js）: ① 6連勤以上（コンプラ違反）の回数
-    // ② 人員不足 ③ 🚨の件数（連勤は回数）④ 連勤の超過日数 ⑤ 🟡の件数。
+    // ② 人員不足 ③ 🚨の件数（連勤は回数）④ 連勤の超過日数 ⑤ 公休の足りない日数
+    // ⑥ 切り替えの超過回数（絶対のとき）⑦ 🟡の件数。
     // 合計件数だけで比べると、🚨4件・合計11件が 🚨3件・合計12件に勝ってしまう。
     const better = (a, b) => scoreCompare(a.sc, b.sc);
     const say = () => {
@@ -206,7 +212,7 @@ function _milpOnce(onProgress, opts, variant) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=231'); }
+    try { worker = new Worker('js/milp.worker.js?v=228'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     // 1部門あたり最大10分。部門数ぶん待てるよう十分な余裕を持たせる（誤タイムアウト防止）
     const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（30分）')); }, 1800000);
@@ -242,7 +248,7 @@ function _milpOnce(onProgress, opts, variant) {
     };
     worker.onerror = (err) => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化Workerエラー: ' + (err.message || 'ソルバーの読込みに失敗しました'))); };
     // timeOverride: 候補をいくつも組み直して比べるときに、1回あたりの時間を短くする
-    worker.postMessage({ type: 'milp', appState: _milpPayload(opts && opts.settingsPatch), deepMode, fastMode, adjustMode, adjustK,
+    worker.postMessage({ type: 'milp', appState: _milpPayload(opts && opts.settingsPatch, opts && opts.requestsPatch), deepMode, fastMode, adjustMode, adjustK,
                          timeOverride: (opts && parseInt(opts.timeOverride)) || 0,
                          variant: parseInt(variant) || 0 });
   });

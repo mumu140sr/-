@@ -179,6 +179,7 @@ function setupSettingsPanel() {
       // 日ごとのスキル指定も日付つきなので片付ける。スキルの種類と目標人数（skills）は残す。
       const ds = {}; Object.keys(AppState.dailySkills || {}).forEach(k => { ds[k] = {}; }); AppState.dailySkills = ds;
       AppState.violations = []; AppState.generated = false;
+      AppState.genBase = null; AppState.editLog = [];   // 生成直後の控えと記録も前の月のもの
       if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 前の月の表へ戻せないように
     }
     refreshAllUI();
@@ -1462,6 +1463,7 @@ function renderCalendar() {
       span.className     = 'shift-cell ' + getShiftClass(selectedMark);
       span.style.cssText = getShiftStyle(selectedMark);
       autoSave();
+      scheduleRequestAlerts();
     });
     // ダブルクリック（削除）
     td.addEventListener('dblclick', () => {
@@ -1473,8 +1475,142 @@ function renderCalendar() {
       span.className     = 'shift-cell s-empty';
       span.style.cssText = '';
       autoSave();
+      scheduleRequestAlerts();
     });
   });
+  scheduleRequestAlerts();
+}
+
+// ===== 希望だけで必ず🚨になるもの（④で希望を入れたその場で知らせる） =====
+// 生成前チェック（analyzeLowerBound）の理由のうち、希望・固定だけで決まり、必ず🚨になるもの
+// だけを出す。計算はしない（すぐ分かるものだけ）。直し方の提案で変えるのは、シフトの種類の
+// 希望と希望休（休）だけ。半休・有給・🔒固定は動かさない。提案は、その変更で理由が消え、
+// 最低エラー数が増えないことを確かめてから出す。
+const REQ_ALERT_TYPE = {
+  'req-le': 'late-early', 'fixed-cons': 'consecutive', 'req-role': 'role-mismatch', 'req-over': 'overstaff',
+  'req-solo': 'resp-duplicate', 'event-req': 'event-absent', 'special-req': 'special-day',
+  'req-offcount': 'off-count', 'paid-short': 'paid', 'day': 'understaff', 'role': 'understaff',
+};
+function _reqIsMust(kind) {
+  const t = REQ_ALERT_TYPE[kind];
+  return !!t && (getRuleLevel(t) === 'must' || (typeof MUST_TYPES_OPT !== 'undefined' && MUST_TYPES_OPT.has(t)));
+}
+const _reqKey = (r) => [r.kind, r.staffId || '', r.day || 0, r.role || '', r.from || ''].join('|');
+// 希望だけを変えて試す（試したあとは必ず元に戻す）
+function _tryRequestChange(changes, lb0, reason) {
+  const bk = changes.map(c => (AppState.requests[c.id] || {})[c.day]);
+  try {
+    changes.forEach(c => {
+      AppState.requests[c.id] = AppState.requests[c.id] || {};
+      if (c.to === '') delete AppState.requests[c.id][c.day]; else AppState.requests[c.id][c.day] = c.to;
+    });
+    const lb = analyzeLowerBound();
+    const gone = !lb.reasons.some(r => _reqKey(r) === _reqKey(reason));
+    return gone && lb.minErrors < lb0.minErrors;
+  } finally {
+    changes.forEach((c, i) => { if (bk[i] === undefined) delete AppState.requests[c.id][c.day]; else AppState.requests[c.id][c.day] = bk[i]; });
+  }
+}
+// 1つの理由について、変えてよい希望（シフトの種類・休）だけで直せる案を最大3つ
+function requestFixOptions(reason, lb0) {
+  const s = (AppState.staff || []).find(x => x.id === reason.staffId);
+  const req = (id, d) => (AppState.requests[id] || {})[d] || '';
+  const fixed = (id, d) => (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(id, d) : null;
+  const movable = (v) => v && v !== '半' && v !== '有';                 // 半休・有給は動かさない
+  const name = (id) => ((AppState.staff || []).find(x => x.id === id) || {}).name || '';
+  const cands = [];
+  const add = (changes) => { if (changes.length) cands.push(changes); };
+  if (reason.kind === 'req-le' && s) {
+    (reason.cells || []).forEach(d => {
+      const v = req(s.id, d);
+      if (!movable(v) || fixed(s.id, d) && !req(s.id, d)) return;
+      if (isWork(v)) {
+        // 反対の時間帯の、担当できるシフトに変える（例: 遅責→早責）
+        const wantEarly = isLate(v);
+        const same = v.replace(/^遅/, '早').replace(/^早/, wantEarly ? '早' : '遅');
+        const alts = (s.allowedShifts || []).filter(k => !isTraining(k) && (wantEarly ? isEarlyCategory(k) : isLate(k)));
+        const to = alts.includes(same) ? same : alts[0];
+        if (to) add([{ id: s.id, day: d, from: v, to }]);
+      }
+      add([{ id: s.id, day: d, from: v, to: '休' }]);
+    });
+  } else if (reason.kind === 'fixed-cons' && s) {
+    const m = /(\d+)日〜(\d+)日/.exec(reason.fix || reason.text || '');
+    if (m) {
+      const from = +m[1], to = +m[2], mid = (from + to) / 2;
+      const days = [];
+      for (let d = from; d <= to; d++) { const v = req(s.id, d); if (movable(v) && isWork(v)) days.push(d); }
+      days.sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid));
+      days.forEach(d => add([{ id: s.id, day: d, from: req(s.id, d), to: '休' }]));
+    }
+  } else if ((reason.kind === 'day' || reason.kind === 'role') && reason.day) {
+    // その日に休み希望を出している人の、希望休を外す
+    (AppState.staff || []).forEach(x => { if (req(x.id, reason.day) === '休') add([{ id: x.id, day: reason.day, from: '休', to: '' }]); });
+  }
+  const out = [];
+  for (const ch of cands) {
+    if (out.length >= 3) break;
+    if (out.some(o => JSON.stringify(o) === JSON.stringify(ch))) continue;
+    if (_tryRequestChange(ch, lb0, reason)) out.push(ch);
+  }
+  return out.map(ch => ({ changes: ch,
+    text: ch.map(c => `${name(c.id)}さん ${c.day}日「${c.from}」→ ${c.to ? '「' + c.to + '」' : '希望なし'}`).join('、') }));
+}
+/** 希望だけで必ず🚨になるものの一覧（理由だけ。直し方の案はあとから1件ずつ足す） */
+function requestCertainMusts() {
+  const lb = analyzeLowerBound();
+  return { lb, items: lb.reasons.filter(r => _reqIsMust(r.kind)).map(r => ({ reason: r, options: null })) };
+}
+let _reqAlertSeq = 0;
+let _reqAlertTimer = null;
+function scheduleRequestAlerts() { clearTimeout(_reqAlertTimer); _reqAlertTimer = setTimeout(renderRequestAlerts, 150); }
+function renderRequestAlerts() {
+  const box = document.getElementById('reqAlerts');
+  if (!box || !AppState.staff || !AppState.staff.length) return;
+  let res;
+  try { res = requestCertainMusts(); } catch (e) { box.innerHTML = ''; return; }
+  // 表のマスに印を付ける
+  document.querySelectorAll('#calendarTable td.req-alert').forEach(td => { td.classList.remove('req-alert'); td.style.outline = ''; });
+  res.items.forEach(it => {
+    const r = it.reason; if (!r.staffId) return;
+    const cells = r.cells || (r.day ? [r.day] : []);
+    cells.forEach(d => { const td = document.querySelector(`#calendarTable td[data-sid="${r.staffId}"][data-day="${d}"]`);
+      if (td) { td.classList.add('req-alert'); td.style.outline = '2px solid var(--danger)'; } });
+  });
+  if (!res.items.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div style="border:1px solid color-mix(in srgb, var(--danger) 45%, transparent);background:color-mix(in srgb, var(--danger) 10%, var(--surface));border-radius:10px;padding:10px 14px">
+      <div style="font-weight:700;margin-bottom:6px">🚨 希望だけで、必ずエラーになるものが ${res.items.length}件 あります</div>
+      <div class="hint" style="margin-bottom:6px">生成しても消えません。下の案のどれかに変えるか、そのまま生成してください（半休・有給・🔒固定は動かしていません）。</div>
+      ${res.items.map((it, i) => `<div style="padding:6px 0;${i ? 'border-top:1px solid var(--border)' : ''}">
+          <div>🚨 ${escapeHtml(it.reason.text)}</div>
+          <div data-reqopts="${i}"><div class="hint" style="margin:4px 0 0 16px">直し方を調べています…</div></div>
+        </div>`).join('')}
+    </div>`;
+  // 直し方の案は、1件ずつ少しあとで調べて足す（🚨の一覧はすぐに出すため）。
+  // 途中でまた希望が変わったら、古い調べものは捨てる。
+  const seq = ++_reqAlertSeq;
+  res.items.forEach((it, i) => setTimeout(() => {
+    if (seq !== _reqAlertSeq) return;
+    it.options = requestFixOptions(it.reason, res.lb);
+    const slot = box.querySelector(`[data-reqopts="${i}"]`); if (!slot) return;
+    slot.innerHTML = it.options.length
+      ? it.options.map((o, j) => `<div style="margin:4px 0 0 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="hint">案${j + 1}:</span><span>${escapeHtml(o.text)}</span>
+          <button class="btn" data-reqfix="${i}:${j}" style="padding:2px 10px">この案にする</button></div>`).join('')
+      : `<div class="hint" style="margin:4px 0 0 16px">${escapeHtml(it.reason.fix || '希望の入れ方を見直してください')}（変えてよい希望だけでは直せません）</div>`;
+    slot.querySelectorAll('[data-reqfix]').forEach(bindFix);
+  }, 30 * (i + 1)));
+  function bindFix(btn) { btn.addEventListener('click', () => {
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+    const [i, j] = btn.dataset.reqfix.split(':').map(Number);
+    const o = ((res.items[i] || {}).options || [])[j]; if (!o) return;
+    o.changes.forEach(c => {
+      AppState.requests[c.id] = AppState.requests[c.id] || {};
+      if (c.to === '') delete AppState.requests[c.id][c.day]; else AppState.requests[c.id][c.day] = c.to;
+    });
+    autoSave(); renderCalendar();
+    toast('希望を変えました: ' + o.text, 'success', 5000);
+  }); }
 }
 
 // ===== ⑥ シフト表 =====
@@ -2074,6 +2210,7 @@ function updateHistoryButtons() {
 // 固定マス（🔒）も手直し前のものを使う（入れ替えで🔒も動くため、手直し後の🔒で
 // 数えると、良くなったのに「悪くなりました」と出ることがあった）。
 function refreshAfterManualEdit(doneMsg, before) {
+  if (before && before.shifts && typeof noteEdits === 'function') noteEdits('手', before.shifts);
   let prevV = AppState.violations || [];
   if (before && before.shifts) {
     const nowFixed = AppState.fixedShifts;
@@ -2095,7 +2232,7 @@ function refreshAfterManualEdit(doneMsg, before) {
   if (up.length) {
     const lab = (k) => k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? '🟡'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
-    warns.push('⚠ 悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${x.key === 'over' ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('・'));
+    warns.push('⚠ 悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${(x.key === 'over' || x.key === 'offShort') ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('・'));
   }
   if (warns.length) {
     toast((doneMsg ? doneMsg + '。' : '') + warns.join(' ／ '), warns.some(w => w.startsWith('⛔')) ? 'error' : 'warning', 8000);
@@ -2226,6 +2363,184 @@ function setupAllColumnResizers() {
   enableColumnResize(document.getElementById('resultTable'), 'result');
 }
 
+// ===== 生成から変えたマス =====
+// 生成した直後の表を控え（genBase）、そのあとに変えたマスを記録する（editLog）。
+// 物差しは「生成直後の表」との正味の違い（元に戻したマスは数えない）。記録には、
+// 何で変えたか（手・自動修正・余の解消・修正案）を残し、手直しと分けて数える。
+// 控えと記録は保存データと書き出しに入る（生成直後と手直し後を1つのファイルで比べられる）。
+const _IKI_TYPES = new Set(['category-switch', 'bad-rest', 'band-switch']);   // 早番と遅番の行き来
+function _editVsum(vs) {
+  const o = { must: 0, soft: 0, iki: 0, byType: {} };
+  (vs || []).forEach(v => {
+    const m = getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type);
+    if (m) o.must++; else { o.soft++; if (_IKI_TYPES.has(v.type)) o.iki++; }
+    o.byType[v.type] = (o.byType[v.type] || 0) + 1;
+  });
+  let sur = 0; for (const id in (AppState.shifts || {})) for (const d in AppState.shifts[id]) if (AppState.shifts[id][d] === '余') sur++;
+  o.sur = sur;
+  return o;
+}
+// ===== 答えの案を並べて、反映するかを選ぶ（自動修正・余の解消のつじつま合わせ） =====
+// 変わるマス・⛔・🚨（種類ごと）・早番と遅番の行き来・ほかの🟡を、反映する前に見せる。
+const _IKI3 = new Set(['category-switch', 'bad-rest', 'band-switch']);
+/** 2つの表の違うマス。休み↔余・公休の書き替え（どちらも休み）は数えない */
+function candCellChanges(a, b) {
+  const out = [];
+  const offish = (v) => !v || v === '休' || v === '公' || v === '余';
+  (AppState.staff || []).forEach(s => {
+    const x = (a || {})[s.id] || {}, y = (b || {})[s.id] || {};
+    new Set([...Object.keys(x), ...Object.keys(y)]).forEach(d => {
+      const f = x[d] || '', t = y[d] || '';
+      if (f === t || (offish(f) && offish(t))) return;
+      out.push({ id: s.id, name: s.name, day: +d, from: f, to: t });
+    });
+  });
+  return out.sort((p, q) => p.day - q.day || String(p.name).localeCompare(String(q.name)));
+}
+/** 反映する前と後を比べる数 */
+function candStats(beforeShifts, afterShifts, beforeV, afterV) {
+  const bV = beforeV || checkViolations(beforeShifts), aV = afterV || checkViolations(afterShifts);
+  const cnt = (vs) => { let iki = 0, oth = 0; vs.forEach(v => { const m = getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type);
+    if (m) return; if (_IKI3.has(v.type)) iki++; else oth++; }); return { iki, oth }; };
+  const b = scoreViolations(bV), a = scoreViolations(aV), cb = cnt(bV), ca = cnt(aV);
+  return { b, a, ikiB: cb.iki, ikiA: ca.iki, othB: cb.oth, othA: ca.oth,
+           compUp: compWorsened(bV, aV).length > 0, cells: candCellChanges(beforeShifts, afterShifts), aV };
+}
+/** 🚨の種類ごとの増減（増えた種類は赤く） */
+function candMustText(st) {
+  const lab = (k) => (typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k;
+  const keys = new Set([...Object.keys(st.b.byMust || {}), ...Object.keys(st.a.byMust || {})]);
+  const parts = [];
+  keys.forEach(k => { const f = (st.b.byMust || {})[k] || 0, t = (st.a.byMust || {})[k] || 0;
+    if (f !== t) parts.push(`<span style="${t > f ? 'color:var(--danger);font-weight:700' : ''}">${escapeHtml(lab(k))} ${f}→${t}</span>`); });
+  return parts.join('、');
+}
+function candCellsText(cells, max) {
+  const n = max || 12;
+  const t = cells.slice(0, n).map(c => `${escapeHtml(c.name)} ${c.day}日 ${escapeHtml(c.from || '空')}→${escapeHtml(c.to || '空')}`).join('、');
+  return t + (cells.length > n ? ` ほか${cells.length - n}件` : '');
+}
+/** 案の1行（表の行）。btnHtml: 反映などのボタン */
+function candRowHtml(label, st, sec, btnHtml) {
+  const arrow = (a, b, bad, unit) => `${a}→${b}${unit || ''}` + (b > a && bad ? ' ⚠️' : '');
+  return `<tr>
+    <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>${escapeHtml(label)}</b>${sec != null ? `<div class="hint">${sec}秒</div>` : ''}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${st.a.comp > st.b.comp || st.compUp ? '<b style="color:var(--danger)">' : ''}⛔ ${st.b.comp}→${st.a.comp}${st.compUp ? '（伸びる・つながるため選べません）' : ''}${st.a.comp > st.b.comp || st.compUp ? '</b>' : ''}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>🚨 ${st.b.must - st.b.comp}→${st.a.must - st.a.comp}件</b><div class="hint">${candMustText(st)}</div></td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.over, st.a.over, true, '日')}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.offShort || 0, st.a.offShort || 0, true, '日')}</td>${CAND_BS() ? `
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.bsOver || 0, st.a.bsOver || 0, true, '回')}</td>` : ''}
+    <td style="padding:6px 8px;border-top:1px solid var(--border);text-align:center"><b>${st.cells.length}</b>マス</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">行き来 ${arrow(st.ikiB, st.ikiA, true)}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">ほかの🟡 ${arrow(st.othB, st.othA, false)}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border)">${btnHtml || ''}</td>
+  </tr>
+  <tr><td colspan="${CAND_COLS()}" class="hint" style="padding:0 8px 6px">${st.cells.length ? '変わるマス: ' + candCellsText(st.cells) : '変わるマスはありません'}</td></tr>`;
+}
+// 連勤の超過日数・公休の足りない日数（切り替えの超過回数は「絶対」のときだけ）も欄に出す。件数だけでは、
+// 日数だけが違う案が同じ数字に見えていた。
+const CAND_BS = () => getRuleLevel('band-switch') === 'must';
+const CAND_COLS = () => CAND_BS() ? 10 : 9;
+const _cth = (t, left) => `<th style="${left ? 'text-align:left;' : ''}padding:4px 8px">${t}</th>`;
+const candHead = () => '<tr>' + _cth('案', 1) + _cth('⛔ 6連勤以上', 1) + _cth('🚨', 1)
+  + _cth('連勤の超過', 1) + _cth('公休の不足', 1) + (CAND_BS() ? _cth('切り替えの超過', 1) : '')
+  + _cth('変わるマス') + _cth('早番と遅番の行き来', 1) + _cth('ほかの🟡', 1) + '<th></th></tr>';
+
+/** 生成した直後の表を控える（生成・途中から作り直しのあと） */
+function genBaseTake() {
+  AppState.genBase = {
+    at: new Date().toISOString(),
+    version: ((document.getElementById('appVersion') || {}).textContent || '').trim(),
+    month: AppState.settings.targetMonth,
+    shifts: JSON.parse(JSON.stringify(AppState.shifts || {})),
+    fixed: JSON.parse(JSON.stringify(AppState.fixedShifts || {})),
+    vsum: _editVsum(AppState.violations || checkViolations(AppState.shifts)),
+  };
+  AppState.editLog = [];
+  renderEditSummary();
+}
+/** 操作の前後の表を比べて、変わったマスを記録する（src: 手・自動修正・余の解消・修正案） */
+function noteEdits(src, beforeShifts) {
+  if (!AppState.genBase || !beforeShifts) return;
+  const at = new Date().toISOString(), log = AppState.editLog || (AppState.editLog = []);
+  const ids = new Set([...Object.keys(beforeShifts), ...Object.keys(AppState.shifts || {})]);
+  ids.forEach(id => {
+    const a = beforeShifts[id] || {}, b = (AppState.shifts || {})[id] || {};
+    new Set([...Object.keys(a), ...Object.keys(b)]).forEach(d => {
+      if ((a[d] || '') !== (b[d] || '')) log.push({ sid: id, day: +d, from: a[d] || '', to: b[d] || '', src, at });
+    });
+  });
+  if (log.length > 3000) log.splice(0, log.length - 3000);
+  renderEditSummary();
+}
+/** 変えた所の一覧（_applyChangeList の形）から、表のマスだけを記録する */
+function noteEditList(src, list) {
+  if (!AppState.genBase) return;
+  const at = new Date().toISOString(), log = AppState.editLog || (AppState.editLog = []);
+  (list || []).filter(c => c[0] === 'shifts').forEach(c => log.push({ sid: c[1], day: +c[2], from: c[3] || '', to: c[4] || '', src, at }));
+  renderEditSummary();
+}
+/** 生成直後の表と今の表の正味の違い。何で変えたかは、そのマスを最後に変えた記録から取る */
+function editDiff() {
+  const base = (AppState.genBase || {}).shifts; if (!base) return [];
+  const last = {};
+  (AppState.editLog || []).forEach(e => { last[e.sid + '|' + e.day] = e.src; });
+  const out = [];
+  (AppState.staff || []).forEach(s => {
+    const a = base[s.id] || {}, b = (AppState.shifts || {})[s.id] || {};
+    new Set([...Object.keys(a), ...Object.keys(b)]).forEach(d => {
+      if ((a[d] || '') !== (b[d] || '')) out.push({ sid: s.id, name: s.name, day: +d, from: a[d] || '', to: b[d] || '', src: last[s.id + '|' + d] || '手' });
+    });
+  });
+  return out.sort((x, y) => x.day - y.day || String(x.sid).localeCompare(String(y.sid)));
+}
+let _editMarks = false;
+function renderEditSummary() {
+  const box = document.getElementById('editSummary');
+  if (!box) return;
+  const g = AppState.genBase;
+  if (!g || g.month !== AppState.settings.targetMonth) { box.innerHTML = ''; return; }
+  const diff = editDiff();
+  const by = {}; diff.forEach(x => { by[x.src] = (by[x.src] || 0) + 1; });
+  const now = _editVsum(AppState.violations || []), was = g.vsum || {};
+  const arrow = (a, b) => `${a ?? '-'}→${b}`;
+  box.innerHTML = `<div class="hint" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span>✏️ 生成から変えたマス：<b>${diff.length}件</b>${diff.length ? '（' + Object.keys(by).map(k => `${escapeHtml(k)} ${by[k]}`).join('・') + '）' : ''}</span>
+      <span>🚨 ${arrow(was.must, now.must)} ／ 🟡 ${arrow(was.soft, now.soft)}（うち早番と遅番の行き来 ${arrow(was.iki, now.iki)}）／ 余 ${arrow(was.sur, now.sur)}</span>
+      ${diff.length ? '<button class="btn" id="editListBtn" style="padding:2px 10px">一覧</button>' : ''}
+      ${diff.length ? `<label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="editMarkCb" ${_editMarks ? 'checked' : ''}>表に印</label>` : ''}
+    </div>`;
+  const lb = document.getElementById('editListBtn');
+  if (lb) lb.addEventListener('click', showEditList);
+  const cb = document.getElementById('editMarkCb');
+  if (cb) cb.addEventListener('change', () => { _editMarks = cb.checked; applyEditMarks(); });
+  applyEditMarks();
+}
+function applyEditMarks() {
+  document.querySelectorAll('.result-table td.edit-mark').forEach(td => { td.classList.remove('edit-mark'); td.style.boxShadow = ''; });
+  if (!_editMarks) return;
+  editDiff().forEach(x => {
+    const td = document.querySelector(`.result-table td[data-sid="${x.sid}"][data-day="${x.day}"]`);
+    if (td) { td.classList.add('edit-mark'); td.style.boxShadow = 'inset 0 0 0 2px #b7791f'; }
+  });
+}
+function showEditList() {
+  const diff = editDiff();
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.style.zIndex = 10050;
+  modal.innerHTML = `<div class="modal-content" style="max-width:640px">
+      <div class="modal-header"><h3 style="margin:0">✏️ 生成から変えたマス（${diff.length}件）</h3><button class="modal-close" id="elClose">✕</button></div>
+      <div class="modal-body" style="max-height:60vh;overflow:auto">
+        <table class="calendar-table" style="width:100%"><thead><tr><th>日</th><th>人</th><th>生成したとき</th><th>今</th><th>何で変えたか</th></tr></thead>
+        <tbody>${diff.map(x => `<tr><td>${x.day}日</td><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.from || '（空）')}</td><td>${escapeHtml(x.to || '（空）')}</td><td>${escapeHtml(x.src)}</td></tr>`).join('')}</tbody></table>
+      </div></div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.querySelector('#elClose').addEventListener('click', close);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+}
+
 // 各テーブルの描画後に列幅調整を有効化する（描画関数をラップして自動適用）
 ['renderRoleTable', 'renderStaffTable', 'renderResultTable'].forEach((fn) => {
   const orig = window[fn];
@@ -2233,6 +2548,7 @@ function setupAllColumnResizers() {
   window[fn] = function (...args) {
     const r = orig.apply(this, args);
     try { setupAllColumnResizers(); } catch (_) {}
+    if (fn === 'renderResultTable') { try { renderEditSummary(); } catch (_) {} }
     return r;
   };
 });
@@ -2595,10 +2911,49 @@ async function _trySurplusChange(apply, opts) {
   const bSc = scoreViolations(beforeV);
   apply();
   mid = captureChangeBase();          // ここまでが、この変更そのもので変えた所
-  // 周りのつじつまを、最小限の変更で合わせる
-  if (o.adjust && typeof optimizeScheduleMILP === 'function') {
+  // 周りのつじつまを、最小限の変更で合わせる。変更そのもので🚨・⛔・連勤の超過日数・公休の足りない日数・
+  // 切り替えの超過回数（絶対のとき）が悪くならないときは
+  // 合わせない（合わせる必要が無いのに、計算の上の数だけを減らそうとして、ほかの人のマスを
+  // 20マス近く動かし、早番と遅番の行き来を増やしていた）。
+  const midV = checkViolations(AppState.shifts);
+  const needAdjust = scoreWorsened(scoreViolations(midV), bSc).some(x => x.key !== 'soft') || compWorsened(beforeV, midV).length > 0;
+  if (o.adjust && needAdjust && typeof optimizeScheduleMILP === 'function') {
     try { await optimizeScheduleMILP(() => {}, { adjustMode: true, adjustK: (o.k || 24), fastMode: true }); }
     catch (_) { /* 調整できなくてもそのまま検証する */ }
+  }
+  // つじつま合わせでほかのマスも動いたときは、反映する前に「つじつま合わせあり」と
+  // 「変更だけ（つじつま合わせなし）」を並べて見せ、選んでもらう（以前はつじつま合わせが
+  // 解けずに何もしていなかったので、ほかの人のマスが動くのは新しい動きになる）。
+  let chosen = false;
+  if (o.adjust && typeof o.chooseAdjust === 'function') {
+    const adjCells = changesBetween(mid, captureChangeBase()).filter(c => c[0] === 'shifts' && c[3] !== c[4]);
+    if (adjCells.length) {
+      const withShifts = JSON.parse(JSON.stringify(AppState.shifts));
+      _applyChangeList(adjCells, 'undo');
+      const woShifts = JSON.parse(JSON.stringify(AppState.shifts));
+      _applyChangeList(adjCells, 'redo');
+      const withSt = candStats(base0.shifts, withShifts, beforeV);
+      const woSt = candStats(base0.shifts, woShifts, beforeV);
+      const adjList = candCellChanges(mid.shifts, withShifts);
+      // つじつま合わせで🚨・⛔が「変更だけ」より良くならないなら、合わせない（マスが動くだけ）
+      // 役に立つ: ⛔にならず、並べ方で「変更だけ」より良く、⛔・人員不足・🚨・連勤の超過日数・公休の足りない日数・
+      // 切り替えの超過回数（「絶対」のときだけ数える）のどれかが減る。
+      // 「変更だけ」は⛔が伸び、つじつま合わせは伸びないときも役に立つ（以前は「役に立たない」として、⛔で止めていた）。
+      const helps = !withSt.compUp && (woSt.compUp || (scoreCompare(withSt.a, woSt.a) < 0 &&
+                    (withSt.a.comp < woSt.a.comp || withSt.a.under < woSt.a.under || withSt.a.must < woSt.a.must ||
+                     withSt.a.over < woSt.a.over || (withSt.a.offShort || 0) < (woSt.a.offShort || 0) ||
+                     (withSt.a.bsOver || 0) < (woSt.a.bsOver || 0))));
+      if (helps) {
+        const pick = await o.chooseAdjust({ withSt, woSt, adjList });
+        if (!pick) { restore(); return { ok: false, before, after: before, sd: null, cancelled: true, message: '実行しませんでした' }; }
+        if (pick === 'without') _applyChangeList(adjCells, 'undo');
+        chosen = true;   // 並べた案を見て選んだので、🚨の件数ではあらためて聞かない（日数・回数が増えるときは下で聞く）
+      } else {
+        // 選ぶ画面を出していないときは「変更だけ」にして、下の確認（悪くなりますが、よいですか）を通す。
+        // chosen を真にしていたため、🚨が増える変更（遅番の翌日を早番にする など）が確認なしで入っていた。
+        _applyChangeList(adjCells, 'undo');
+      }
+    }
   }
   changes = collectChanges();         // 確認を待つ前に、この変更で変えた所を覚えておく
   AppState.violations = checkViolations(AppState.shifts);
@@ -2615,6 +2970,16 @@ async function _trySurplusChange(apply, opts) {
   // どれかが増える（🚨の種類・連勤の超過日数・🟡）ときは、取り消さずに本人へ確認する。
   // 合計件数では判断しない（合計が減っても🚨が増えることがある）。
   const up = scoreWorsened(aSc, bSc);
+  // 並べた案を見て選んだときは、🚨の件数（表で見えている）ではあらためて聞かない。ただし連勤の超過日数・
+  // 公休の足りない日数・切り替えの超過回数が増えるときは聞く（件数が同じだと見落としやすく、以前は
+  // 「変更だけ」で公休の不足が1日→2日に増えたまま確認なしで入っていた）。
+  const upDays = up.filter(x => x.key === 'over' || x.key === 'offShort' || x.key === 'bsOver');
+  if (up.length && chosen && !upDays.length) {
+    recordDeltaHistory(changes);
+    noteEditList('余の解消', changes);
+    autoSave();
+    return { ok: true, before, after, sd, worsened: true, hadCritical: up.some(x => x.key !== 'soft'), message: words };
+  }
   if (up.length) {
     const hadCritical = up.some(x => x.key !== 'soft');
     const go = (typeof o.confirm === 'function')
@@ -2622,10 +2987,12 @@ async function _trySurplusChange(apply, opts) {
       : confirm(`この変更で ${words}。\nそれでも実行しますか？`);
     if (!go) { restore(); return { ok: false, before, after, sd, cancelled: true, message: `${words}ため取り消しました` }; }
     recordDeltaHistory(changes);   // 元に戻すで、この変更だけを戻せるように
+    noteEditList('余の解消', changes);
     autoSave();
     return { ok: true, before, after, sd, worsened: true, hadCritical, message: words };
   }
   recordDeltaHistory(changes);
+  noteEditList('余の解消', changes);
   autoSave();
   return { ok: true, before, after, sd, message: words };
 }
@@ -2746,6 +3113,29 @@ function showSurplusResolveModal() {
       </div>`;
     $m.querySelector('#worsenYes').addEventListener('click', () => resolve(true));
     $m.querySelector('#worsenNo').addEventListener('click', () => resolve(false));
+  });
+
+  // つじつま合わせでほかのマスも動いたとき、「あり」と「変更だけ」を並べて選んでもらう
+  const askAdjust = ({ withSt, woSt, adjList }) => new Promise(resolve0 => {
+    if (panelClosed) return resolve0(false);
+    const resolve = (v) => { pendingAsk = null; resolve0(v); };
+    pendingAsk = resolve;
+    const $m = modal.querySelector('#resolveMsg');
+    if (!$m) return resolve(confirm(`つじつま合わせで ${adjList.length}マス 変わります。実行しますか？`) ? 'with' : false);
+    $m.style.display = 'block';
+    $m.style.background = 'var(--surface)';
+    $m.style.border = '1px solid var(--border)';
+    $m.innerHTML = `<div style="font-size:14px;margin-bottom:4px"><b>つじつま合わせで変わるマス：${adjList.length}件</b></div>
+      <div class="hint" style="margin-bottom:6px">${candCellsText(adjList, 20)}</div>
+      <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead>${candHead()}</thead><tbody>
+        ${candRowHtml('つじつま合わせあり', withSt, null, `<button class="btn btn-primary" id="adjWith" ${withSt.compUp ? 'disabled title="6連勤以上になるため選べません"' : ''}>これで実行</button>`)}
+        ${candRowHtml('変更だけ（つじつま合わせなし）', woSt, null, `<button class="btn" id="adjWithout" ${woSt.compUp ? 'disabled title="6連勤以上になるため選べません"' : ''}>これで実行</button>`)}
+      </tbody></table></div>
+      <div style="margin-top:8px"><button id="adjNo" class="btn">やめる</button></div>`;
+    const bw = $m.querySelector('#adjWith'), bo = $m.querySelector('#adjWithout');
+    if (bw) bw.addEventListener('click', () => resolve('with'));
+    if (bo) bo.addEventListener('click', () => resolve('without'));
+    $m.querySelector('#adjNo').addEventListener('click', () => resolve(false));
   });
 
   // 誰を選ぶかの判断材料として、今月の有給数と余の数を名前の横に出す
@@ -3235,8 +3625,8 @@ function showSurplusResolveModal() {
                   add: best.after - best.before, before: best.before, after: best.after, sd: best.sd,
                   wasSurplus: (vl === '余' ? 1 : 0) + (vt === '余' ? 1 : 0) });
     }
-    // 6連勤以上になる日は出さない。並べ方は scoreCompare（① 6連勤以上 ② 人員不足
-    // ③ 🚨 ④ 連勤の超過日数 ⑤ 🟡）、同じなら指導役がすでにいる日、次に余を消せる日
+    // 6連勤以上になる日は出さない。並べ方は scoreCompare（① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数
+    // ⑤ 公休の足りない日数 ⑥ 切り替えの超過回数（絶対のとき） ⑦ 🟡）、同じなら指導役がすでにいる日、次に余を消せる日
     for (let i = rows.length - 1; i >= 0; i--) if (rows[i].sd && rows[i].sd.compUp) rows.splice(i, 1);
     rows.sort((x, y) => _diffCmp(x.sd, y.sd)
                      || (x.mode === 'already' ? 0 : 1) - (y.mode === 'already' ? 0 : 1)
@@ -3316,7 +3706,7 @@ function showSurplusResolveModal() {
         AppState.fixedShifts[T.id] = AppState.fixedShifts[T.id] || {};
         AppState.fixedShifts[T.id][d] = row.tk;
       }
-    }, { adjust: true, k: 32, confirm: askWorsen });
+    }, { adjust: true, k: 32, confirm: askWorsen, chooseAdjust: askAdjust });
     busy(false);
     say(r.ok ? `${r.hadCritical ? '🚨' : r.worsened ? '⚠️' : '✅'} ${d}日 ${escapeHtml(T.name)}（${escapeHtml(row.tk)}）のそばに ${escapeHtml(L.name)}（${escapeHtml(row.lk)}）を入れました（${r.message}）。${diffText(r)}`
              : `↩ ${d}日の指定を取り消しました。${r.message}`, r.ok && !r.worsened);
@@ -3331,7 +3721,7 @@ function showSurplusResolveModal() {
     if (!up.length) return '';
     const lab = (k) => k === 'comp' ? '⛔コンプラ違反' : k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? '🟡'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
-    return `<br><span class="hint">増えたもの：${up.map(x => escapeHtml(lab(x.key)) + ` ${x.from}→${x.to}${x.key === 'over' ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('、')}</span>`;
+    return `<br><span class="hint">増えたもの：${up.map(x => escapeHtml(lab(x.key)) + ` ${x.from}→${x.to}${(x.key === 'over' || x.key === 'offShort') ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('、')}</span>`;
   };
 
   const busy = (on) => modal.querySelectorAll('button, select').forEach(el => {
@@ -3566,7 +3956,7 @@ function showSurplusResolveModal() {
           throw new Error('⛔ 作り直すと6連勤以上（コンプラ違反）になるため、元に戻しました');
         const sgn = _diffSign(_scoreDiff(bSc, aSc));
         // 元に戻すで、作り直し（表・🔒固定・必要人数+1）を一緒に戻せるようにする
-        recordDeltaHistory(changesOfChangeAndCalc(histBase, histMid));
+        { const ch = changesOfChangeAndCalc(histBase, histMid); recordDeltaHistory(ch); noteEditList('余の解消', ch); }
         say(`${sgn <= 0 ? '✅' : '⚠️'} ${escapeHtml(_diffWords(_scoreDiff(bSc, aSc)))}。${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.tutor)}さんのそばに入れて作り直しました（余 ${listSurplusCells().length}コマ）。`, true);
       } catch (e) {
         // ⛔・中止・失敗のときは、作り直しで変えた所（固定・必要人数+1・計算で動いた表のマス）だけを戻す。
@@ -3701,7 +4091,7 @@ function showSurplusResolveModal() {
         AppState.fixedShifts[id][d] = key;                                     // その人をその日に固定
         AppState.shifts[id] = AppState.shifts[id] || {};
         AppState.shifts[id][d] = key;
-      }, { adjust: true, k: 24, confirm: askWorsen });
+      }, { adjust: true, k: 24, confirm: askWorsen, chooseAdjust: askAdjust });
       busy(false);
       say(r.ok ? `${r.hadCritical ? '🚨' : r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。${diffText(r)}`
                : `↩ ${escapeHtml(s.name)} ${d}日 の「${escapeHtml(key)}」を取り消しました。${r.message}`, r.ok && !r.worsened);
@@ -4264,7 +4654,8 @@ function _trainingCandidates(learnerId, band, tutorIds) {
 
 // 「入れてみた前後」を比べる共通の物差し（optimizer.js の scoreViolations と同じ）。
 // 良し悪しは scoreBetter（どの🚨も増えず、どれかが減る）、並べ替えは scoreCompare
-// （① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 🟡）。表示は件数と超過日数を分けて出す。
+// （① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 公休の足りない日数 ⑥ 切り替えの超過回数（絶対のとき）⑦ 🟡）。
+// 表示は件数と日数を分けて出す。
 // compUp: 6連勤以上が新しくできた・伸びた・つながったか（compWorsened）。回数だけで
 // 判定すると、6連勤を7連勤に伸ばす変更などを見逃すため、分かるときは渡す。
 function _scoreDiff(before, after, compUp) {
@@ -4297,6 +4688,7 @@ function _diffWords(d) {
   // 🚨は⛔（6連勤以上）を除いた件数で出す（⛔は別に出す）
   if (a.must - a.comp !== b.must - b.comp) ch.push(`🚨 ${b.must - b.comp}→${a.must - a.comp}件`);
   if (a.over !== b.over) ch.push(`連勤の超過 ${b.over}→${a.over}日`);
+  if ((a.offShort || 0) !== (b.offShort || 0)) ch.push(`公休の不足 ${b.offShort || 0}→${a.offShort || 0}日`);
   if ((a.bsOver || 0) !== (b.bsOver || 0)) ch.push(`切り替えの超過 ${b.bsOver || 0}→${a.bsOver || 0}回`);
   if (a.soft !== b.soft) ch.push(`🟡 ${b.soft}→${a.soft}件`);
   const sg = _diffSign(d);
@@ -4304,7 +4696,7 @@ function _diffWords(d) {
              : sg < 0 ? '良くなります' : sg === 0 ? '変わりません'
              : sg === 1 ? '悪くなります' : '減るものと増えるものがあります';
   // 🚨の種類が入れ替わっただけ（件数は同じ）のときも分かるように、増えた種類を出す
-  const up = scoreWorsened(a, b).filter(x => x.key !== 'comp' && x.key !== 'over' && x.key !== 'bsOver' && x.key !== 'soft')
+  const up = scoreWorsened(a, b).filter(x => x.key !== 'comp' && x.key !== 'over' && x.key !== 'bsOver' && x.key !== 'offShort' && x.key !== 'soft')
     .map(x => `${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[x.key]) || x.key} +${x.to - x.from}`);
   if (sg === 2 && up.length) ch.push('増える🚨: ' + up.join('・'));
   return ch.length ? `${head}（${ch.join('・')}）` : head;

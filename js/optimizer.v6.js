@@ -304,6 +304,7 @@ const VIOLATION_LABEL = {
   'understaff':        '人員不足',
   'overstaff':         '定数オーバー',
   'off-count':         '公休数不足',
+  'offShort':          '公休の不足日数',
   'paid':              '有給が消化できない',
   'consecutive':       '連勤超過',
   'band-switch':       '早遅の切り替え回数',
@@ -3074,7 +3075,7 @@ function checkViolations(shifts) {
     const diff = offCount - (s.maxOff || 0);
     if (!isCast && diff < 0) {
       violations.push({
-        staffId: s.id, day: 0, type: 'off-count',
+        staffId: s.id, day: 0, type: 'off-count', short: -diff,   // 足りない日数（比べ方で使う）
         message: `🚨 公休数 ${offCount}日（目標${s.maxOff}日, 差${diff}）`,
         action:  '公休数を増やしてください',
       });
@@ -3442,12 +3443,15 @@ function findCapabilityBottlenecks() {
  *   under … 人員不足の件数
  *   must  … 🚨の件数（連勤は回数で数える。6連勤以上も含む）
  *   over  … 連勤の、上限を超えた日数の合計
+ *   offShort … 公休の足りない日数の合計（件数 byMust['off-count'] は足りない人数。連勤の回数と超過日数と同じく、
+ *              人数と日数の両方を見る）
+ *   bsOver … 早遅の切り替えの超過回数（「絶対」のときだけ数える）
  *   soft  … 🟡の件数
  *   byMust… 🚨の種類ごとの件数
  *   count / total … 全部の件数（表示用） / mustCount … must と同じ（表示用）
  */
 function scoreViolations(vs) {
-  const r = { comp: 0, under: 0, must: 0, over: 0, bsOver: 0, soft: 0, count: 0, byMust: {} };
+  const r = { comp: 0, under: 0, must: 0, over: 0, bsOver: 0, offShort: 0, soft: 0, count: 0, byMust: {} };
   (vs || []).forEach(v => {
     if (!v) return;
     r.count++;
@@ -3459,6 +3463,8 @@ function scoreViolations(vs) {
     }
     if (v.type === 'consecutive') { r.over += (v.over || 0); if (v.compliance) r.comp++; }
     if (v.type === 'understaff') r.under++;
+    // 公休の足りない日数の合計（offShort）。件数は「足りない人数」なので、連勤（回数と超過日数）と同じく日数も見る
+    if (v.type === 'off-count' && (getRuleLevel(v.type) === 'must' || MUST_TYPES_OPT.has(v.type))) r.offShort += (v.short || 0);
     // 早遅の切り替えを「絶対」にしているときは、超えた回数も連勤の超過日数と同じように見る
     if (v.type === 'band-switch' && getRuleLevel('band-switch') === 'must') r.bsOver += (v.over || 0);
   });
@@ -3478,8 +3484,11 @@ function scoreBetter(a, b) {
     if (x > y) return false;
     if (x < y) less = true;
   }
-  if (a.over > b.over || a.comp > b.comp || (a.bsOver || 0) > (b.bsOver || 0)) return false;
-  if (a.over < b.over || a.comp < b.comp || (a.bsOver || 0) < (b.bsOver || 0)) less = true;
+  // 公休の足りない日数の合計も、連勤の超過日数と同じく増やさない（利用者の判断 2026年9月26日）。
+  // はじくのは「足りない日数の合計が増える案」。合計が同じまま足りない人数が減る案（1人に寄せる案を含む）は、
+  // 連勤（回数が減り超過日数が同じ）と同じく改善のまま。
+  if (a.over > b.over || a.comp > b.comp || (a.bsOver || 0) > (b.bsOver || 0) || (a.offShort || 0) > (b.offShort || 0)) return false;
+  if (a.over < b.over || a.comp < b.comp || (a.bsOver || 0) < (b.bsOver || 0) || (a.offShort || 0) < (b.offShort || 0)) less = true;
   if (less) return true;
   return a.soft < b.soft;
 }
@@ -3491,6 +3500,7 @@ function scoreWorsened(a, b) {
   keys.forEach(k => { const x = a.byMust[k] || 0, y = b.byMust[k] || 0; if (x > y) out.push({ key: k, from: y, to: x }); });
   if (a.over > b.over) out.push({ key: 'over', from: b.over, to: a.over });
   if ((a.bsOver || 0) > (b.bsOver || 0)) out.push({ key: 'bsOver', from: b.bsOver || 0, to: a.bsOver });
+  if ((a.offShort || 0) > (b.offShort || 0)) out.push({ key: 'offShort', from: b.offShort || 0, to: a.offShort });
   if (a.soft > b.soft) out.push({ key: 'soft', from: b.soft, to: a.soft });
   return out;
 }
@@ -3507,9 +3517,11 @@ function compWorsened(beforeVs, afterVs) {
 
 // 順番を付ける必要がある所（4通りから選ぶ、候補を並べる）の並べ方。小さいほど良い。
 //   ① 6連勤以上の回数 ② 人員不足 ③ 🚨の件数（連勤は回数） ④ 連勤の超過日数
-//   ④' 早遅の切り替えの超過回数（「絶対」のときだけ。「なるべく」なら⑤の🟡に1人1件で入る） ⑤ 🟡の件数
+//   ⑤ 公休の足りない日数の合計（利用者の判断 2026年9月26日。連勤の超過日数のすぐあと）
+//   ⑥ 早遅の切り替えの超過回数（「絶対」のときだけ。「なるべく」なら⑦の🟡に1人1件で入る） ⑦ 🟡の件数
 function scoreCompare(a, b) {
   return (a.comp - b.comp) || (a.under - b.under) || (a.must - b.must) || (a.over - b.over)
+      || ((a.offShort || 0) - (b.offShort || 0))
       || ((a.bsOver || 0) - (b.bsOver || 0)) || (a.soft - b.soft);
 }
 // 画面に出す要約（件数と超過日数を分けて出す）
@@ -3519,6 +3531,7 @@ function scoreSummary(r) {
   if (r.comp) parts.push(`⛔コンプラ違反 ${r.comp}件`);
   parts.push(`🚨${r.must - r.comp}件`);
   if (r.over) parts.push(`連勤の超過 ${r.over}日`);
+  if (r.offShort) parts.push(`公休の不足 ${r.offShort}日`);
   if (r.bsOver) parts.push(`切り替えの超過 ${r.bsOver}回`);
   parts.push(`🟡${r.soft}件`);
   return parts.join('・');
@@ -3593,7 +3606,8 @@ function findConcreteFixes(opt) {
       m._same = (n.must === baseScore.must && n.total === baseScore.total);
     }
   });
-  // 並べ方は scoreCompare（① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 🟡）
+  // 並べ方は scoreCompare（① 6連勤以上 ② 人員不足 ③ 🚨 ④ 連勤の超過日数 ⑤ 公休の足りない日数
+  // ⑥ 切り替えの超過回数（絶対のとき）⑦ 🟡）
   found.sort((a, b) => scoreCompare(a._sc, b._sc));
   if (found.length >= maxResults || !o.deep) return _dedupeFixes(found, maxResults);
 
@@ -4803,6 +4817,56 @@ function maxSkillInBand(g, sk, bandKeys, d) {
   return { max, blocker };
 }
 
+/**
+ * 日ごとの人数の余裕（生成前チェック 3-1①）。計算はせず、希望・固定・担当できるシフトだけで数える。
+ *   全体・早番帯・遅番帯: 出られる人数 − 必要人数。0 なら、出られる人は全員その日（その時間帯）に出勤になる。
+ *   スキル: その時間帯に入れる保有者の人数 − 目標人数（最低ラインを下回ると必ずエラー）。
+ * 休み・有給・半休の希望、休みの🔒固定、研修の日は「出られない」に数える。
+ * @returns {Array<{label, days: Array<{day, total, early, late, skills}>}>}
+ *   total/early/late: { avail, need, margin, ids }（ids は出られる人。余裕0の日に「必ず出勤」の人として出す）
+ *   skills: [{ name, band, avail, need, min, margin, ids }]
+ */
+function analyzeDayMargins() {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const out = [];
+  if (!AppState.staff.length || !days) return out;
+  const shiftKeys = getWorkShiftKeys().filter(k => {
+    const t = AppState.shiftTypes.find(x => x.key === k);
+    return t && !t.isTraining;
+  });
+  const inBand = (k, band) => band === 'early' ? isEarlyCategory(k) : isLate(k);
+  getDepartmentGroups(AppState.staff).forEach(g => {
+    const rows = [];
+    for (let d = 1; d <= days; d++) {
+      // その人がその日に入れるシフト（出られなければ空）
+      const keysOf = (s) => {
+        const st = staffDayState(s, d);
+        if (st === 'off' || st === 'training') return [];
+        if (st.indexOf('fixed:') === 0) { const k = st.slice(6); return shiftKeys.includes(k) ? [k] : []; }
+        return (s.allowedShifts || []).filter(k => shiftKeys.includes(k));
+      };
+      const ks = {}; g.staff.forEach(s => { ks[s.id] = keysOf(s); });
+      const count = (pred) => {
+        const need = shiftKeys.filter(pred).reduce((a, k) => a + getDayReq(g.reqs, g.dailyReqs || {}, k, d), 0);
+        const ids = g.staff.filter(s => ks[s.id].some(pred)).map(s => s.id);
+        return { avail: ids.length, need, margin: ids.length - need, ids };
+      };
+      const row = { day: d, total: count(() => true),
+                    early: count(k => inBand(k, 'early')), late: count(k => inBand(k, 'late')), skills: [] };
+      (AppState.skills || []).forEach(sk => {
+        const { need, min } = getDaySkillReq(sk, d);
+        if (!(need > 0) && !(min > 0)) return;
+        const band = (sk.target || 'late') === 'early' ? 'early' : 'late';
+        const ids = g.staff.filter(s => (s.skills || []).includes(sk.name) && ks[s.id].some(k => inBand(k, band))).map(s => s.id);
+        row.skills.push({ name: sk.name, band, avail: ids.length, need, min, margin: ids.length - need, ids });
+      });
+      rows.push(row);
+    }
+    out.push({ label: g.label, days: rows });
+  });
+  return out;
+}
+
 function analyzeLowerBound() {
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const res = { possible: true, minErrors: 0, reasons: [], capacity: [] };
@@ -5049,14 +5113,27 @@ function analyzeLowerBound() {
       }
 
       // (4) 遅番の翌日が早番（休みなしの遅→早）
+      // 半休は検査と同じく出勤・早番として数える（「遅責 → 半休」も遅→早になる。数えていなかった）。
+      // 前月末が遅番で、1日が早番（半休）の希望なら、それも遅→早になる。
       if (AppState.settings.forbidLateEarly !== false) {
+        const wk = (x) => !!x && (isWork(x) || isHalfWork(x));
+        const earlyish = (x) => isEarlyCategory(x) || isHalfWork(x);
         g.staff.forEach(s => {
+          const pe = (typeof getPrevMonthEnd === 'function') ? getPrevMonthEnd(s) : {};
+          const b1 = confirmOf(s, 1);
+          if ((pe.cons || 0) >= 1 && pe.lastShift && isLate(pe.lastShift) && wk(b1) && earlyish(b1)) {
+            res.reasons.push({
+              kind: 'req-le', day: 0, staffId: s.id, cells: [1],
+              fix: `1日を休みにするか、遅番に変えてください`,
+              text: `${pfx}${s.name}さん: 前月末が遅番で、1日「${b1}」なので、休みを挟まずに遅番→早番になります`,
+            });
+          }
           for (let d = 1; d < days; d++) {
             const a = confirmOf(s, d), b = confirmOf(s, d + 1);
-            if (!a || !b || !isWork(a) || !isWork(b)) continue;
-            if (isLate(a) && isEarlyCategory(b)) {
+            if (!wk(a) || !wk(b)) continue;
+            if (isLate(a) && earlyish(b)) {
               res.reasons.push({
-                kind: 'req-le', day: d, staffId: s.id,
+                kind: 'req-le', day: d, staffId: s.id, cells: [d, d + 1],
                 fix: `${d}日か${d + 1}日のどちらかを休みにするか、時間帯を揃えてください`,
                 text: `${pfx}${s.name}さん: ${d}日「${a}」の翌日 ${d + 1}日「${b}」で、休みを挟まずに遅番→${isTraining(b) ? '研修' : '早番'}になります`,
               });
@@ -5279,7 +5356,8 @@ function analyzeLowerBound() {
           const rq = (AppState.requests[s.id] || {})[d];
           const fx = (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(s.id, d) : null;
           const v = fx || rq || '';
-          working = !!(v && isWork(v) && !isTraining(v));
+          // 半休も出勤として数える（検査の連勤と同じ。数えないと半休で連勤が切れていた）
+          working = !!(v && (isWork(v) || isHalfWork(v)) && !isTraining(v));
         }
         if (working) { if (!run) runStart = d; run++; continue; }
         if (run) {
