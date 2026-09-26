@@ -2427,14 +2427,24 @@ function candRowHtml(label, st, sec, btnHtml) {
     <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>${escapeHtml(label)}</b>${sec != null ? `<div class="hint">${sec}秒</div>` : ''}</td>
     <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${st.a.comp > st.b.comp ? '<b style="color:var(--danger)">' : ''}⛔ ${st.b.comp}→${st.a.comp}${st.a.comp > st.b.comp ? '</b>' : ''}</td>
     <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>🚨 ${st.b.must}→${st.a.must}件</b><div class="hint">${candMustText(st)}</div></td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.over, st.a.over, true)}日</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.offShort || 0, st.a.offShort || 0, true)}日</td>${CAND_BS() ? `
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.bsOver || 0, st.a.bsOver || 0, true)}回</td>` : ''}
     <td style="padding:6px 8px;border-top:1px solid var(--border);text-align:center"><b>${st.cells.length}</b>マス</td>
     <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">行き来 ${arrow(st.ikiB, st.ikiA, true)}</td>
     <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">ほかの🟡 ${arrow(st.othB, st.othA, false)}</td>
     <td style="padding:6px 8px;border-top:1px solid var(--border)">${btnHtml || ''}</td>
   </tr>
-  <tr><td colspan="7" class="hint" style="padding:0 8px 6px">${st.cells.length ? '変わるマス: ' + candCellsText(st.cells) : '変わるマスはありません'}</td></tr>`;
+  <tr><td colspan="${CAND_COLS()}" class="hint" style="padding:0 8px 6px">${st.cells.length ? '変わるマス: ' + candCellsText(st.cells) : '変わるマスはありません'}</td></tr>`;
 }
-const CAND_HEAD = '<tr><th style="text-align:left;padding:4px 8px">案</th><th style="text-align:left;padding:4px 8px">⛔ 6連勤以上</th><th style="text-align:left;padding:4px 8px">🚨</th><th style="padding:4px 8px">変わるマス</th><th style="text-align:left;padding:4px 8px">早番と遅番の行き来</th><th style="text-align:left;padding:4px 8px">ほかの🟡</th><th></th></tr>';
+// 連勤の超過日数・公休の足りない日数（切り替えの超過回数は「絶対」のときだけ）も欄に出す。件数だけでは、
+// 日数だけが違う案が同じ数字に見えていた。
+const CAND_BS = () => getRuleLevel('band-switch') === 'must';
+const CAND_COLS = () => CAND_BS() ? 10 : 9;
+const _cth = (t, left) => `<th style="${left ? 'text-align:left;' : ''}padding:4px 8px">${t}</th>`;
+const candHead = () => '<tr>' + _cth('案', 1) + _cth('⛔ 6連勤以上', 1) + _cth('🚨', 1)
+  + _cth('連勤の超過', 1) + _cth('公休の不足', 1) + (CAND_BS() ? _cth('切り替えの超過', 1) : '')
+  + _cth('変わるマス') + _cth('早番と遅番の行き来', 1) + _cth('ほかの🟡', 1) + '<th></th></tr>';
 
 /** 生成した直後の表を控える（生成・途中から作り直しのあと） */
 function genBaseTake() {
@@ -2925,9 +2935,13 @@ async function _trySurplusChange(apply, opts) {
       const woSt = candStats(base0.shifts, woShifts, beforeV);
       const adjList = candCellChanges(mid.shifts, withShifts);
       // つじつま合わせで🚨・⛔が「変更だけ」より良くならないなら、合わせない（マスが動くだけ）
-      const helps = !withSt.compUp && scoreCompare(withSt.a, woSt.a) < 0 &&
+      // 役に立つ: ⛔にならず、並べ方で「変更だけ」より良く、⛔・人員不足・🚨・連勤の超過日数・公休の足りない日数・
+      // 切り替えの超過回数（「絶対」のときだけ数える）のどれかが減る。
+      // 「変更だけ」は⛔が伸び、つじつま合わせは伸びないときも役に立つ（以前は「役に立たない」として、⛔で止めていた）。
+      const helps = !withSt.compUp && (woSt.compUp || (scoreCompare(withSt.a, woSt.a) < 0 &&
                     (withSt.a.comp < woSt.a.comp || withSt.a.under < woSt.a.under || withSt.a.must < woSt.a.must ||
-                     withSt.a.over < woSt.a.over || (withSt.a.offShort || 0) < (woSt.a.offShort || 0));
+                     withSt.a.over < woSt.a.over || (withSt.a.offShort || 0) < (woSt.a.offShort || 0) ||
+                     (withSt.a.bsOver || 0) < (woSt.a.bsOver || 0))));
       if (helps) {
         const pick = await o.chooseAdjust({ withSt, woSt, adjList });
         if (!pick) { restore(); return { ok: false, before, after: before, sd: null, cancelled: true, message: '実行しませんでした' }; }
@@ -2955,7 +2969,11 @@ async function _trySurplusChange(apply, opts) {
   // どれかが増える（🚨の種類・連勤の超過日数・🟡）ときは、取り消さずに本人へ確認する。
   // 合計件数では判断しない（合計が減っても🚨が増えることがある）。
   const up = scoreWorsened(aSc, bSc);
-  if (up.length && chosen) {   // 並べた案を見て選んだので、あらためては聞かない
+  // 並べた案を見て選んだときは、🚨の件数（表で見えている）ではあらためて聞かない。ただし連勤の超過日数・
+  // 公休の足りない日数・切り替えの超過回数が増えるときは聞く（件数が同じだと見落としやすく、以前は
+  // 「変更だけ」で公休の不足が1日→2日に増えたまま確認なしで入っていた）。
+  const upDays = up.filter(x => x.key === 'over' || x.key === 'offShort' || x.key === 'bsOver');
+  if (up.length && chosen && !upDays.length) {
     recordDeltaHistory(changes);
     noteEditList('余の解消', changes);
     autoSave();
@@ -3108,7 +3126,7 @@ function showSurplusResolveModal() {
     $m.style.border = '1px solid var(--border)';
     $m.innerHTML = `<div style="font-size:14px;margin-bottom:4px"><b>つじつま合わせで変わるマス：${adjList.length}件</b></div>
       <div class="hint" style="margin-bottom:6px">${candCellsText(adjList, 20)}</div>
-      <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead>${CAND_HEAD}</thead><tbody>
+      <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead>${candHead()}</thead><tbody>
         ${candRowHtml('つじつま合わせあり', withSt, null, `<button class="btn btn-primary" id="adjWith" ${withSt.compUp ? 'disabled title="6連勤以上になるため選べません"' : ''}>これで実行</button>`)}
         ${candRowHtml('変更だけ（つじつま合わせなし）', woSt, null, `<button class="btn" id="adjWithout" ${woSt.compUp ? 'disabled title="6連勤以上になるため選べません"' : ''}>これで実行</button>`)}
       </tbody></table></div>

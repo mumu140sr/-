@@ -1078,7 +1078,7 @@ function setupResultPanel() {
           <div class="modal-body">
             <div class="hint" style="margin-bottom:8px">変えるマスが少ない案から順に計算して並べます。どれも、選ぶまで表は変わりません。
               🚨がどの種類も増えない案だけを出します。変えるマスは、休み↔余の書き替えを除いた数です。</div>
-            <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:13px"><thead>${CAND_HEAD}</thead><tbody id="rcRows"></tbody></table></div>
+            <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:13px"><thead>${candHead()}</thead><tbody id="rcRows"></tbody></table></div>
             <div id="rcStatus" style="margin-top:8px"></div>
             <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn" id="rcStop" style="background:#e74c3c;color:#fff">⏹ 中止（出ている案は選べます）</button>
@@ -1095,8 +1095,8 @@ function setupResultPanel() {
       const redraw = () => {
         $rows.innerHTML = cands.map((c, i) => candRowHtml(c.label, c.st, c.sec,
           `<button class="btn btn-primary" data-rcgo="${i}" ${running ? 'disabled title="計算中です。⏹ 中止するか、終わるのを待ってから選んでください"' : ''}>反映</button>`)).join('')
-          || (running ? '' : '<tr><td colspan="7" class="hint" style="padding:8px">🚨を減らせる案は見つかりませんでした。関係する🔒を解除すると直せる場合があります。</td></tr>');
-        $rows.innerHTML += skipped.map(t => `<tr><td colspan="7" class="hint" style="padding:4px 8px;border-top:1px dashed var(--border)">${escapeHtml(t)}</td></tr>`).join('');
+          || (running ? '' : '<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">🚨を減らせる案は見つかりませんでした。関係する🔒を解除すると直せる場合があります。</td></tr>');
+        $rows.innerHTML += skipped.map(t => `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:4px 8px;border-top:1px dashed var(--border)">${escapeHtml(t)}</td></tr>`).join('');
         $rows.querySelectorAll('[data-rcgo]').forEach(b => b.addEventListener('click', () => applyCand(cands[+b.dataset.rcgo])));
       };
       const applyCand = (c) => {
@@ -1141,10 +1141,12 @@ function setupResultPanel() {
           }
           const sec = Math.round((Date.now() - t0) / 1000);
           const st = candStats(baseShifts, r._shifts || r.shifts, beforeV, r.violations);
-          // 🚨がどの種類も増えず、⛔ も悪くならず、🚨・⛔・連勤の超過日数・公休の足りない日数のどれかが減った案だけを出す
+          // 🚨がどの種類も増えず、⛔ も悪くならず、🚨・⛔・連勤の超過日数・公休の足りない日数・切り替えの超過回数
+          // （「絶対」のときだけ数える）のどれかが減った案だけを出す
           // 連勤の超過日数・公休の足りない日数だけが減る案も出す（件数が同じでも日数が減れば改善）
           const ok = !st.compUp && scoreBetter(st.a, beforeSc) && (st.a.must < beforeSc.must || st.a.comp < beforeSc.comp ||
-                     st.a.over < beforeSc.over || (st.a.offShort || 0) < (beforeSc.offShort || 0));
+                     st.a.over < beforeSc.over || (st.a.offShort || 0) < (beforeSc.offShort || 0) ||
+                     (st.a.bsOver || 0) < (beforeSc.bsOver || 0));
           // 前の案より🚨が減っていない案は出さない（同じ直り方で、変えるマスが多いだけ）。
           // ただし「全部直す」は並べたままにする（表を作り直すので行き来が減ることが多く、
           // 行き来を減らしたい月はこれを選べるようにする。利用者の希望）。
