@@ -2926,11 +2926,18 @@ async function _trySurplusChange(apply, opts) {
       const adjList = candCellChanges(mid.shifts, withShifts);
       // つじつま合わせで🚨・⛔が「変更だけ」より良くならないなら、合わせない（マスが動くだけ）
       const helps = !withSt.compUp && scoreCompare(withSt.a, woSt.a) < 0 &&
-                    (withSt.a.comp < woSt.a.comp || withSt.a.under < woSt.a.under || withSt.a.must < woSt.a.must || withSt.a.over < woSt.a.over);
-      const pick = helps ? await o.chooseAdjust({ withSt, woSt, adjList }) : 'without';
-      if (!pick) { restore(); return { ok: false, before, after: before, sd: null, cancelled: true, message: '実行しませんでした' }; }
-      if (pick === 'without') _applyChangeList(adjCells, 'undo');
-      chosen = true;
+                    (withSt.a.comp < woSt.a.comp || withSt.a.under < woSt.a.under || withSt.a.must < woSt.a.must ||
+                     withSt.a.over < woSt.a.over || (withSt.a.offShort || 0) < (woSt.a.offShort || 0));
+      if (helps) {
+        const pick = await o.chooseAdjust({ withSt, woSt, adjList });
+        if (!pick) { restore(); return { ok: false, before, after: before, sd: null, cancelled: true, message: '実行しませんでした' }; }
+        if (pick === 'without') _applyChangeList(adjCells, 'undo');
+        chosen = true;   // 並べた案を見て選んだので、下の「悪くなります」はあらためて聞かない
+      } else {
+        // 選ぶ画面を出していないときは「変更だけ」にして、下の確認（悪くなりますが、よいですか）を通す。
+        // chosen を真にしていたため、🚨が増える変更（遅番の翌日を早番にする など）が確認なしで入っていた。
+        _applyChangeList(adjCells, 'undo');
+      }
     }
   }
   changes = collectChanges();         // 確認を待つ前に、この変更で変えた所を覚えておく
