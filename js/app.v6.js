@@ -264,20 +264,38 @@ function renderWishFixBox(modal) {
         1つずつ試しに作り直します。その🚨が消え、ほかの🚨が増えない案だけを出します。変えるのはシフトの種類の希望と休みの希望だけ
         （半休・有給・🔒固定は動かしません）。表・希望は、「この案にする」を押すまで変わりません。1つの案に約1分かかります。</div>
       <button class="btn" id="wfGo">計算で確かめる</button> <button class="btn" id="wfStop" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button>
+      <div id="wfNote" style="display:none;margin:8px 0 0;padding:6px 10px;border-radius:8px;background:#fefcbf;color:#744210;font-size:13px"></div>
       <div id="wfOut" style="margin-top:8px;font-size:13px;line-height:1.7"></div></div>`;
   const $out = box.querySelector('#wfOut'), $go = box.querySelector('#wfGo'), $stop = box.querySelector('#wfStop');
+  // 画面の中の帯に出す知らせ（トーストは暗幕の後ろに出て見えなかった）
+  const $note = box.querySelector('#wfNote');
+  const wfNote = (msg) => { $note.textContent = msg; $note.style.display = msg ? 'block' : 'none'; };
   let stopped = false;
   const stopNow = () => { stopped = true; if (typeof cancelMILP === 'function') cancelMILP(); };
   $stop.addEventListener('click', stopNow);
   let running = false;
   modal._stopCalc = () => { if (running) stopNow(); };   // 画面を閉じたら計算も止める
   $go.addEventListener('click', async () => {
-    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+    if (typeof calcBusy === 'function' && calcBusy()) {
+      const own = (typeof calcOwner === 'function' && calcOwner()) || '';
+      wfNote(/確認待ち/.test(own) ? '余の解消パネルの質問に答えてからにしてください'
+                                  : `いまは「${own || '計算'}」の計算中です。終わってからにしてください`);
+      return;
+    }
     if (!calcBegin('希望の変え方を確かめる')) return;
+    wfNote('');
     stopped = false; running = true; $go.disabled = true; $stop.style.display = 'inline-block';
     const fp0 = (typeof contentFingerprint === 'function') ? contentFingerprint() : '';
     const lines = [];
-    const show = (extra) => { $out.innerHTML = lines.join('') + (extra || ''); };
+    // 計算の途中は「この案にする」を押せなくし、帯で知らせる（途中で押しても何も起きなかった）
+    const show = (extra) => {
+      let html = lines.join('');
+      if (running && /data-wf="/.test(html)) {
+        html = html.replace(/data-wf="/g, 'disabled title="全部の計算が終わってから選べます" data-wf="');
+        wfNote('全部の計算が終わってから選べます');
+      }
+      $out.innerHTML = html + (extra || '');
+    };
     // 同じ変更（同じ希望の組み合わせ）の計算は使い回す（別の🚨の案として同じ変更が出ることがある）
     const cache = {};
     let done = 0, total = 1, secSum = 0;
@@ -331,7 +349,8 @@ function renderWishFixBox(modal) {
           // その🚨が消え、決まり（scoreBetter: どれも増えず、どれかが減る）でも改善のときだけ ✅。
           // 🚨が別の人・日に移っただけの案（件数は同じ）には付けない。
           const better = gone && scoreBetter(res.sc, base.sc) && !compWorsened(base.r.violations || [], res.r.violations || []).length;
-          // 🚨を消したくて見ているので、🚨の合計（⛔を含む）が減らない案には ✅ を付けない（5連勤が別の所に移り、🟡だけが減る案など）
+          // 🚨を消したくて見ているので、🚨の合計（⛔を含む）が減らない案には ✅ を付けない（5連勤が別の所に移り、🟡だけが減る案など）。
+          // ⛔が減る案（6連勤が5連勤に移る など）は、🚨の合計が同じでも ✅
           const ok = better && (res.sc.must < base.sc.must || res.sc.comp < base.sc.comp);
           const idx = lines.length;
           if (better && !ok) {
@@ -353,6 +372,9 @@ function renderWishFixBox(modal) {
       lines.push(`<div class="hint">${/^cancel/.test(e.message || '') ? '中止しました。' : '計算に失敗しました: ' + escapeHtml(e.message || '')}</div>`); show();
     } finally {
       running = false; calcEnd(); $go.disabled = false; $stop.style.display = 'none';
+      // 終わったら「この案にする」を押せるように描き直し、途中の知らせを消す
+      if ($note.textContent === '全部の計算が終わってから選べます') wfNote('');
+      if (lines.length) show();
       // 画面の中に知らせを出し、すぐ横に「計算で確かめる」を置く（トーストは暗幕の後ろに出て見えなかった）
       const stale = (msg) => {
         $out.querySelectorAll('[data-wf]').forEach(x => { if (x.textContent !== '変えました') x.disabled = true; });
@@ -680,9 +702,15 @@ function showForecastModal() {
       const mustTxt = cmp(base.must, x.st.must, '件') + (bad
         ? (mustKeys(upKeys).length ? `<div style="color:#c53030">増えます（${words(mustKeys(upKeys))}）</div>`
           : upKeys.indexOf('comp') >= 0 ? '<div style="color:#c53030">6連勤以上が増えるため選べません</div>'
-          // 範囲では増えて見えないが、いちばん良い回どうしでは増えるとき（⛔込みの数で出す）
-          : `<div style="color:#c53030">増えます（いちばん良い回どうしで ${upKeys.map(k => `${labOf(k)} ${rng(bki[k] || z, '')}→${rng(cki[k] || z, unitOf(k))}`).join('・')}）</div>`)
-        : upWorst ? (mustKeys(upMax).length ? `<div style="color:#b7791f">回によっては増えます（${words(mustKeys(upMax))}）</div>` : '<div style="color:#b7791f">回によっては増えます（6連勤以上）</div>')
+          // 範囲では増えて見えないが、いちばん良い回どうしでは増えるとき: いちばん良い回どうしの数（⛔込み）をそのまま出す
+          : `<div style="color:#c53030">増えます（いちばん良い回どうしで ${scoreWorsened(x.st.best.sc, base.best.sc).filter(w => counted(w.key) && w.key !== 'comp')
+              .map(w => `${labOf(w.key)} ${w.from}→${w.to}${unitOf(w.key)}`).join('・')}）</div>`)
+        : upWorst ? (mustKeys(upMax).length ? `<div style="color:#b7791f">回によっては増えます（${words(mustKeys(upMax))}）</div>`
+          // ⛔が本当に新しくできた・伸びたときだけ「6連勤以上」。そうでなければ（基準の別々の回の⛔と5連勤が1つの回に
+          // まとまった、7連勤が6連勤に縮んだ など）⛔込みの数で出す
+          : compAny ? '<div style="color:#b7791f">回によっては増えます（6連勤以上）</div>'
+          : `<div style="color:#b7791f">回によっては増えます（${(upMax.filter(k => k !== 'comp').length ? upMax.filter(k => k !== 'comp') : ['comp'])
+              .map(k => `${k === 'comp' ? '6連勤以上の件数' : labOf(k)} ${rng(bki[k] || z, '')}→${rng(cki[k] || z, unitOf(k))}`).join('・')}）</div>`)
         : '<div class="hint">増えません</div>');
       // 切り替えの超過・🟡が増える案には ⚠️（最小か最大のどちらかが増えたとき）
       const warn = (a, b) => (a.min > b.min || a.max > b.max) ? '⚠️ ' : '';
