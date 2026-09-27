@@ -420,13 +420,22 @@ function forecastBandOver(vs) {   // 切り替えの超過回数（「なるべ�
   return (vs || []).reduce((n, v) => n + (v && v.type === 'band-switch' ? (v.over || 0) : 0), 0);
 }
 // 1回ぶんの、種類ごとの数（🚨の種類・⛔・連勤の超過日数・公休の足りない日数・切り替えの超過回数）
-function forecastKeys(r) {
+// raw=true は⛔込みの数（増えたかの判定に使う）。false は文に出す数（⛔の連勤は⛔の欄で数えるので除く）
+function forecastKeys(r, raw) {
   const m = Object.assign({}, r.sc.byMust || {});
-  if (m.consecutive != null) m.consecutive -= r.sc.comp;   // ⛔の連勤は⛔の欄で数える
+  if (raw) { m.comp = r.sc.comp; m.over = r.sc.over; m.offShort = r.sc.offShort || 0; m.bsOver = r.sc.bsOver || 0; return m; }
+  if (m.consecutive != null) m.consecutive -= r.sc.comp;
   // 連勤の超過日数も、⛔の連勤の分は除く（⛔は⛔の欄だけで出す）
   const compOver = (r.violations || []).reduce((n, v) => n + (v && v.type === 'consecutive' && v.compliance ? (v.over || 0) : 0), 0);
   m.comp = r.sc.comp; m.over = r.sc.over - compOver; m.offShort = r.sc.offShort || 0; m.bsOver = r.sc.bsOver || 0;
   return m;
+}
+function forecastRanges(runs, raw) {
+  const per = runs.map(r => forecastKeys(r, raw)), keys = new Set();
+  per.forEach(m => Object.keys(m).forEach(k => keys.add(k)));
+  const o = {};
+  keys.forEach(k => { const xs = per.map(m => m[k] || 0); o[k] = { min: Math.min(...xs), max: Math.max(...xs) }; });
+  return o;
 }
 function forecastStats(runs) {
   const pick = (f) => { const xs = runs.map(f); return { min: Math.min(...xs), max: Math.max(...xs) }; };
@@ -438,13 +447,8 @@ function forecastStats(runs) {
     best: byCmp[0], worst: byCmp[byCmp.length - 1],
     // 種類ごとの、全部の回の最小〜最大（まん中の回だけで増えた種類も見落とさない）。
     // 連勤超過は⛔（6連勤以上）の分を除いて数える（⛔は別の欄。同じ⛔が2つの文で出ていた）
-    byK: (() => {
-      const per = runs.map(forecastKeys), keys = new Set();
-      per.forEach(m => Object.keys(m).forEach(k => keys.add(k)));
-      const o = {};
-      keys.forEach(k => { const xs = per.map(m => m[k] || 0); o[k] = { min: Math.min(...xs), max: Math.max(...xs) }; });
-      return o;
-    })(),
+    byK: forecastRanges(runs, false),    // 文に出す数（⛔を除く）
+    byKi: forecastRanges(runs, true),    // 増えたかの判定に使う数（⛔込み）
     // 全部の回の違反（⛔が新しくできた・伸びたかを、基準の全部の回と比べるため）
     allVs: [].concat(...runs.map(r => r.violations || [])),
   };
@@ -638,8 +642,9 @@ function showForecastModal() {
       const up = scoreWorsened(x.st.best.sc, base.best.sc).map(w => w.key).filter(counted);
       const upComp = compWorsened(base.best.violations || [], x.st.best.violations || []).length > 0;
       const bad = up.length > 0 || upComp;
-      const bk = base.byK, ck = x.st.byK;
-      const upMax = bad ? [] : Object.keys(Object.assign({}, ck, bk)).filter(k => counted(k) && ((ck[k] || {}).max || 0) > ((bk[k] || {}).max || 0));
+      // 「増えたか」は⛔込みの数（byKi）で決める。⛔を除いた数（byK）は文に出すときだけ使う
+      const bk = base.byK, ck = x.st.byK, bki = base.byKi, cki = x.st.byKi;
+      const upMax = bad ? [] : Object.keys(Object.assign({}, cki, bki)).filter(k => counted(k) && ((cki[k] || {}).max || 0) > ((bki[k] || {}).max || 0));
       const compAny = !bad && compWorsened(base.allVs, x.st.allVs).length > 0;
       if (compAny && upMax.indexOf('comp') < 0) upMax.push('comp');
       const upWorst = upMax.length > 0;
@@ -649,9 +654,14 @@ function showForecastModal() {
       const upKeys = bad ? up.filter(k => k !== 'comp').concat((upComp || up.indexOf('comp') >= 0) ? ['comp'] : []) : [];
       const compMark = (bad && upKeys.indexOf('comp') >= 0) ? '<div style="color:#c53030">増えます</div>'
         : upMax.indexOf('comp') >= 0 ? '<div style="color:#b7791f">回によっては増えます</div>' : '';
-      const mustKeys = (keys) => keys.filter(k => k !== 'comp');
+      // 文に出すのは、⛔を除いた数でも増えている項目だけ（⛔だけが増えたときに「0→0件」などと出ていた）
+      const mustKeys = (keys) => keys.filter(k => k !== 'comp' &&
+        (((ck[k] || z).max > (bk[k] || z).max) || ((ck[k] || z).min > (bk[k] || z).min)));
       const mustTxt = cmp(base.must, x.st.must, '件') + (bad
-        ? (mustKeys(upKeys).length ? `<div style="color:#c53030">増えます（${words(mustKeys(upKeys))}）</div>` : '<div style="color:#c53030">6連勤以上が増えるため選べません</div>')
+        ? (mustKeys(upKeys).length ? `<div style="color:#c53030">増えます（${words(mustKeys(upKeys))}）</div>`
+          : upKeys.indexOf('comp') >= 0 ? '<div style="color:#c53030">6連勤以上が増えるため選べません</div>'
+          // 範囲では増えて見えないが、いちばん良い回どうしでは増えるとき（⛔込みの数で出す）
+          : `<div style="color:#c53030">増えます（いちばん良い回どうしで ${upKeys.map(k => `${labOf(k)} ${rng(bki[k] || z, '')}→${rng(cki[k] || z, unitOf(k))}`).join('・')}）</div>`)
         : upWorst ? (mustKeys(upMax).length ? `<div style="color:#b7791f">回によっては増えます（${words(mustKeys(upMax))}）</div>` : '<div style="color:#b7791f">回によっては増えます（6連勤以上）</div>')
         : '<div class="hint">増えません</div>');
       // 切り替えの超過・🟡が増える案には ⚠️（最小か最大のどちらかが増えたとき）
@@ -677,7 +687,7 @@ function showForecastModal() {
   }, 1000);
   const applyCand = (x) => {
     if (!x || running) return;
-    if (typeof calcBusy === 'function' && calcBusy()) { note(`いまは「${calcOwner()}」の計算中です。終わってからにしてください`); return; }
+    if (typeof calcBusy === 'function' && calcBusy()) { note(/確認待ち/.test(calcOwner() || '') ? '余の解消パネルの質問に答えてからにしてください' : `いまは「${calcOwner()}」の計算中です。終わってからにしてください`); return; }
     if (fp0 && forecastFp() !== fp0) { note('表などが変わったため、この見込みは使えません。計算し直してください'); return; }
     const names = [];
     // 足す直前のいまの表を数えておく（保存されていたエラーの一覧は古いことがあり、担当以外の差が混ざっていた）
@@ -696,7 +706,7 @@ function showForecastModal() {
     close();
   };
   $('fcGo').addEventListener('click', async () => {
-    if (typeof calcBusy === 'function' && calcBusy()) { note(`いまは「${calcOwner()}」の計算中です。終わってからにしてください`); return; }
+    if (typeof calcBusy === 'function' && calcBusy()) { note(/確認待ち/.test(calcOwner() || '') ? '余の解消パネルの質問に答えてからにしてください' : `いまは「${calcOwner()}」の計算中です。終わってからにしてください`); return; }
     const todo = cands.filter(c => c.on);
     if (!calcBegin('設定を変えたときの見込み')) return;
     running = true; stopped = false; $('fcGo').disabled = true; $('fcStop').style.display = 'inline-block'; $('fcEst').textContent = '';
