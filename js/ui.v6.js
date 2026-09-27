@@ -1300,6 +1300,8 @@ function renderStaffTable() {
         if (label) label.style.background = '#edf2f7';
       }
       autoSave();
+      // いまの表のエラーの一覧を数え直す（担当外シフトなどの判定が変わるため）
+      if (typeof recheckAfterStaffChange === 'function') recheckAfterStaffChange();
     });
   });
 
@@ -2905,6 +2907,7 @@ async function _trySurplusChange(apply, opts) {
   const restore = () => {
     _applyChangeList(changes || collectChanges(), 'undo');
     AppState.violations = checkViolations(AppState.shifts);
+    saveToStorage();   // 計算中に自動保存された変更が、保存データに残らないように
   };
   const beforeV = checkViolations(AppState.shifts);
   const before = beforeV.length;
@@ -3992,6 +3995,8 @@ function showSurplusResolveModal() {
         AppState.violations = checkViolations(AppState.shifts);
         say((/^cancel/.test(e.message || '') ? '中止しました。元に戻しました。' : '作り直しに失敗しました: ' + escapeHtml(e.message)), false);
       } finally { calcEnd(); }
+      // 戻したあとも保存し直す（画面では🔒と必要人数+1が戻っても、保存データに残って読み直すと戻ってきた）
+      saveToStorage();
       planRows = null; recoDirty = true;
       busy(false); renderResultTable(); render();
     }));
