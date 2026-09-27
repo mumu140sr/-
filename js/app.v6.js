@@ -330,8 +330,14 @@ function renderWishFixBox(modal) {
           const gone = !_wishTargetStill(res.r.violations || [], t);
           // その🚨が消え、決まり（scoreBetter: どれも増えず、どれかが減る）でも改善のときだけ ✅。
           // 🚨が別の人・日に移っただけの案（件数は同じ）には付けない。
-          const ok = gone && scoreBetter(res.sc, base.sc) && !compWorsened(base.r.violations || [], res.r.violations || []).length;
+          const better = gone && scoreBetter(res.sc, base.sc) && !compWorsened(base.r.violations || [], res.r.violations || []).length;
+          // 🚨を消したくて見ているので、🚨の合計（⛔を含む）が減らない案には ✅ を付けない（5連勤が別の所に移り、🟡だけが減る案など）
+          const ok = better && (res.sc.must < base.sc.must || res.sc.comp < base.sc.comp);
           const idx = lines.length;
+          if (better && !ok) {
+            lines.push(`<div class="hint" style="margin-left:1em">➖ ${escapeHtml(c.text)} → ${escapeHtml(scoreSummary(res.sc))}（🚨は減りません（別の日・人に移ります）・${res.cached ? '前の計算を使いました' : res.sec + '秒'}）</div>`);
+            continue;
+          }
           lines.push(ok
             ? `<div style="margin-left:1em">✅ ${escapeHtml(c.text)} → <b>${escapeHtml(scoreSummary(res.sc))}</b>（${res.cached ? '前の計算を使いました' : res.sec + '秒'}）
                  <button class="btn" data-wf="${idx}" style="padding:1px 10px">この案にする</button></div>`
@@ -347,17 +353,31 @@ function renderWishFixBox(modal) {
       lines.push(`<div class="hint">${/^cancel/.test(e.message || '') ? '中止しました。' : '計算に失敗しました: ' + escapeHtml(e.message || '')}</div>`); show();
     } finally {
       running = false; calcEnd(); $go.disabled = false; $stop.style.display = 'none';
+      // 画面の中に知らせを出し、すぐ横に「計算で確かめる」を置く（トーストは暗幕の後ろに出て見えなかった）
+      const stale = (msg) => {
+        $out.querySelectorAll('[data-wf]').forEach(x => { if (x.textContent !== '変えました') x.disabled = true; });
+        let $n = $out.querySelector('#wfStale');
+        if (!$n) { $n = document.createElement('div'); $n.id = 'wfStale';
+          $n.style.cssText = 'margin:8px 0;padding:6px 10px;border-radius:8px;background:#fefcbf;color:#744210';
+          $out.appendChild($n); }
+        $n.innerHTML = `${escapeHtml(msg)} <button class="btn" style="padding:1px 10px">計算で確かめる</button>`;
+        $n.querySelector('button').addEventListener('click', () => $go.click());
+      };
       $out.querySelectorAll('[data-wf]').forEach(b => b.addEventListener('click', () => {
-        const c = wfApply[+b.dataset.wf]; if (!c) return;
+        const c = wfApply[+b.dataset.wf]; if (!c || b.disabled) return;
         if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
         if (fp0 && typeof contentFingerprint === 'function' && contentFingerprint() !== fp0) {
-          toast('希望や表が変わったため、この案は使えません。もう一度「計算で確かめる」を押してください', 'error', 6000); return;
+          stale('希望や表が変わったので、この案は使えません。ほかの案を使うには、もう一度「計算で確かめる」を押してください。'); return;
         }
+        // 希望の変更も「元に戻す」で戻せるように、変えた所だけを履歴に積む
+        const hb = (typeof captureChangeBase === 'function') ? captureChangeBase() : null;
         c.changes.forEach(x => { AppState.requests[x.id] = AppState.requests[x.id] || {};
           if (x.to) AppState.requests[x.id][x.day] = x.to; else delete AppState.requests[x.id][x.day]; });
+        if (hb && typeof recordDeltaHistory === 'function') recordDeltaHistory(changesSince(hb));
         autoSave(); if (typeof renderCalendar === 'function') renderCalendar();
-        toast('希望を変えました: ' + c.text, 'success', 6000);
         b.disabled = true; b.textContent = '変えました';
+        // 1つ反映したら希望が変わるので、ほかの案は押せなくする
+        stale(`希望を変えました（${c.text}）。希望が変わったので、ほかの案を使うには、もう一度「計算で確かめる」を押してください。`);
       }));
     }
   });
