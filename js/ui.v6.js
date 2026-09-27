@@ -3084,8 +3084,10 @@ function showSurplusResolveModal() {
   // パネルを閉じる（✕・開き直し）。答えていない確認は「やめる」にする。確認があれば true
   modal._closePanel = () => {
     panelClosed = true;
-    // つじつま合わせの計算中に閉じたら、計算も止める（止めずに閉じると、終わるまでほかの計算ができなかった）
-    if (typeof calcOwner === 'function' && calcOwner() === '余の解消' && typeof cancelMILP === 'function') cancelMILP();
+    // このパネルの計算中（つじつま合わせ・組み直して比べる・この通りに作り直す）に閉じたら、計算も止める
+    // （止めずに閉じると、終わるまでほかの計算ができなかった）。作り直しは中止のときと同じく、変えた所を戻す
+    const own = typeof calcOwner === 'function' ? calcOwner() : null;
+    if (['余の解消', '余の使い道の候補さがし', '余の使い道の作り直し'].includes(own) && typeof cancelMILP === 'function') cancelMILP();
     const had = !!pendingAsk;
     if (pendingAsk) pendingAsk(false);
     modal.remove();

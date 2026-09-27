@@ -335,7 +335,7 @@ function renderWishFixBox(modal) {
         }
         if (!any && !stopped) lines.push('<div class="hint" style="margin-left:1em">変えてよい希望だけでは、この🚨を消せませんでした。</div>');
       }
-      if (stopped) lines.push('<div class="hint">中止しました。出ている案から選べます。</div>');
+      if (stopped) lines.push(`<div class="hint">${lines.some(l => l.includes('data-wf=')) ? '中止しました。出ている案から選べます。' : '中止しました。'}</div>`);
       show();
     } catch (e) {
       lines.push(`<div class="hint">${/^cancel/.test(e.message || '') ? '中止しました。' : '計算に失敗しました: ' + escapeHtml(e.message || '')}</div>`); show();
@@ -405,6 +405,219 @@ function renderDayMarginsHtml() {
 }
 
 // 実現性チェック（生成前）: 各エラーが「避けられる/避けられない」かを判定して表示
+// ===== ④ 設定を変えたときの見込み =====
+// 「この人の担当に〇〇を足すと、切り替えの超過が◯回減る」を、試し計算で見せる。
+// いまの設定で試しに作ったもの（基準）と、担当を足して試しに作ったものを比べる。
+// どれも試し計算（noApply・staffPatch）で、本物の表・スタッフ・保存データは「この設定にする」を押すまで変えない。
+// 生成は1回ごとにぶれるので、同じ条件で数回作り、最小〜最大の範囲で出す。
+function forecastBandOver(vs) {   // 切り替えの超過回数（「なるべく」でも数える）
+  return (vs || []).reduce((n, v) => n + (v && v.type === 'band-switch' ? (v.over || 0) : 0), 0);
+}
+function forecastStats(runs) {
+  const pick = (f) => { const xs = runs.map(f); return { min: Math.min(...xs), max: Math.max(...xs) }; };
+  return {
+    must: pick(r => r.sc.must), comp: pick(r => r.sc.comp), soft: pick(r => r.sc.soft),
+    bs: pick(r => forecastBandOver(r.violations)),
+    best: runs.slice().sort((a, b) => scoreCompare(a.sc, b.sc))[0],
+  };
+}
+// 候補: いまの表（無ければ基準の試し計算）で切り替えを超えた人が、切り替えた日に入ったシフトを、
+// まだ担当できない上位の人（副店長・チーフ・リーダー）に足す。1人ずつの案と、まとめて足す案。
+function forecastCandidates(shifts, vs) {
+  const staff = AppState.staff || [];
+  const pri = s => (POSITION_TYPES[s.positionType] || {}).priority || 9;
+  const keysUsed = {};   // シフト → 切り替えの日に入った回数
+  (vs || []).filter(v => v.type === 'band-switch').forEach(v => {
+    const row = (shifts || {})[v.staffId] || {};
+    const m = /切り替えた日: ([\d・]+)日/.exec(v.message || '');
+    const days = m ? m[1].split('・').map(Number) : [];
+    days.forEach(d => { const k = row[d]; if (k && isWork(k) && !isHalfWork(k)) keysUsed[k] = (keysUsed[k] || 0) + 1; });
+  });
+  // 切り替えの日に2回以上入ったシフトだけ、多い順に3つまで（候補が多すぎると1つ約1分で終わらない）
+  const keys = Object.keys(keysUsed).filter(k => keysUsed[k] >= 2).sort((a, b) => keysUsed[b] - keysUsed[a]).slice(0, 3);
+  const out = [];
+  keys.forEach(k => {
+    const st = (AppState.shiftTypes || []).find(t => t.key === k);
+    if (!st || st.isTraining) return;
+    const holders = staff.filter(s => (s.allowedShifts || []).includes(k));
+    const dept = holders.length ? getStaffDepartment(holders[0]) : null;
+    const who = staff.filter(s => !(s.allowedShifts || []).includes(k) && pri(s) <= 3 &&
+                                  (!dept || getStaffDepartment(s) === dept))
+                     .sort((a, b) => pri(a) - pri(b));
+    if (who.length > 1) out.push({ label: `${who.map(s => s.name + 'さん').join('・')}の担当に「${k}」を足す（まとめて）`,
+                                    patch: who.map(s => ({ id: s.id, add: [k] })), top: true });
+    who.slice(0, 2).forEach(s => out.push({ label: `${s.name}さんの担当に「${k}」を足す`, patch: [{ id: s.id, add: [k] }] }));
+  });
+  if (keys.length > 1) {
+    const all = [];
+    keys.forEach(k => {
+      const h = staff.find(s => (s.allowedShifts || []).includes(k));
+      staff.filter(s => !(s.allowedShifts || []).includes(k) && pri(s) <= 3 && (!h || getStaffDepartment(s) === getStaffDepartment(h)))
+           .forEach(s => all.push({ id: s.id, add: [k] }));
+    });
+    if (all.length) out.push({ label: `上位の人（副店長・チーフ・リーダー）の担当に「${keys.join('」「')}」をまとめて足す`, patch: all });
+  }
+  return out;
+}
+
+// 見込みが古くなったかの指紋（表・希望などに加え、担当・スキル・設定・必要人数も見る）
+function forecastFp() {
+  return contentFingerprint() + JSON.stringify([AppState.settings, AppState.staff, AppState.skills, AppState.dailySkills,
+    AppState.roleRequirements, AppState.roleRequirementsCast, AppState.shiftTypes, AppState.specialDays, AppState.events]);
+}
+function showForecastModal() {
+  if (!AppState.staff.length) { toast('スタッフを登録してください', 'error'); return; }
+  const old = document.getElementById('forecastModal');
+  if (old) { if (old._stopCalc) old._stopCalc(); old.remove(); }
+  const modal = document.createElement('div');
+  modal.id = 'forecastModal';
+  modal.className = 'modal-overlay show';
+  modal.style.zIndex = 10050;
+  const staffOpts = AppState.staff.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
+  const keyOpts = (AppState.shiftTypes || []).filter(t => !t.isTraining && isWork(t.key))
+    .map(t => `<option value="${escapeHtml(t.key)}">${escapeHtml(t.key)}</option>`).join('');
+  modal.innerHTML = `<div class="modal-content" style="max-width:980px;width:calc(100vw - 32px)">
+      <div class="modal-header"><h3 style="margin:0">🔮 設定を変えたときの見込み</h3><button class="modal-close" id="fcClose">✕</button></div>
+      <div class="modal-body">
+        <div class="hint" style="margin-bottom:8px">担当シフトを足したら、表がどう変わりそうかを試しに作って比べます。
+          いまの設定で試しに作ったもの（基準）と比べます。表・スタッフは「この設定にする」を押すまで変わりません。
+          生成は1回ごとにぶれるので、同じ条件で数回作り、最小〜最大の範囲で出します。1回に約1分かかります。</div>
+        <div id="fcCands" style="font-size:13px;line-height:1.9"></div>
+        <div style="margin:6px 0;font-size:13px">自分で足す: <select id="fcWho">${staffOpts}</select> の担当に
+          <select id="fcKey">${keyOpts}</select> を <button class="btn" id="fcAdd" style="padding:1px 10px">候補に加える</button></div>
+        <div style="margin:8px 0;font-size:13px">1つの条件で作る回数: <select id="fcRuns"><option>1</option><option selected>2</option><option>3</option></select>
+          <button class="btn btn-primary" id="fcGo">見込みを計算する</button>
+          <button class="btn" id="fcStop" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button></div>
+        <div id="fcStatus" class="hint"></div>
+        <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr>
+          <th style="text-align:left;padding:4px">変える内容</th><th style="padding:4px">⛔</th><th style="padding:4px">🚨</th>
+          <th style="padding:4px">切り替えの超過</th><th style="padding:4px">🟡</th><th style="padding:4px"></th></tr></thead>
+          <tbody id="fcRows"></tbody></table></div>
+      </div></div>`;
+  document.body.appendChild(modal);
+  const $ = (id) => modal.querySelector('#' + id);
+  const cands = [];
+  const renderCands = () => {
+    $('fcCands').innerHTML = cands.length
+      ? '<b>試す候補</b>（チェックしたものを計算します）<br>' + cands.map((c, i) =>
+          `<label style="display:block"><input type="checkbox" data-fci="${i}" ${c.on ? 'checked' : ''}> ${escapeHtml(c.label)}</label>`).join('')
+      : '<span class="hint">切り替えの超過から出せる候補はありません（下の「自分で足す」で候補を加えられます）。</span>';
+    modal.querySelectorAll('[data-fci]').forEach(b => b.addEventListener('change', () => { cands[+b.dataset.fci].on = b.checked; }));
+  };
+  // 候補は、いまの表があればその表の切り替えから作る（無ければ計算のあとに作る）
+  if (AppState.generated && AppState.shifts) {
+    forecastCandidates(AppState.shifts, checkViolations(AppState.shifts)).forEach(c => cands.push(Object.assign(c, { on: !!c.top })));
+  }
+  renderCands();
+  $('fcAdd').addEventListener('click', () => {
+    const s = AppState.staff.find(x => x.id === $('fcWho').value), k = $('fcKey').value;
+    if (!s || !k) return;
+    if ((s.allowedShifts || []).includes(k)) { toast(`${s.name}さんは、もう「${k}」を担当できます`, 'info'); return; }
+    cands.push({ label: `${s.name}さんの担当に「${k}」を足す`, patch: [{ id: s.id, add: [k] }], on: true }); renderCands();
+  });
+
+  let running = false, stopped = false, fp0 = null, base = null;
+  const results = [];
+  const stopNow = () => { stopped = true; if (typeof cancelMILP === 'function') cancelMILP(); };
+  modal._stopCalc = () => { if (running) stopNow(); };   // 画面を閉じたら計算も止める
+  $('fcStop').addEventListener('click', stopNow);
+  const close = () => { modal._stopCalc(); clearInterval(watch); modal.remove(); };
+  $('fcClose').addEventListener('click', close);
+  const rng = (x, unit) => x.min === x.max ? `${x.min}${unit}` : `${x.min}〜${x.max}${unit}`;
+  const cmp = (b, a, unit) => `${rng(b, unit)}→<b>${rng(a, unit)}</b>`;
+  const redraw = () => {
+    const stale = fp0 && forecastFp() !== fp0;
+    $('fcRows').innerHTML = results.map((x, i) => {
+      if (!base) return '';
+      // 🚨が増えないか: いちばん良い回どうしで、🚨のどの種類・⛔・連勤の超過日数・公休の足りない日数が増えないか
+      const up = scoreWorsened(x.st.best.sc, base.best.sc).filter(w => w.key !== 'soft' && w.key !== 'bsOver');
+      const upComp = compWorsened(base.best.violations || [], x.st.best.violations || []).length > 0;
+      const bad = up.length || upComp;
+      const mustTxt = cmp(base.must, x.st.must, '件') + (bad ? `<div style="color:#c53030">増えます（${up.map(w => `${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[w.key]) || (w.key === 'comp' ? '⛔6連勤以上' : w.key === 'over' ? '連勤の超過日数' : w.key === 'offShort' ? '公休の不足日数' : w.key)} ${w.from}→${w.to}`).join('・') || '6連勤以上'}）</div>` : '<div class="hint">増えません</div>');
+      const btn = bad ? '<span class="hint">🚨が増えるため選べません</span>'
+        : `<button class="btn btn-primary" data-fcgo="${i}" ${running || stale ? 'disabled' : ''}>この設定にする</button>`;
+      return `<tr style="border-top:1px solid var(--border)"><td style="padding:4px">${escapeHtml(x.label)}<div class="hint">${x.runs}回・${x.sec}秒</div></td>
+        <td style="padding:4px;text-align:center">${cmp(base.comp, x.st.comp, '件')}</td><td style="padding:4px;text-align:center">${mustTxt}</td>
+        <td style="padding:4px;text-align:center">${cmp(base.bs, x.st.bs, '回')}</td><td style="padding:4px;text-align:center">${cmp(base.soft, x.st.soft, '件')}</td>
+        <td style="padding:4px">${btn}</td></tr>`;
+    }).join('');
+    if (stale && !running) $('fcStatus').innerHTML = '⚠️ 見込みが古くなっています（表・希望・設定などが変わりました）。計算し直してください。';
+    modal.querySelectorAll('[data-fcgo]').forEach(b => b.addEventListener('click', () => applyCand(results[+b.dataset.fcgo])));
+  };
+  let lastStale = false;
+  const watch = setInterval(() => {
+    if (!modal.isConnected) { clearInterval(watch); return; }
+    const stale = !!(fp0 && forecastFp() !== fp0);
+    if (stale !== lastStale) { lastStale = stale; redraw(); }
+  }, 1000);
+  const applyCand = (x) => {
+    if (!x || running) return;
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+    if (fp0 && forecastFp() !== fp0) { toast('表などが変わったため、この見込みは使えません。計算し直してください', 'error', 6000); return; }
+    const names = [];
+    x.patch.forEach(c => {
+      const s = AppState.staff.find(y => y.id === c.id); if (!s) return;
+      s.allowedShifts = s.allowedShifts || [];
+      c.add.forEach(k => { if (!s.allowedShifts.includes(k)) { s.allowedShifts.push(k); names.push(`${s.name}さんに「${k}」`); } });
+    });
+    saveToStorage();
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+    toast(`✅ 担当を足しました（${names.join('・') || '変更なし'}）。表は変えていません。この設定で作るには、生成してください`, 'success', 8000);
+    close();
+  };
+  $('fcGo').addEventListener('click', async () => {
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+    const todo = cands.filter(c => c.on);
+    if (!calcBegin('設定を変えたときの見込み')) return;
+    running = true; stopped = false; $('fcGo').disabled = true; $('fcStop').style.display = 'inline-block';
+    const R = +$('fcRuns').value || 2;
+    fp0 = forecastFp(); results.length = 0; base = null; redraw();
+    let total = R * (1 + todo.length), done = 0, secSum = 0;
+    const say = (what) => {
+      const avg = done ? secSum / done : 65;
+      $('fcStatus').innerHTML = `⏳ ${escapeHtml(what)}（全部で${total}回・いま${Math.min(done + 1, total)}回目・あと約${Math.max(1, Math.round((total - done) * avg / 60))}分）`;
+    };
+    const runN = async (what, patch) => {
+      const runs = []; const t0 = Date.now();
+      for (let i = 0; i < R; i++) {
+        if (stopped) throw new Error(MILP_CANCEL_MSG);
+        say(what);
+        const t1 = Date.now();
+        const r = await optimizeScheduleMILP(null, { fastMode: true, noApply: true, staffPatch: patch });
+        done++; secSum += (Date.now() - t1) / 1000;
+        runs.push({ sc: scoreViolations(r.violations || []), violations: r.violations || [], shifts: r._shifts || r.shifts });
+      }
+      return { runs, sec: Math.round((Date.now() - t0) / 1000) };
+    };
+    try {
+      const b = await runN('いまの設定で試しに作っています', null);
+      base = forecastStats(b.runs);
+      // いまの表が無いときは、基準の試し計算の切り替えから候補を作る
+      if (!cands.length) {
+        forecastCandidates(base.best.shifts, base.best.violations).forEach(c => cands.push(Object.assign(c, { on: !!c.top })));
+        renderCands();
+        todo.push(...cands.filter(c => c.on)); total = R * (1 + todo.length);
+      }
+      $('fcStatus').innerHTML = `基準（いまの設定）: ⛔ ${rng(base.comp, '件')}・🚨 ${rng(base.must, '件')}・切り替えの超過 ${rng(base.bs, '回')}・🟡 ${rng(base.soft, '件')}`;
+      for (const c of todo) {
+        const x = await runN(`「${c.label}」で試しに作っています`, c.patch);
+        results.push({ label: c.label, patch: c.patch, st: forecastStats(x.runs), runs: R, sec: x.sec });
+        redraw();
+      }
+      $('fcStatus').innerHTML = todo.length
+        ? `計算が終わりました。基準（いまの設定）: ⛔ ${rng(base.comp, '件')}・🚨 ${rng(base.must, '件')}・切り替えの超過 ${rng(base.bs, '回')}・🟡 ${rng(base.soft, '件')}`
+        : '基準だけを計算しました。試す候補にチェックを入れてから、もう一度押してください。';
+    } catch (e) {
+      $('fcStatus').innerHTML = /^cancel/.test(e.message || '') || stopped
+        ? (results.length ? '中止しました。出ている見込みから選べます。' : '中止しました。')
+        : '計算に失敗しました。もう一度試してください。（' + escapeHtml(e.message || '') + '）';
+    } finally {
+      running = false; calcEnd();
+      if (modal.isConnected) { $('fcGo').disabled = false; $('fcStop').style.display = 'none'; redraw(); }
+    }
+  });
+}
+
 function showFeasibilityModal() {
   if (!AppState.staff.length || !AppState.settings.targetMonth) {
     toast('スタッフと対象年月を設定してください', 'error');
@@ -603,6 +816,8 @@ function setupGeneratePanel() {
   const btnCancel = document.getElementById('btnCancelGenerate');
   const btnFeas = document.getElementById('btnFeasibility');
   if (btnFeas) btnFeas.addEventListener('click', showFeasibilityModal);
+  const btnFc = document.getElementById('btnForecast');
+  if (btnFc) btnFc.addEventListener('click', showForecastModal);
   const btnRelax = document.getElementById('btnRelax');
   if (btnRelax) btnRelax.addEventListener('click', showRelaxModal);
   const btnSurPlan = document.getElementById('btnSurplusPlan');
@@ -1229,7 +1444,7 @@ function setupResultPanel() {
       ];
       const cands = [], skipped = [];
       let skippedUp = false;   // 何かが増えるために外した案があるか（🔒の解除をすすめない）
-      let stopped = false, running = true;
+      let stopped = false, running = true, failed = false;
       const modal = document.createElement('div');
       modal.className = 'modal-overlay show';
       modal.style.zIndex = 10050;
@@ -1255,7 +1470,7 @@ function setupResultPanel() {
       const redraw = () => {
         $rows.innerHTML = cands.map((c, i) => candRowHtml(c.label, c.st, c.sec,
           `<button class="btn btn-primary" data-rcgo="${i}" ${running ? 'disabled title="計算中です。⏹ 中止するか、終わるのを待ってから選んでください"' : ''}>反映</button>`)).join('')
-          || (running ? '' : `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">${stopped ? '中止しました。' : `良くなる案は見つかりませんでした。${
+          || (running ? '' : `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">${stopped ? '中止しました。' : (failed && !cands.length) ? '計算に失敗しました。もう一度試してください。' : `良くなる案は見つかりませんでした。${
                 skippedUp ? '下の理由のとおり、どの案も何かが増えるため出していません。' : '関係する🔒を解除すると直せる場合があります。'}`}</td></tr>`);
         $rows.innerHTML += skipped.map(t => `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:4px 8px;border-top:1px dashed var(--border)">${escapeHtml(t)}</td></tr>`).join('');
         $rows.querySelectorAll('[data-rcgo]').forEach(b => b.addEventListener('click', () => applyCand(cands[+b.dataset.rcgo])));
@@ -1282,7 +1497,7 @@ function setupResultPanel() {
       if ($stop2) { $stop2.style.display = 'inline-block'; $stop2.onclick = stop; }
       btnRepair.disabled = true;
       try {
-        let reached0 = false;
+        let reached0 = false; failed = false;
         // 最初から🚨も⛔も0件なら、マスの上限の案（🚨を直すための案）は計算せず「全部直す」だけにする
         const noMust0 = beforeSc.must === 0 && beforeSc.comp === 0;
         for (const sp of SPECS) {
@@ -1299,6 +1514,7 @@ function setupResultPanel() {
                     : { improveOver: beforeSc, noApply: true });
           } catch (e) {
             if (/^cancel/.test(e.message || '') || stopped) break;
+            failed = true;
             skipped.push(`${sp.label}: 計算に失敗しました（${escapeHtml(e.message || '')}）`); redraw();
             continue;
           }
@@ -1341,8 +1557,10 @@ function setupResultPanel() {
         btnRepair.disabled = false;
         if (modal.isConnected) {
           modal.querySelector('#rcStop').style.display = 'none';
-          $st.innerHTML = stopped ? '<span class="hint">中止しました。出ている案から選べます。</span>'
-                                  : '<span class="hint">計算が終わりました。反映する案を選んでください。</span>';
+          // 案が無いときは「選べます」「選んでください」を出さない（中止・失敗・見つからないは表の中に書く）
+          $st.innerHTML = !cands.length ? ''
+            : stopped ? '<span class="hint">中止しました。出ている案から選べます。</span>'
+            : '<span class="hint">計算が終わりました。反映する案を選んでください。</span>';
           redraw();
         }
       }

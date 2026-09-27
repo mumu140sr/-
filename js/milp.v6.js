@@ -7,7 +7,8 @@
 // 書き換えてから戻す方式だと、計算中に自動保存が走ると変えた値が保存されてしまう。
 // requestsPatch: 試し計算で希望だけを変えて解く（[{ id, day, to }]、to が '' なら希望を消す）。
 // 本物の AppState.requests は書き換えない。
-function _milpPayload(settingsPatch, requestsPatch) {
+// staffPatch: 試し計算で担当シフトだけを足して解く（[{ id, add: ['早総務', …] }]）。本物の AppState.staff は書き換えない。
+function _milpPayload(settingsPatch, requestsPatch, staffPatch) {
   let settings = AppState.settings;
   if (settingsPatch) {
     settings = Object.assign({}, AppState.settings, settingsPatch);
@@ -23,7 +24,13 @@ function _milpPayload(settingsPatch, requestsPatch) {
     skills:                AppState.skills,
     dailySkills:           AppState.dailySkills,
     shifts:                AppState.shifts,   // 微調整のとき、いまの表を出発点にする
-    staff:                 AppState.staff,
+    staff:                 staffPatch && staffPatch.length ? AppState.staff.map(st => {
+                             const add = [].concat(...staffPatch.filter(c => c.id === st.id).map(c => c.add || []));
+                             if (!add.length) return st;
+                             const keys = (st.allowedShifts || []).slice();
+                             add.forEach(k => { if (keys.indexOf(k) < 0) keys.push(k); });
+                             return Object.assign({}, st, { allowedShifts: keys });
+                           }) : AppState.staff,
     requests:              requestsPatch && requestsPatch.length ? (() => {
                              const r = JSON.parse(JSON.stringify(AppState.requests || {}));
                              requestsPatch.forEach(c => { r[c.id] = r[c.id] || {}; if (c.to) r[c.id][c.day] = c.to; else delete r[c.id][c.day]; });
@@ -64,10 +71,10 @@ let _calcOwner = null;
 const CALC_BUTTONS = ['btnGenerate', 'btnGenerateFast', 'btnWizard', 'btnRepair', 'btnPartialRegen',
                       'btnSurplusPlan', 'btnRelax', 'btnResolveSurplus'];
 function calcBusy() { return !!_calcOwner; }
-// ⏹ 中止ボタンがあるのは、生成・自動修正・🧪 希望の変え方を確かめる・余の解消のつじつま合わせの計算中だけ。
+// ⏹ 中止ボタンがあるのは、生成・自動修正・🧪 希望の変え方を確かめる・余の解消のつじつま合わせ・④の見込みの計算中だけ。
 // ほかの計算では中止を案内しない（ボタンが無いのに「⏹ 中止を押して」と案内していた）。
 // 確認待ち（余の解消の選ぶ画面・「実行しますか？」）は、鍵の名前を「〜（確認待ち）」に替え、答えるよう案内する。
-const CALC_HAS_STOP = new Set(['生成', 'エラーの自動修正', '希望の変え方を確かめる', '余の解消']);
+const CALC_HAS_STOP = new Set(['生成', 'エラーの自動修正', '希望の変え方を確かめる', '余の解消', '設定を変えたときの見込み']);
 function calcBusyToast() {
   if (typeof toast !== 'function') return;
   const what = _calcOwner || '計算';
@@ -120,7 +127,7 @@ function milpTrial(payload, variant, timeOverride) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=232'); }
+    try { worker = new Worker('js/milp.worker.js?v=233'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     const untrack = _milpTrack(worker, () => { clearTimeout(timeout); reject(new Error(MILP_CANCEL_MSG)); });
     const timeout = setTimeout(() => { untrack(); try { worker.terminate(); } catch (_) {} reject(new Error('タイムアウト')); }, 600000);
@@ -216,7 +223,7 @@ function _milpOnce(onProgress, opts, variant) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=232'); }
+    try { worker = new Worker('js/milp.worker.js?v=233'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     // 1部門あたり最大10分。部門数ぶん待てるよう十分な余裕を持たせる（誤タイムアウト防止）
     const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（30分）')); }, 1800000);
@@ -252,7 +259,7 @@ function _milpOnce(onProgress, opts, variant) {
     };
     worker.onerror = (err) => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化Workerエラー: ' + (err.message || 'ソルバーの読込みに失敗しました'))); };
     // timeOverride: 候補をいくつも組み直して比べるときに、1回あたりの時間を短くする
-    worker.postMessage({ type: 'milp', appState: _milpPayload(opts && opts.settingsPatch, opts && opts.requestsPatch), deepMode, fastMode, adjustMode, adjustK,
+    worker.postMessage({ type: 'milp', appState: _milpPayload(opts && opts.settingsPatch, opts && opts.requestsPatch, opts && opts.staffPatch), deepMode, fastMode, adjustMode, adjustK,
                          timeOverride: (opts && parseInt(opts.timeOverride)) || 0,
                          variant: parseInt(variant) || 0 });
   });
