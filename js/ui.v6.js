@@ -1290,6 +1290,8 @@ function renderStaffTable() {
       const staff    = AppState.staff.find(s => s.id === id);
       if (!staff) return;
       if (!Array.isArray(staff.allowedShifts)) staff.allowedShifts = [];
+      // 変える直前のいまの表を数えておく（担当以外の変更の差を混ぜない）
+      const bSc = (AppState.generated && AppState.shifts) ? scoreViolations(checkViolations(AppState.shifts)) : null;
       const label = e.target.closest('.allowed-label');
       if (e.target.checked) {
         if (!staff.allowedShifts.includes(shiftKey)) staff.allowedShifts.push(shiftKey);
@@ -1301,7 +1303,7 @@ function renderStaffTable() {
       }
       autoSave();
       // いまの表のエラーの一覧を数え直す（担当外シフトなどの判定が変わるため）
-      if (typeof recheckAfterStaffChange === 'function') recheckAfterStaffChange();
+      if (typeof recheckAfterStaffChange === 'function') recheckAfterStaffChange(bSc);
     });
   });
 

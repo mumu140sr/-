@@ -427,6 +427,13 @@ function forecastStats(runs) {
     must: pick(r => r.sc.must - r.sc.comp), comp: pick(r => r.sc.comp), soft: pick(r => r.sc.soft),
     bs: pick(r => forecastBandOver(r.violations)),
     best: byCmp[0], worst: byCmp[byCmp.length - 1],
+    // 種類ごとに、全部の回で一番多い数（まん中の回だけで増えた種類も見落とさない）
+    maxBy: runs.reduce((m, r) => {
+      const put = (k, v) => { m[k] = Math.max(m[k] || 0, v || 0); };
+      Object.keys(r.sc.byMust || {}).forEach(k => put(k, r.sc.byMust[k]));
+      put('comp', r.sc.comp); put('over', r.sc.over); put('offShort', r.sc.offShort); put('bsOver', r.sc.bsOver);
+      return m;
+    }, {}),
   };
 }
 // そのシフトを、その人に足してよいか（同じ部門・「早番のみ／遅番のみ」と逆の時間帯でない）
@@ -436,6 +443,11 @@ function forecastCanAdd(s, k, dept) {
   const only = (typeof getBalanceRatio === 'function') ? (getBalanceRatio(s) || {}).only : null;
   if (only === 'e' && isLate(k)) return false;
   if (only === 'l' && isEarlyCategory(k)) return false;
+  // 早可・遅可（空なら両方可。生成と同じ見方）
+  if (s.prefs && s.prefs.length) {
+    if (isLate(k) && !s.prefs.includes('遅可')) return false;
+    if (isEarlyCategory(k) && !s.prefs.includes('早可')) return false;
+  }
   return true;
 }
 // 候補: いまの表（無ければ基準の試し計算）で切り替えを超えた人が、切り替えた日に入ったシフトを、
@@ -474,9 +486,10 @@ function forecastCandidates(shifts, vs) {
   return out;
 }
 // 担当を変えたあと、いまの表のエラーの一覧を数え直す（担当外シフトなどの判定が変わるため）。変わった件数を返す
-function recheckAfterStaffChange() {
+// beforeSc: 担当を変える直前に、いまの表を数えたもの（担当以外の変更の差を混ぜないため）
+function recheckAfterStaffChange(beforeSc) {
   if (!AppState.generated || !AppState.shifts) return null;
-  const b = scoreViolations(AppState.violations || []);
+  const b = beforeSc || scoreViolations(AppState.violations || []);
   AppState.violations = checkViolations(AppState.shifts);
   const a = scoreViolations(AppState.violations);
   if (typeof renderReport === 'function') renderReport({ success: AppState.violations.length === 0, score: AppState.violations.length, violations: AppState.violations });
@@ -525,14 +538,15 @@ function showForecastModal() {
   const $ = (id) => modal.querySelector('#' + id);
   const cands = [];
   let running = false, stopped = false, fp0 = null, base = null, statusHtml = '';
+  let autoMade = hasTable;   // 候補を表から作ったか（表が無いときは基準のあとで作る）
   const results = [];
   const setStatus = (h) => { statusHtml = h; $('fcStatus').innerHTML = h; };
   // 押す前に、全部で何回・約何分かを出す
   const estimate = () => {
     if (running) return;
     const R = +$('fcRuns').value || 2, n = cands.filter(c => c.on).length;
-    $('fcEst').textContent = (!hasTable && !cands.length)
-      ? `（基準を${R}回作ってから、候補を決めて続けて計算します。候補1つにつき${R}回・約${R}分ずつ増えます）`
+    $('fcEst').textContent = !autoMade
+      ? `（全部で${R * (1 + n)}回・約${R * (1 + n)}分より多くなります。表がまだ無いので、基準を作ったあとに候補を決め、候補1つにつき${R}回・約${R}分ずつ増えます）`
       : n ? `（全部で${R * (1 + n)}回・約${R * (1 + n)}分）` : `（試す候補がありません。基準だけ${R}回・約${R}分）`;
   };
   const renderCands = () => {
@@ -546,7 +560,6 @@ function showForecastModal() {
     estimate();
   };
   if (hasTable) forecastCandidates(AppState.shifts, checkViolations(AppState.shifts)).forEach(c => cands.push(Object.assign(c, { on: !!c.top })));
-  let autoMade = hasTable;   // 候補を表から作ったか（表が無いときは基準のあとで作る）
   renderCands();
   $('fcRuns').addEventListener('change', estimate);
   $('fcAdd').addEventListener('click', () => {
@@ -560,6 +573,10 @@ function showForecastModal() {
       if (add.length) { patch.push({ id, add }); parts.push(`${s.name}さんに「${add.join('」「')}」`); }
     });
     if (!patch.length) { toast('選んだ人は、選んだシフトをもう担当できます', 'info'); return; }
+    // 同じ組み合わせ（人とシフトが同じ）の案がもうあれば、重ねて加えない
+    const keyOf = (pt) => JSON.stringify(pt.map(c => [c.id, c.add.slice().sort()]).sort());
+    const same = cands.find(c => keyOf(c.patch) === keyOf(patch));
+    if (same) { same.on = true; renderCands(); toast('同じ組み合わせの案がもうあります（チェックを付けました）', 'info'); return; }
     cands.push({ label: `担当を足す: ${parts.join('・')}`, patch, on: true }); renderCands();
     modal.querySelectorAll('[data-fcwho],[data-fckey]').forEach(b => { b.checked = false; });
   });
@@ -583,17 +600,23 @@ function showForecastModal() {
       const up = hard(x.st.best, base.best);
       const upComp = compWorsened(base.best.violations || [], x.st.best.violations || []).length > 0;
       const bad = up.length > 0 || upComp;
-      const upWorst = !bad && (hard(x.st.worst, base.worst).length > 0 ||
-                               compWorsened(base.worst.violations || [], x.st.worst.violations || []).length > 0);
+      // 種類ごとに全部の回で一番多い数を比べ、増えたものを「回によっては増えます」として出す
+      const upMax = bad ? [] : Object.keys(Object.assign({}, x.st.maxBy, base.maxBy))
+        .filter(k => (k !== 'bsOver' || getRuleLevel('band-switch') === 'must') && (x.st.maxBy[k] || 0) > (base.maxBy[k] || 0))
+        .map(k => ({ key: k, from: base.maxBy[k] || 0, to: x.st.maxBy[k] || 0 }));
+      const upWorst = upMax.length > 0;
+      const compMark = (bad && (upComp || up.some(w => w.key === 'comp'))) ? '<div style="color:#c53030">増えます</div>'
+        : upMax.some(w => w.key === 'comp') ? '<div style="color:#b7791f">回によっては増えます</div>' : '';
       const mustTxt = cmp(base.must, x.st.must, '件') + (bad
         ? `<div style="color:#c53030">増えます（${up.map(w => `${labOf(w.key)} ${w.from}→${w.to}`).join('・') || '6連勤以上'}）</div>`
-        : upWorst ? '<div style="color:#b7791f">回によっては増えます</div>' : '<div class="hint">増えません</div>');
+        : upWorst ? `<div style="color:#b7791f">回によっては増えます（${upMax.map(w => `${labOf(w.key)} ${w.from}→${w.to}`).join('・')}）</div>`
+        : '<div class="hint">増えません</div>');
       // 切り替えの超過・🟡が増える案には ⚠️（最小か最大のどちらかが増えたとき）
       const warn = (a, b) => (a.min > b.min || a.max > b.max) ? '⚠️ ' : '';
       const btn = bad ? '<span class="hint">🚨が増えるため選べません</span>'
         : `<button class="btn btn-primary" data-fcgo="${i}" ${running || stale ? 'disabled' : ''}>この設定にする</button>`;
       return `<tr style="border-top:1px solid var(--border)"><td style="padding:4px">${escapeHtml(x.label)}<div class="hint">${x.runs}回・${x.sec}秒</div></td>
-        <td style="padding:4px;text-align:center">${cmp(base.comp, x.st.comp, '件')}</td><td style="padding:4px;text-align:center">${mustTxt}</td>
+        <td style="padding:4px;text-align:center">${cmp(base.comp, x.st.comp, '件')}${compMark}</td><td style="padding:4px;text-align:center">${mustTxt}</td>
         <td style="padding:4px;text-align:center">${warn(x.st.bs, base.bs)}${cmp(base.bs, x.st.bs, '回')}</td>
         <td style="padding:4px;text-align:center">${warn(x.st.soft, base.soft)}${cmp(base.soft, x.st.soft, '件')}</td>
         <td style="padding:4px">${btn}</td></tr>`;
@@ -614,6 +637,8 @@ function showForecastModal() {
     if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
     if (fp0 && forecastFp() !== fp0) { toast('表などが変わったため、この見込みは使えません。計算し直してください', 'error', 6000); return; }
     const names = [];
+    // 足す直前のいまの表を数えておく（保存されていたエラーの一覧は古いことがあり、担当以外の差が混ざっていた）
+    const bSc = (AppState.generated && AppState.shifts) ? scoreViolations(checkViolations(AppState.shifts)) : null;
     x.patch.forEach(c => {
       const s = AppState.staff.find(y => y.id === c.id); if (!s) return;
       s.allowedShifts = s.allowedShifts || [];
@@ -621,9 +646,9 @@ function showForecastModal() {
     });
     saveToStorage();
     if (typeof refreshAllUI === 'function') refreshAllUI();
-    const re = recheckAfterStaffChange();
+    const re = recheckAfterStaffChange(bSc);
     toast(`✅ 担当を足しました（${names.join('・') || '変更なし'}）。表は変えていません。` +
-          (re ? `いまの表のエラーを数え直しました（${scoreSummary(re.b)} → ${scoreSummary(re.a)}）。` : '') +
+          (re ? `いまの表のエラーを数え直しました（担当を足す前 ${scoreSummary(re.b)} → 足したあと ${scoreSummary(re.a)}）。` : '') +
           'この設定で作るには、生成してください。見込みの数は試しに作ったものなので、1〜2件の差はたまたま変わることがあります', 'success', 10000);
     close();
   };
@@ -1540,7 +1565,7 @@ function setupResultPanel() {
         $rows.innerHTML = cands.map((c, i) => candRowHtml(c.label, c.st, c.sec,
           `<button class="btn btn-primary" data-rcgo="${i}" ${running ? 'disabled title="計算中です。⏹ 中止するか、終わるのを待ってから選んでください"' : ''}>反映</button>`)).join('')
           || (running ? '' : `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">${stopped ? '中止しました。' : (failed && !cands.length && failed === tried) ? '計算に失敗しました。もう一度試してください。' : `良くなる案は見つかりませんでした。${failed ? '計算に失敗した段があります（下のとおり）。' : ''}${
-                skippedUp ? '下の理由のとおり、どの案も何かが増えるため出していません。' : '関係する🔒を解除すると直せる場合があります。'}`}</td></tr>`);
+                skippedUp ? '下の理由のとおり、どの案も何かが増えるため出していません。' : failed ? '' : '関係する🔒を解除すると直せる場合があります。'}`}</td></tr>`);
         $rows.innerHTML += skipped.map(t => `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:4px 8px;border-top:1px dashed var(--border)">${escapeHtml(t)}</td></tr>`).join('');
         $rows.querySelectorAll('[data-rcgo]').forEach(b => b.addEventListener('click', () => applyCand(cands[+b.dataset.rcgo])));
       };
