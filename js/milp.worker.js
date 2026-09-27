@@ -166,7 +166,9 @@ self.addEventListener('message', async (e) => {
         // いまの表の件数は、表を固定したまま（k=0）🚨の罰点だけを最小にして数える。
         {
           const mustTypes = [];
-          mustTiers.forEach(t => t.types.forEach(ty => { if (mustTypes.indexOf(ty) < 0) mustTypes.push(ty); }));
+          // 責任者の順位（hierarchy）は、計算の上では総務の組み合わせまで数え、画面の数え方と違うので、上限に入れない
+          // （画面では何も増えない入れ替えまで止まり、小さな案が出なくなっていた）
+          mustTiers.forEach(t => t.types.forEach(ty => { if (ty !== 'hierarchy' && mustTypes.indexOf(ty) < 0) mustTypes.push(ty); }));
           if (mustTypes.length) {
             const z = solver.solve(MILP.composeLP(m.parts, { types: mustTypes, neighbor: { ones, k: 0, only } }), topt(tPer));
             if (String(z && z.Status) === 'Optimal' && MILP.solutionIsValid(z, m.parts, [], true)) {

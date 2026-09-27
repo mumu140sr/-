@@ -64,13 +64,14 @@ let _calcOwner = null;
 const CALC_BUTTONS = ['btnGenerate', 'btnGenerateFast', 'btnWizard', 'btnRepair', 'btnPartialRegen',
                       'btnSurplusPlan', 'btnRelax', 'btnResolveSurplus'];
 function calcBusy() { return !!_calcOwner; }
-// ⏹ 中止ボタンがあるのは、生成と自動修正だけ。ほかの計算では中止を案内しない
-// （ボタンが無いのに「⏹ 中止を押して」と案内していた）。確認待ちは、答えるよう案内する。
+// ⏹ 中止ボタンがあるのは、生成・自動修正・🧪 希望の変え方を確かめる・余の解消のつじつま合わせの計算中だけ。
+// ほかの計算では中止を案内しない（ボタンが無いのに「⏹ 中止を押して」と案内していた）。
+// 確認待ち（余の解消の選ぶ画面・「実行しますか？」）は、鍵の名前を「〜（確認待ち）」に替え、答えるよう案内する。
 const CALC_HAS_STOP = new Set(['生成', 'エラーの自動修正', '希望の変え方を確かめる', '余の解消']);
 function calcBusyToast() {
   if (typeof toast !== 'function') return;
   const what = _calcOwner || '計算';
-  const how = /確認待ち/.test(what) ? '余の解消パネルの「実行しますか？」に答えてからにしてください'
+  const how = /確認待ち/.test(what) ? '余の解消パネルの質問に答えてからにしてください'
             : CALC_HAS_STOP.has(what) ? '終わるのを待つか、⏹ 中止を押してからにしてください'
             : '終わるまでお待ちください';
   toast(`いまは「${what}」の${/確認待ち/.test(what) ? '途中' : '計算中'}です。${how}`, 'warning', 6000);
@@ -83,6 +84,9 @@ function calcBegin(label) {
   return true;
 }
 function calcEnd() { _calcOwner = null; _calcButtons(false); }
+/** 鍵を持ったまま名前を替える（計算中 ⇄ 確認待ち）。鍵を持っていないときは何もしない */
+function calcRelabel(label) { if (_calcOwner) _calcOwner = label; }
+function calcOwner() { return _calcOwner; }
 function _calcButtons(on) {
   if (typeof document === 'undefined') return;
   CALC_BUTTONS.forEach(id => {

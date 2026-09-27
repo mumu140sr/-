@@ -281,7 +281,9 @@ function renderWishFixBox(modal) {
     // 同じ変更（同じ希望の組み合わせ）の計算は使い回す（別の🚨の案として同じ変更が出ることがある）
     const cache = {};
     let done = 0, total = 1, secSum = 0;
+    let totalKnown = false;
     const progress = () => {
+      if (!totalKnown) return '（全部で何回かは、いまの希望で作ったあとに出ます）';
       const avg = done ? secSum / done : 65;
       return `（全部で${total}回・いま${Math.min(done + 1, total)}回目・あと約${Math.max(1, Math.round((total - done) * avg / 60))}分）`;
     };
@@ -300,7 +302,7 @@ function renderWishFixBox(modal) {
       const targets = wishFixCandidates(base.r.violations || [], (typeof analyzeDayMargins === 'function') ? analyzeDayMargins() : []);
       // 全部で何回計算するか（同じ変更は1回と数える）
       { const keys = new Set(); targets.forEach(t => t.cands.forEach(c => keys.add(JSON.stringify(c.changes.map(x => ({ id: x.id, day: x.day, to: x.to }))
-          .sort((a, b) => (a.id + a.day).localeCompare(b.id + b.day)))))); total = 1 + keys.size; }
+          .sort((a, b) => (a.id + a.day).localeCompare(b.id + b.day)))))); total = 1 + keys.size; totalKnown = true; }
       lines.push(`<div>いまの希望で作ると: <b>${escapeHtml(scoreSummary(base.sc))}</b>（${base.sec}秒）</div>`);
       if (!targets.length) {
         const n = (base.r.violations || []).filter(v => WISH_MUST_TYPES.indexOf(v.type) >= 0 &&
@@ -1253,8 +1255,8 @@ function setupResultPanel() {
       const redraw = () => {
         $rows.innerHTML = cands.map((c, i) => candRowHtml(c.label, c.st, c.sec,
           `<button class="btn btn-primary" data-rcgo="${i}" ${running ? 'disabled title="計算中です。⏹ 中止するか、終わるのを待ってから選んでください"' : ''}>反映</button>`)).join('')
-          || (running ? '' : `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">良くなる案は見つかりませんでした。${
-                skippedUp ? '下の理由のとおり、どの案も何かが増えるため出していません。' : '関係する🔒を解除すると直せる場合があります。'}</td></tr>`);
+          || (running ? '' : `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:8px">${stopped ? '中止しました。' : `良くなる案は見つかりませんでした。${
+                skippedUp ? '下の理由のとおり、どの案も何かが増えるため出していません。' : '関係する🔒を解除すると直せる場合があります。'}`}</td></tr>`);
         $rows.innerHTML += skipped.map(t => `<tr><td colspan="${CAND_COLS()}" class="hint" style="padding:4px 8px;border-top:1px dashed var(--border)">${escapeHtml(t)}</td></tr>`).join('');
         $rows.querySelectorAll('[data-rcgo]').forEach(b => b.addEventListener('click', () => applyCand(cands[+b.dataset.rcgo])));
       };

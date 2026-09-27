@@ -2954,6 +2954,7 @@ async function _trySurplusChange(apply, opts) {
                      withSt.a.over < woSt.a.over || (withSt.a.offShort || 0) < (woSt.a.offShort || 0) ||
                      (withSt.a.bsOver || 0) < (woSt.a.bsOver || 0))));
       if (helps) {
+        if (typeof calcRelabel === 'function') calcRelabel('余の解消（確認待ち）');
         const pick = await o.chooseAdjust({ withSt, woSt, adjList });
         if (!pick) { restore(); return { ok: false, before, after: before, sd: null, cancelled: true, message: '実行しませんでした' }; }
         if (pick === 'without') _applyChangeList(adjCells, 'undo');
@@ -2992,6 +2993,7 @@ async function _trySurplusChange(apply, opts) {
   }
   if (up.length) {
     const hadCritical = up.some(x => x.key !== 'soft');
+    if (typeof calcRelabel === 'function') calcRelabel('余の解消（確認待ち）');
     const go = (typeof o.confirm === 'function')
       ? await o.confirm(sd, up)
       : confirm(`この変更で ${words}。\nそれでも実行しますか？`);
@@ -3082,6 +3084,8 @@ function showSurplusResolveModal() {
   // パネルを閉じる（✕・開き直し）。答えていない確認は「やめる」にする。確認があれば true
   modal._closePanel = () => {
     panelClosed = true;
+    // つじつま合わせの計算中に閉じたら、計算も止める（止めずに閉じると、終わるまでほかの計算ができなかった）
+    if (typeof calcOwner === 'function' && calcOwner() === '余の解消' && typeof cancelMILP === 'function') cancelMILP();
     const had = !!pendingAsk;
     if (pendingAsk) pendingAsk(false);
     modal.remove();
@@ -3126,8 +3130,13 @@ function showSurplusResolveModal() {
   });
 
   // つじつま合わせの計算中の表示（経過秒数と ⏹ 中止）。⏹ はパネルの中のどこで押されても効くように、パネルで受ける。
-  const adjustTick = (sec) => say(`⏳ 周りのつじつまを合わせています…（${sec}秒・最大25秒ほど）
+  // ⏹ は1回だけ作り、秒数の文字だけを書き換える（毎秒作り直すと、押している最中に作り直されて効かなかった）
+  const adjustTick = (sec) => {
+    const $s = modal.querySelector('#adjSec');
+    if (sec > 0 && $s) { $s.textContent = String(sec); return; }
+    say(`⏳ 周りのつじつまを合わせています…（<span id="adjSec">${sec}</span>秒・最大25秒ほど）
       <button class="btn" data-adjstop="1" style="margin-left:8px;padding:1px 10px;background:#e74c3c;color:#fff">⏹ 中止</button>`, true, true);
+  };
   modal.addEventListener('click', (e) => {
     if (e.target && e.target.closest && e.target.closest('[data-adjstop]') && typeof cancelMILP === 'function') cancelMILP();
   });
