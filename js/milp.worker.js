@@ -16,11 +16,10 @@ function getSolver() {
   return _solverPromise;
 }
 
-self.addEventListener('message', async (e) => {
-  const msg = e.data || {};
-  if (msg.type !== 'milp') return;
-  const post = (pct, label) => self.postMessage({ type: 'progress', pct, label });
-  try {
+// 1回分を解く。emit には途中経過・記録を渡す。答え（done の形）を返す。
+async function runMilp(msg, emit) {
+  const post = (pct, label) => emit({ type: 'progress', pct, label });
+  {
     const incoming = msg.appState || {};
     Object.assign(AppState.settings, incoming.settings || {});
     if (incoming.shiftTypes) AppState.shiftTypes = incoming.shiftTypes;
@@ -263,6 +262,51 @@ self.addEventListener('message', async (e) => {
         // 実データ3件＋固定なし・人手不足のデータ1件を各5回測って、差がぶれの中だったので
         // 入れていない（v214 以前と同じ止めどころのまま）。
         const tierOpts = () => opts;
+        // 案A: 段を解いたら、表のマスを固定したまま、その段の印（罰点の変数）だけを最小にする。
+        // 印は「違反なら1」という決まりなので、違反でなくても1のままでいられる。時間切れ・差を許す設定で
+        // 止まった段は、立ったままの印まで数えて上限にしていたため、あとの段（早遅バランス・単発休みなど）が
+        // その余白を使って本当の違反（行き来など）を増やせた。マスが決まっているので、すぐ終わる。
+        const CELLS = /^[xy]_/;
+        let tightenMs = 0;
+        const tighten = (s0, types) => {
+          if (!s0 || msg.noTighten) return s0;
+          const q0 = Date.now();
+          const z = solver.solve(MILP.composeLP(m.parts, { types, budgets, neighbor: { ones: MILP.onesOf(s0), k: 0, only: CELLS } }),
+                                 Object.assign({}, opts, { time_limit: 5, mip_rel_gap: 0, mip_abs_gap: 0 }));
+          tightenMs += Date.now() - q0;
+          return (MILP.solutionIsValid(z, m.parts, budgets) &&
+                  MILP.slackTotal(z, m.parts, types) <= MILP.slackTotal(s0, m.parts, types)) ? z : s0;
+        };
+        // 案B: 段の答えを表に直して、画面と同じ検査（仕上げの入れ替えの前）で前の答えと比べる。
+        //  1. 🚨のどれかの種類・⛔（新しく・長く・つながる）・連勤の超過日数・公休の足りない日数・
+        //     切り替えの超過回数（「絶対」のとき）のどれかが増えるなら採らない（種類をまたいで交換しない）
+        //  2. 1に当たらず、🚨側のどれかが減るなら、🟡が増えても採る
+        //  3. 🚨側が全部同じときだけ、画面の🟡の合計か行き来が増えるなら採らない
+        const IKI_T = ['category-switch', 'bad-rest'];
+        const ikiOf = (vs) => vs.filter(v => IKI_T.indexOf(v.type) >= 0).length +
+          vs.filter(v => v.type === 'band-switch').reduce((a, v) => a + (v.over || 0), 0);
+        const screenOf = (s0) => {
+          const tmp = {}; Object.keys(shifts).forEach(id => { tmp[id] = Object.assign({}, shifts[id]); });
+          MILP.applyGroupSolution(m, s0, tmp);
+          const vs = checkViolations(tmp);
+          return { vs, sc: scoreViolations(vs), iki: ikiOf(vs) };
+        };
+        const judge = (nw, pv) => {
+          const up = scoreWorsened(nw.sc, pv.sc).filter(w => w.key !== 'soft');
+          if (up.length || compWorsened(pv.vs, nw.vs).length) return { ok: false, rule: 1 };
+          const a = nw.sc, b = pv.sc;
+          const keys = new Set(Object.keys(a.byMust).concat(Object.keys(b.byMust)));
+          let down = a.comp < b.comp || a.over < b.over || (a.offShort || 0) < (b.offShort || 0) || (a.bsOver || 0) < (b.bsOver || 0);
+          keys.forEach(k => { if ((a.byMust[k] || 0) < (b.byMust[k] || 0)) down = true; });
+          if (down) return { ok: true, rule: 2 };
+          if (a.soft > b.soft || nw.iki > pv.iki) return { ok: false, rule: 3 };
+          return { ok: true, rule: 3 };
+        };
+        let curScr = null;   // いまの答え（sol）の画面の検査の結果
+        const useB = !msg.noScreenGuard;
+        const traceScreen = (label, sc, decision, rule) => {
+          if (msg.trace) emit({ type: 'trace-screen', label, must: sc.sc.must, comp: sc.sc.comp, soft: sc.sc.soft, iki: sc.iki, decision, rule });
+        };
         for (let ti = 0; ti < tiers.length; ti++) {
           const t = tiers[ti];
           const left = tiers.length - ti - 1;     // この段より後に残っている段数
@@ -289,7 +333,7 @@ self.addEventListener('message', async (e) => {
               (t.types || []).forEach(ty => protect.push(ty));
             }
             if (!okC || !provenOf(sC, t.types)) tierProven = false;
-            if (msg.trace) self.postMessage({ type: 'trace', ti, label: t.label, cap,
+            if (msg.trace) emit({ type: 'trace', ti, label: t.label, cap,
               sec: Math.round((Date.now() - t0) / 1000), status: String(sC && sC.Status), okStrict: okC,
               prev: null, got: okC ? MILP.slackTotal(sC, m.parts, t.types) : null });
             remain = Math.max(0, remain - Math.round((Date.now() - t0) / 1000));
@@ -347,7 +391,7 @@ self.addEventListener('message', async (e) => {
           if (!msg.noGuard && okStrict && sol &&
               MILP.slackTotal(s2, m.parts, t.types) > MILP.slackTotal(sol, m.parts, t.types)) { s2 = sol; provenHere = false; }
           // 検証用の記録（画面からは使わない）
-          if (msg.trace) self.postMessage({ type: 'trace', ti, label: t.label, cap,
+          if (msg.trace) emit({ type: 'trace', ti, label: t.label, cap,
             sec: Math.round((Date.now() - t0) / 1000), status: String(s2 && s2.Status), okStrict,
             prev: sol ? MILP.slackTotal(sol, m.parts, t.types) : null,
             got: okStrict ? MILP.slackTotal(s2, m.parts, t.types) : null });
@@ -358,6 +402,7 @@ self.addEventListener('message', async (e) => {
           if (!okStrict) {
             tierProven = false;
             if (sol) {
+              sol = tighten(sol, t.types);
               // 今の解での件数を上限として引き継ぎ、後の段で悪化させないようにする
               bIdx[ti] = budgets.length;
               budgets.push({ names: MILP.slackNames(m.parts, t.types), max: MILP.slackTotal(sol, m.parts, t.types) });
@@ -365,7 +410,18 @@ self.addEventListener('message', async (e) => {
             }
             continue;
           }
-          sol = s2;
+          // 案B: 前の答えがあるときは、画面と同じ検査で採るかを決める
+          let taken = true;
+          if (useB && sol) {
+            if (!curScr) curScr = screenOf(sol);
+            const nw = screenOf(s2);
+            const j = judge(nw, curScr);
+            traceScreen(t.label, j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
+            if (j.ok) curScr = nw; else taken = false;
+          }
+          if (taken) sol = s2;
+          // 案A: 立ったままの印を落としてから、この段の件数を上限にする
+          sol = tighten(sol, t.types);
           // この段で達成した件数を上限として固定（以後の段で悪化させない）
           const got = MILP.slackTotal(sol, m.parts, t.types);
           bIdx[ti] = budgets.length;
@@ -405,9 +461,18 @@ self.addEventListener('message', async (e) => {
               const used = Math.max(1, Math.round((Date.now() - q0) / 1000));
               budget -= used; polishLeft = Math.max(0, polishLeft - used);
               if (!MILP.solutionIsValid(s5, m.parts, budgets)) continue;
-              const got2 = MILP.slackTotal(s5, m.parts, p.t.types);
+              let s6 = tighten(s5, p.t.types);
+              const got2 = MILP.slackTotal(s6, m.parts, p.t.types);
               if (got2 < p.cur) {
-                sol = s5;
+                // 案B: 詰め直した答えも、画面と同じ検査で前の答えより悪くならないときだけ採る
+                if (useB) {
+                  if (!curScr) curScr = screenOf(sol);
+                  const nw = screenOf(s6); const j = judge(nw, curScr);
+                  traceScreen('詰め直し: ' + p.t.label, j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
+                  if (!j.ok) continue;
+                  curScr = nw;
+                }
+                sol = s6;
                 improved = true;
                 // 良くなった分だけ上限も締め直す（後の詰め直しで戻らないように）
                 const bi = bIdx[p.i];
@@ -433,9 +498,19 @@ self.addEventListener('message', async (e) => {
           if (!MILP.solutionIsValid(s4, m.parts, budgets)) break;
           const prev = best === null ? Infinity : best;
           const now  = MILP.objTotal(s4, m.parts);
-          if (now < prev - 1e-6) { sol = s4; best = now; }
+          if (now < prev - 1e-6) {
+            if (useB) {
+              if (!curScr) curScr = screenOf(sol);
+              const nw = screenOf(s4); const j = judge(nw, curScr);
+              traceScreen('仕上げの探し直し', j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
+              if (!j.ok) break;
+              curScr = nw;
+            }
+            sol = s4; best = now;
+          }
           else break;      // これ以上良くならない
         }
+        if (msg.trace) emit({ type: 'trace-tighten', ms: tightenMs });
       }
       if (!sol) { sol = solver.solve(m.lp, opts); tierProven = exact && String(sol && sol.Status) === 'Optimal'; }
       // 時間切れかどうかは「各段を証明できたか」で決める。仕上げ処理の Status は見ない。
@@ -459,19 +534,19 @@ self.addEventListener('message', async (e) => {
     post(85, '仕上げ中：公休を整理中...');
     AppState.shifts = shifts;
     try { if (typeof markSurplusRest === 'function') markSurplusRest(shifts); }
-    catch (e1) { self.postMessage({ type: 'progress', pct: 88, label: '公休整理をスキップ（' + e1.message + '）' }); }
+    catch (e1) { emit({ type: 'progress', pct: 88, label: '公休整理をスキップ（' + e1.message + '）' }); }
     // 検証用の記録（画面からは使わない）: 仕上げの前の、画面の数え方での責任者の順位の件数
-    if (msg.trace) { try { self.postMessage({ type: 'trace-prepolish', hier: checkViolations(shifts).filter(v => v.type === 'hierarchy').length }); } catch (_) {} }
+    if (msg.trace) { try { emit({ type: 'trace-prepolish', hier: checkViolations(shifts).filter(v => v.type === 'hierarchy').length }); } catch (_) {} }
     // 検査で確かめながら、入れ替えで減らせるところを減らす（🚨は絶対に増やさない）
     if (!adjust && !msg.noPolish && typeof polishShifts === 'function') {
       post(90, '仕上げ中：入れ替えで減らせるところを探しています…');
       try { polishShifts(shifts, { timeMs: 6000 }); }
-      catch (e3) { self.postMessage({ type: 'progress', pct: 90, label: '入れ替えをスキップ（' + e3.message + '）' }); }
+      catch (e3) { emit({ type: 'progress', pct: 90, label: '入れ替えをスキップ（' + e3.message + '）' }); }
     }
     post(92, '仕上げ中：違反を検証中...');
     let violations = [];
     try { violations = checkViolations(shifts); }
-    catch (e2) { violations = []; self.postMessage({ type: 'progress', pct: 95, label: '検証をスキップ（' + e2.message + '）' }); }
+    catch (e2) { violations = []; emit({ type: 'progress', pct: 95, label: '検証をスキップ（' + e2.message + '）' }); }
     AppState.violations = violations;
     // 段ごとの結果は、実際の違反件数から作る（内部の罰点変数の合計は
     // 1件の違反に複数の変数が対応することがあり、件数として正しくない）
@@ -485,8 +560,36 @@ self.addEventListener('message', async (e) => {
         tierLog.push(`${t.label}: ${n}件`);
       });
     }
-    self.postMessage({ type: 'done', shifts, violations, allOptimal, deep, fast, usedGap, tiered, tierLog, variant, variantLabel: VARLABEL, adjustRejected });
+    return { type: 'done', shifts, violations, allOptimal, deep, fast, usedGap, tiered, tierLog, variant, variantLabel: VARLABEL, adjustRejected };
+  }
+}
+
+// 案D（保険）: じっくり生成では、先に1分生成と同じ答えも作り、画面と同じ並べ方（scoreCompare）で
+// 良いほうを返す。じっくり生成の答えが1分生成より悪くなることを、しくみで防ぐ（利用者の判断 2026年9月30日）。
+// 同じ worker の中で順に解くので、同時に動く計算の数は増えない。同点ならじっくり生成の答えを採る。
+self.addEventListener('message', async (e) => {
+  const msg = e.data || {};
+  if (msg.type !== 'milp') return;
+  const emit = (m) => self.postMessage(m);
+  try {
+    if (msg.deepMode && !msg.adjustMode && !msg.noSafety) {
+      const q = await runMilp(Object.assign({}, msg, { deepMode: false, fastMode: true }), (m) => {
+        if (m.type === 'progress') emit({ type: 'progress', pct: Math.floor((m.pct || 0) * 0.15),
+                                          label: '（先に1分生成と同じ答えを作っています）' + (m.label || '') });
+        else if (msg.trace) emit(Object.assign({}, m, { pass: 'fast' }));
+      });
+      const d = await runMilp(msg, (m) => {
+        if (m.type === 'progress') emit({ type: 'progress', pct: 15 + Math.floor((m.pct || 0) * 0.85), label: m.label });
+        else emit(msg.trace ? Object.assign({}, m, { pass: 'deep' }) : m);
+      });
+      const c = scoreCompare(scoreViolations(q.violations || []), scoreViolations(d.violations || []));
+      const pick = c < 0 ? q : d;
+      emit(Object.assign({}, pick, { deep: true, safetyPick: c < 0 ? 'fast' : 'deep',
+        safetyOther: { violations: (c < 0 ? d : q).violations } }));
+    } else {
+      emit(await runMilp(msg, emit));
+    }
   } catch (err) {
-    self.postMessage({ type: 'error', message: (err && err.message) || String(err) });
+    emit({ type: 'error', message: (err && err.message) || String(err) });
   }
 });
