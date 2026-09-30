@@ -291,17 +291,35 @@ async function runMilp(msg, emit) {
           const vs = checkViolations(tmp);
           return { vs, sc: scoreViolations(vs), iki: ikiOf(vs) };
         };
-        const judge = (nw, pv) => {
-          const up = scoreWorsened(nw.sc, pv.sc).filter(w => w.key !== 'soft');
-          if (up.length || compWorsened(pv.vs, nw.vs).length) return { ok: false, rule: 1 };
-          const a = nw.sc, b = pv.sc;
-          const keys = new Set(Object.keys(a.byMust).concat(Object.keys(b.byMust)));
-          let down = a.comp < b.comp || a.over < b.over || (a.offShort || 0) < (b.offShort || 0) || (a.bsOver || 0) < (b.bsOver || 0);
-          keys.forEach(k => { if ((a.byMust[k] || 0) < (b.byMust[k] || 0)) down = true; });
+        // 比べるのは、その段までに解き終えた段の種類だけ（まだ解いていない段の種類は、あとの段で直すので
+        // 途中で増えてもよい。全部の種類で比べると、公休の段で連勤が増えただけで戻してしまい、どの段も採れなかった）
+        const isMustT = (ty) => getRuleLevel(ty) === 'must' || (typeof MUST_TYPES_OPT !== 'undefined' && MUST_TYPES_OPT.has(ty));
+        const countsOf = (vs, settled) => {
+          const o = { must: {}, soft: 0, iki: 0, comp: 0, over: 0, offShort: 0, bsOver: 0 };
+          vs.forEach(v => {
+            if (v.type === 'consecutive' && v.compliance && settled.has('comp-cons')) o.comp++;
+            if (!settled.has(v.type)) return;
+            if (isMustT(v.type)) o.must[v.type] = (o.must[v.type] || 0) + 1; else o.soft++;
+            if (IKI_T.indexOf(v.type) >= 0) o.iki++;
+            if (v.type === 'band-switch') { o.iki += (v.over || 0); if (getRuleLevel('band-switch') === 'must') o.bsOver += (v.over || 0); }
+            if (v.type === 'consecutive') o.over += (v.over || 0);
+            if (v.type === 'off-count' && isMustT(v.type)) o.offShort += (v.short || 0);
+          });
+          return o;
+        };
+        const judge = (nw, pv, settled) => {
+          const a = countsOf(nw.vs, settled), b = countsOf(pv.vs, settled);
+          const keys = new Set(Object.keys(a.must).concat(Object.keys(b.must)));
+          let up = a.comp > b.comp || a.over > b.over || a.offShort > b.offShort || a.bsOver > b.bsOver ||
+                   (settled.has('comp-cons') && compWorsened(pv.vs, nw.vs).length > 0);
+          let down = a.comp < b.comp || a.over < b.over || a.offShort < b.offShort || a.bsOver < b.bsOver;
+          keys.forEach(k => { const x = a.must[k] || 0, y = b.must[k] || 0; if (x > y) up = true; if (x < y) down = true; });
+          if (up) return { ok: false, rule: 1 };
           if (down) return { ok: true, rule: 2 };
-          if (a.soft > b.soft || nw.iki > pv.iki) return { ok: false, rule: 3 };
+          if (a.soft > b.soft || a.iki > b.iki) return { ok: false, rule: 3 };
           return { ok: true, rule: 3 };
         };
+        const settled = new Set();   // 解き終えた段の種類
         let curScr = null;   // いまの答え（sol）の画面の検査の結果
         const useB = !msg.noScreenGuard;
         const traceScreen = (label, sc, decision, rule) => {
@@ -333,6 +351,7 @@ async function runMilp(msg, emit) {
               (t.types || []).forEach(ty => protect.push(ty));
             }
             if (!okC || !provenOf(sC, t.types)) tierProven = false;
+            (t.types || []).forEach(ty => settled.add(ty));
             if (msg.trace) emit({ type: 'trace', ti, label: t.label, cap,
               sec: Math.round((Date.now() - t0) / 1000), status: String(sC && sC.Status), okStrict: okC,
               prev: null, got: okC ? MILP.slackTotal(sC, m.parts, t.types) : null });
@@ -400,6 +419,7 @@ async function runMilp(msg, emit) {
           // どちらの方式でも前の段を守れなかった場合は、この段の結果は採用しない。
           // ただし後ろの段は打ち切らない（別の段なら解けることがあるため）。
           if (!okStrict) {
+            (t.types || []).forEach(ty => settled.add(ty));
             tierProven = false;
             if (sol) {
               sol = tighten(sol, t.types);
@@ -412,10 +432,11 @@ async function runMilp(msg, emit) {
           }
           // 案B: 前の答えがあるときは、画面と同じ検査で採るかを決める
           let taken = true;
+          (t.types || []).forEach(ty => settled.add(ty));
           if (useB && sol) {
             if (!curScr) curScr = screenOf(sol);
             const nw = screenOf(s2);
-            const j = judge(nw, curScr);
+            const j = judge(nw, curScr, settled);
             traceScreen(t.label, j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
             if (j.ok) curScr = nw; else taken = false;
           }
@@ -467,7 +488,7 @@ async function runMilp(msg, emit) {
                 // 案B: 詰め直した答えも、画面と同じ検査で前の答えより悪くならないときだけ採る
                 if (useB) {
                   if (!curScr) curScr = screenOf(sol);
-                  const nw = screenOf(s6); const j = judge(nw, curScr);
+                  const nw = screenOf(s6); const j = judge(nw, curScr, settled);
                   traceScreen('詰め直し: ' + p.t.label, j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
                   if (!j.ok) continue;
                   curScr = nw;
@@ -501,7 +522,7 @@ async function runMilp(msg, emit) {
           if (now < prev - 1e-6) {
             if (useB) {
               if (!curScr) curScr = screenOf(sol);
-              const nw = screenOf(s4); const j = judge(nw, curScr);
+              const nw = screenOf(s4); const j = judge(nw, curScr, settled);
               traceScreen('仕上げの探し直し', j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
               if (!j.ok) break;
               curScr = nw;
