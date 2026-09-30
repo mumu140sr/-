@@ -705,12 +705,27 @@
     });
 
     // ヒエラルキー（早責/遅責）
+    // 画面の検査（checkViolations の hierarchy）と同じ数え方にする:
+    //  ・その日・その責任者シフトごとに1件（責任者より上の人が何人いても1件）。以前は「責任者×上の人」の組ごとに
+    //    1件で、罰点の印が約1000個になり、じっくり生成がこの段で持ち時間を使い切って、あとのリズムの段が悪くなった。
+    //  ・上の人が半休・早番側の研修の日は「その時間帯にいる」と数えない（検査は出勤かつ研修でない人だけを見る。
+    //    遅番側は検査も研修を数えるので、そのまま数える）。
     const wH = ruleW('hierarchy', P.hierarchyViolation || 3000);
     if (wH > 0) {
+      const hierBand = (hi, d, band) => {
+        if (isTrainDay(hi, d)) { const k = fx(hi, d); return (band === 'l' && cat(k) === 'l') ? { t: [], c: 1 } : { t: [], c: 0 }; }
+        const o = cellTerms(hi, d);
+        if (o.half) return { t: [], c: 0 };
+        const arr = band === 'e' ? o.e : o.l;
+        return { t: realT(arr), c: constOf(arr) };
+      };
       [['e', earlyRoles], ['l', lateRoles]].forEach(([band, bandRoles]) => {
-        bandRoles.filter(r => SOLO.has(r)).forEach(resp => {
+        bandRoles.filter(r => SOLO.has(r)).forEach((resp, ri) => {
           const capable = gStaff.filter(s => (s.allowedShifts || []).includes(resp));
           for (let d = 1; d <= days; d++) {
+            const v = `h_${band}${ri}_${d}`;
+            let made = false;
+            const slack = () => { if (!made) { addSlack(v, 1, wH, 'hierarchy'); made = true; } return v; };
             capable.forEach(lo => {
               let loResp = null;
               if (fx(lo, d) === resp) loResp = '1c';
@@ -718,11 +733,11 @@
               else return;
               capable.forEach(hi => {
                 if (hi.id === lo.id || getStaffPriority(hi) >= getStaffPriority(lo)) return;
-                const o = cellTerms(hi, d); const bandArr = band === 'e' ? o.e : o.l;
-                const hiT = realT(bandArr), hiC = constOf(bandArr);
-                if (loResp === '1c') { if (hiT.length) { const v = `h_${band}_${d}_${sidOf[lo.id]}_${sidOf[hi.id]}`; addSlack(v, 1, wH, 'hierarchy'); cons.push(`${v}c: ${hiT.join(' + ')} - ${v} <= ${1 - hiC}`); } return; }
-                const v = `h_${band}_${d}_${sidOf[lo.id]}_${sidOf[hi.id]}`; addSlack(v, 1, wH, 'hierarchy');
-                const t = [loResp, ...hiT, `- ${v}`]; cons.push(`${v}c: ${t.join(' + ').replace(/\+ -/g, '-')} <= ${1 - hiC}`);
+                const { t: hiT, c: hiC } = hierBand(hi, d, band);
+                const cn = `${v}_${sidOf[lo.id]}_${sidOf[hi.id]}c`;
+                if (loResp === '1c') { if (hiT.length) cons.push(`${cn}: ${hiT.join(' + ')} - ${slack()} <= ${1 - hiC}`); return; }
+                if (!hiT.length && !hiC) return;   // 上の人がその時間帯に入れない日
+                const t = [loResp, ...hiT, `- ${slack()}`]; cons.push(`${cn}: ${t.join(' + ').replace(/\+ -/g, '-')} <= ${1 - hiC}`);
               });
             });
           }

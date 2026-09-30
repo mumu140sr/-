@@ -460,6 +460,8 @@ self.addEventListener('message', async (e) => {
     AppState.shifts = shifts;
     try { if (typeof markSurplusRest === 'function') markSurplusRest(shifts); }
     catch (e1) { self.postMessage({ type: 'progress', pct: 88, label: '公休整理をスキップ（' + e1.message + '）' }); }
+    // 検証用の記録（画面からは使わない）: 仕上げの前の、画面の数え方での責任者の順位の件数
+    if (msg.trace) { try { self.postMessage({ type: 'trace-prepolish', hier: checkViolations(shifts).filter(v => v.type === 'hierarchy').length }); } catch (_) {} }
     // 検査で確かめながら、入れ替えで減らせるところを減らす（🚨は絶対に増やさない）
     if (!adjust && !msg.noPolish && typeof polishShifts === 'function') {
       post(90, '仕上げ中：入れ替えで減らせるところを探しています…');
