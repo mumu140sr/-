@@ -260,6 +260,8 @@ function _milpOnce(onProgress, opts, variant) {
     worker.onerror = (err) => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化Workerエラー: ' + (err.message || 'ソルバーの読込みに失敗しました'))); };
     // timeOverride: 候補をいくつも組み直して比べるときに、1回あたりの時間を短くする
     worker.postMessage({ type: 'milp', appState: _milpPayload(opts && opts.settingsPatch, opts && opts.requestsPatch, opts && opts.staffPatch), deepMode, fastMode, adjustMode, adjustK,
+                         // 自動修正の「全部直す」（improveOver）では、案D（1分生成の答えも作る）を働かせない
+                         noSafety: !!(opts && (opts.improveOver || opts.noSafety)),
                          timeOverride: (opts && parseInt(opts.timeOverride)) || 0,
                          variant: parseInt(variant) || 0 });
   });

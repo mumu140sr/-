@@ -274,8 +274,10 @@ async function runMilp(msg, emit) {
           const z = solver.solve(MILP.composeLP(m.parts, { types, budgets, neighbor: { ones: MILP.onesOf(s0), k: 0, only: CELLS } }),
                                  Object.assign({}, opts, { time_limit: 5, mip_rel_gap: 0, mip_abs_gap: 0 }));
           tightenMs += Date.now() - q0;
-          return (MILP.solutionIsValid(z, m.parts, budgets) &&
-                  MILP.slackTotal(z, m.parts, types) <= MILP.slackTotal(s0, m.parts, types)) ? z : s0;
+          const before = MILP.slackTotal(s0, m.parts, types);
+          const ok = MILP.solutionIsValid(z, m.parts, budgets) && MILP.slackTotal(z, m.parts, types) <= before;
+          if (msg.trace) emit({ type: 'trace-tighten-tier', types, before, after: ok ? MILP.slackTotal(z, m.parts, types) : before });
+          return ok ? z : s0;
         };
         // 案B: 段の答えを表に直して、画面と同じ検査（仕上げの入れ替えの前）で前の答えと比べる。
         //  1. 🚨のどれかの種類・⛔（新しく・長く・つながる）・連勤の超過日数・公休の足りない日数・
@@ -288,38 +290,25 @@ async function runMilp(msg, emit) {
         const screenOf = (s0) => {
           const tmp = {}; Object.keys(shifts).forEach(id => { tmp[id] = Object.assign({}, shifts[id]); });
           MILP.applyGroupSolution(m, s0, tmp);
+          // 画面と同じく「余」を付けてから数える（付ける前の表では、連休の長さなどが画面と違う）
+          try { if (typeof markSurplusRest === 'function') markSurplusRest(tmp); } catch (_) {}
           const vs = checkViolations(tmp);
           return { vs, sc: scoreViolations(vs), iki: ikiOf(vs) };
         };
-        // 比べるのは、その段までに解き終えた段の種類だけ（まだ解いていない段の種類は、あとの段で直すので
-        // 途中で増えてもよい。全部の種類で比べると、公休の段で連勤が増えただけで戻してしまい、どの段も採れなかった）
-        const isMustT = (ty) => getRuleLevel(ty) === 'must' || (typeof MUST_TYPES_OPT !== 'undefined' && MUST_TYPES_OPT.has(ty));
-        const countsOf = (vs, settled) => {
-          const o = { must: {}, soft: 0, iki: 0, comp: 0, over: 0, offShort: 0, bsOver: 0 };
-          vs.forEach(v => {
-            if (v.type === 'consecutive' && v.compliance && settled.has('comp-cons')) o.comp++;
-            if (!settled.has(v.type)) return;
-            if (isMustT(v.type)) o.must[v.type] = (o.must[v.type] || 0) + 1; else o.soft++;
-            if (IKI_T.indexOf(v.type) >= 0) o.iki++;
-            if (v.type === 'band-switch') { o.iki += (v.over || 0); if (getRuleLevel('band-switch') === 'must') o.bsOver += (v.over || 0); }
-            if (v.type === 'consecutive') o.over += (v.over || 0);
-            if (v.type === 'off-count' && isMustT(v.type)) o.offShort += (v.short || 0);
-          });
-          return o;
-        };
-        const judge = (nw, pv, settled) => {
-          const a = countsOf(nw.vs, settled), b = countsOf(pv.vs, settled);
-          const keys = new Set(Object.keys(a.must).concat(Object.keys(b.must)));
-          let up = a.comp > b.comp || a.over > b.over || a.offShort > b.offShort || a.bsOver > b.bsOver ||
-                   (settled.has('comp-cons') && compWorsened(pv.vs, nw.vs).length > 0);
-          let down = a.comp < b.comp || a.over < b.over || a.offShort < b.offShort || a.bsOver < b.bsOver;
-          keys.forEach(k => { const x = a.must[k] || 0, y = b.must[k] || 0; if (x > y) up = true; if (x < y) down = true; });
-          if (up) return { ok: false, rule: 1 };
+        // 案Bは🚨の段（先頭の5段）にはかけない。計算と画面で数え方が違う種類があり、計算の上では守れている
+        // 良い答えまで戻してしまい、🚨が大きく増えた（1分生成 583→765）。🟡の段（「絶対」にした段も含む）・
+        // 詰め直す回・最後の探し直しでは、🚨の全部の種類で比べる。
+        const judge = (nw, pv) => {
+          const up = scoreWorsened(nw.sc, pv.sc).filter(w => w.key !== 'soft');
+          if (up.length || compWorsened(pv.vs, nw.vs).length) return { ok: false, rule: 1 };
+          const a = nw.sc, b = pv.sc;
+          let down = a.comp < b.comp || a.over < b.over || (a.offShort || 0) < (b.offShort || 0) || (a.bsOver || 0) < (b.bsOver || 0);
+          new Set(Object.keys(a.byMust).concat(Object.keys(b.byMust))).forEach(k => { if ((a.byMust[k] || 0) < (b.byMust[k] || 0)) down = true; });
           if (down) return { ok: true, rule: 2 };
-          if (a.soft > b.soft || a.iki > b.iki) return { ok: false, rule: 3 };
+          if (a.soft > b.soft || nw.iki > pv.iki) return { ok: false, rule: 3 };
           return { ok: true, rule: 3 };
         };
-        const settled = new Set();   // 解き終えた段の種類
+        const CORE_LABELS = new Set(TIER_RAW.slice(0, 5).map(x => x.label));
         let curScr = null;   // いまの答え（sol）の画面の検査の結果
         const useB = !msg.noScreenGuard;
         const traceScreen = (label, sc, decision, rule) => {
@@ -351,7 +340,6 @@ async function runMilp(msg, emit) {
               (t.types || []).forEach(ty => protect.push(ty));
             }
             if (!okC || !provenOf(sC, t.types)) tierProven = false;
-            (t.types || []).forEach(ty => settled.add(ty));
             if (msg.trace) emit({ type: 'trace', ti, label: t.label, cap,
               sec: Math.round((Date.now() - t0) / 1000), status: String(sC && sC.Status), okStrict: okC,
               prev: null, got: okC ? MILP.slackTotal(sC, m.parts, t.types) : null });
@@ -419,7 +407,6 @@ async function runMilp(msg, emit) {
           // どちらの方式でも前の段を守れなかった場合は、この段の結果は採用しない。
           // ただし後ろの段は打ち切らない（別の段なら解けることがあるため）。
           if (!okStrict) {
-            (t.types || []).forEach(ty => settled.add(ty));
             tierProven = false;
             if (sol) {
               sol = tighten(sol, t.types);
@@ -432,13 +419,12 @@ async function runMilp(msg, emit) {
           }
           // 案B: 前の答えがあるときは、画面と同じ検査で採るかを決める
           let taken = true;
-          (t.types || []).forEach(ty => settled.add(ty));
-          if (useB && sol) {
+          if (useB && sol && !CORE_LABELS.has(t.label)) {
             if (!curScr) curScr = screenOf(sol);
             const nw = screenOf(s2);
-            const j = judge(nw, curScr, settled);
+            const j = judge(nw, curScr);
             traceScreen(t.label, j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
-            if (j.ok) curScr = nw; else taken = false;
+            if (j.ok) curScr = nw; else { taken = false; tierProven = false; }
           }
           if (taken) sol = s2;
           // 案A: 立ったままの印を落としてから、この段の件数を上限にする
@@ -488,9 +474,9 @@ async function runMilp(msg, emit) {
                 // 案B: 詰め直した答えも、画面と同じ検査で前の答えより悪くならないときだけ採る
                 if (useB) {
                   if (!curScr) curScr = screenOf(sol);
-                  const nw = screenOf(s6); const j = judge(nw, curScr, settled);
+                  const nw = screenOf(s6); const j = judge(nw, curScr);
                   traceScreen('詰め直し: ' + p.t.label, j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
-                  if (!j.ok) continue;
+                  if (!j.ok) { tierProven = false; continue; }
                   curScr = nw;
                 }
                 sol = s6;
@@ -522,9 +508,10 @@ async function runMilp(msg, emit) {
           if (now < prev - 1e-6) {
             if (useB) {
               if (!curScr) curScr = screenOf(sol);
-              const nw = screenOf(s4); const j = judge(nw, curScr, settled);
+              const nw = screenOf(s4); const j = judge(nw, curScr);
               traceScreen('仕上げの探し直し', j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
-              if (!j.ok) break;
+              // 戻しても打ち切らない。同じ答えをくり返さないよう、次はこの答えより良いものだけを探す
+              if (!j.ok) { best = now; continue; }
               curScr = nw;
             }
             sol = s4; best = now;
@@ -593,19 +580,21 @@ self.addEventListener('message', async (e) => {
   if (msg.type !== 'milp') return;
   const emit = (m) => self.postMessage(m);
   try {
-    if (msg.deepMode && !msg.adjustMode && !msg.noSafety) {
+    // 🎯 じっくり生成（fastMode も deepMode も無し）と、妥協なしモード（deepMode）で働く。
+    // 1分生成・微調整・自動修正の「全部直す」（noSafety）では働かない。
+    if (!msg.fastMode && !msg.adjustMode && !msg.noSafety) {
       const q = await runMilp(Object.assign({}, msg, { deepMode: false, fastMode: true }), (m) => {
         if (m.type === 'progress') emit({ type: 'progress', pct: Math.floor((m.pct || 0) * 0.15),
                                           label: '（先に1分生成と同じ答えを作っています）' + (m.label || '') });
         else if (msg.trace) emit(Object.assign({}, m, { pass: 'fast' }));
       });
-      const d = await runMilp(msg, (m) => {
+      const d = await runMilp(Object.assign({}, msg, { noSafety: true }), (m) => {
         if (m.type === 'progress') emit({ type: 'progress', pct: 15 + Math.floor((m.pct || 0) * 0.85), label: m.label });
         else emit(msg.trace ? Object.assign({}, m, { pass: 'deep' }) : m);
       });
       const c = scoreCompare(scoreViolations(q.violations || []), scoreViolations(d.violations || []));
       const pick = c < 0 ? q : d;
-      emit(Object.assign({}, pick, { deep: true, safetyPick: c < 0 ? 'fast' : 'deep',
+      emit(Object.assign({}, pick, { deep: d.deep, fast: d.fast, usedGap: d.usedGap, safetyPick: c < 0 ? 'fast' : 'deep',
         safetyOther: { violations: (c < 0 ? d : q).violations } }));
     } else {
       emit(await runMilp(msg, emit));
