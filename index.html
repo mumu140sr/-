@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=240" />
+<link rel="stylesheet" href="css/style.css?v=241" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -20,7 +20,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v240</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v241</span>
   </div>
   <div class="header-actions">
     <button id="btnTheme" class="btn btn-ghost btn-theme" aria-label="テーマ切替" title="明暗を切り替え">🌙</button>
@@ -281,11 +281,11 @@
       <p class="hint" style="margin:8px 0 0">上のボタンで順番に進めば、ここは使わなくても大丈夫です。手順が分かっている方は、個別に実行できます。</p>
       <div class="genmode" style="margin-top:10px">
         <div class="genmode-row"><b>⚡ 速い生成（証明なし）</b><span>1部門あたり最大60秒で打ち切り、その時点の最良の表を返します。設定を直しながら何度も試す段階はこちらが快適です。</span></div>
-        <div class="genmode-row"><b>🎯 じっくり生成（証明あり）</b><span>「これ以上良い組み合わせは存在しない」と数学的に確かめるまで解きます。1部門あたり最大10分。<b>最終確定はこちら</b>で。条件が厳しい月ほど、速い生成との差が大きくなります。</span></div>
+        <div class="genmode-row"><b>🎯 じっくり生成（証明あり）</b><span>「これ以上良い組み合わせは存在しない」と数学的に確かめるまで解きます。1部門あたり最大約11分（中で1分生成の答えも作り、良いほうを採るため）。<b>最終確定はこちら</b>で。条件が厳しい月ほど、速い生成との差が大きくなります。</span></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="btnGenerateFast" class="btn btn-large btn-primary">⚡ 速い生成（証明なし・最大60秒）</button>
-        <button id="btnGenerate" class="btn btn-large" style="background:#4c51bf;color:#fff">🎯 じっくり生成（証明あり・最大10分）</button>
+        <button id="btnGenerate" class="btn btn-large" style="background:#4c51bf;color:#fff">🎯 じっくり生成（証明あり・最大約11分）</button>
         <button id="btnFeasibility" class="btn btn-large" style="background:#38a169;color:#fff">🔍 実現性チェック（生成前）</button>
         <button id="btnRelax" class="btn btn-large" style="background:#dd6b20;color:#fff">🩹 エラー解消プラン</button>
         <button id="btnSurplusPlan" class="btn btn-large" style="background:#2b6cb0;color:#fff">⚖️ 余の使い道を決める</button>
@@ -374,12 +374,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=240"></script>
-<script src="js/optimizer.v6.js?v=240"></script>
-<script src="js/worker-client.v6.js?v=240"></script>
-<script src="js/ai-explain.v6.js?v=240"></script>
-<script src="js/ui.v6.js?v=240"></script>
-<script src="js/milp.v6.js?v=240"></script>
-<script src="js/app.v6.js?v=240"></script>
+<script src="js/data.v6.js?v=241"></script>
+<script src="js/optimizer.v6.js?v=241"></script>
+<script src="js/worker-client.v6.js?v=241"></script>
+<script src="js/ai-explain.v6.js?v=241"></script>
+<script src="js/ui.v6.js?v=241"></script>
+<script src="js/milp.v6.js?v=241"></script>
+<script src="js/app.v6.js?v=241"></script>
 </body>
 </html>

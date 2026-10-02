@@ -934,7 +934,7 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
            じっくり生成にすると<b>さらに減ることがあります</b>。人手がぎりぎりの月ほど差が大きくなる傾向があります。
            最終確定の前に、一度は下のボタンで解き直すことをおすすめします。`) +
       (vioCount > 0
-        ? '<br><button id="btnProofOptimize" class="btn btn-primary" style="margin-top:8px">🎯 じっくり生成で解き直す（証明あり・最大10分）</button>'
+        ? '<br><button id="btnProofOptimize" class="btn btn-primary" style="margin-top:8px">🎯 じっくり生成で解き直す（証明あり・最大約11分）</button>'
         : '');
   } else if (cutOff && info && (info.pickedFast || (!info.timedOut && info.screenRejected > 0))) {
     // 時間切れではない理由で「確かめ済み」にならなかったとき。設定を緩めるすすめは出さない
@@ -946,9 +946,18 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
          <b>1分生成の答えのほうが良かったので、そちらを採りました</b>。`
       : `🎯 <b>じっくり生成で完了しました（${elapsed}秒・時間切れはありません）</b>：画面と同じ検査で悪くなる答えを外して、
          良いほうを採りました。`;
-    box.innerHTML = head + (info.timedOut
-      ? `<br>じっくり生成の側には、時間内に最後まで計算しきれない段がありました。残り ${vioCount}件は<b>「避けられない」とは限りません</b>。
-         ⑤自動生成の「🔍 実現性チェック」で人手の不足を確認し、有給日数・日別必要人数・公休数のいずれかを緩めてください。`
+    // 21人以上の部門は最初から「差2%で止める」ので、時間切れでなくても solverProven が false になる。
+    // そのときは時間切れとして扱わず、v239 と同じ説明と「⏳ 妥協なしで再計算」を出す
+    const gapRetry = info.timedOut && usedGap && !wasDeep;
+    box.innerHTML = head + (gapRetry
+      ? `<br>21人以上の部門は、時間を短くするため「ほぼ最良（差2%以内）」のところで計算を止めているため、
+         これが最良だとは確認できていません。<br>
+         <button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">⏳ 妥協なしで再計算（早期停止を無効・最大約11分）</button>`
+      : info.timedOut
+      ? `<br>じっくり生成の側には、時間内に最後まで計算しきれない段がありました。` + (vioCount > 0
+          ? `残り ${vioCount}件は<b>「避けられない」とは限りません</b>。
+             ⑤自動生成の「🔍 実現性チェック」で人手の不足を確認し、有給日数・日別必要人数・公休数のいずれかを緩めてください。`
+          : `エラーは0件なので、このまま使えます。`)
       : (info.pickedFast ? `時間切れではありません。` : '') + (info.screenRejected > 0
           ? `<br>答えを外した段があるため、「これ以上良い組み合わせは無い」とまでは確認していません。`
           : `<br>計算の上の最良と、画面の検査での良し悪しが少し違うため、画面で良いほうを採りました。`) +
@@ -975,7 +984,7 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
         : '最後まで計算しきれなかった段があるため、'}
       これが最良だとは確認できていません。<br>
       ${canRetry
-        ? '<button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">⏳ 妥協なしで再計算（早期停止を無効・最大10分）</button>'
+        ? '<button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">⏳ 妥協なしで再計算（早期停止を無効・最大約11分）</button>'
         : '上限いっぱいまで計算しても解ききれませんでした。⑤自動生成の「🔍 実現性チェック」で人手の不足を確認し、有給日数・日別必要人数・公休数のいずれかを緩めてください。'}`;
   }
   // 段階最適化の結果（どのルールを何件まで抑えられたか）を表示する
@@ -1004,14 +1013,14 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
   const bp = document.getElementById('btnProofOptimize');
   if (bp) bp.addEventListener('click', () => {
     if (typeof window._runGenerate === 'function') {
-      toast('じっくり生成で解き直します（1部門あたり最大10分）', 'info', 4000);
+      toast('じっくり生成で解き直します（1部門あたり最大約11分）', 'info', 4000);
       window._runGenerate({ newTiering: true });
     }
   });
   const bd = document.getElementById('btnDeepOptimize');
   if (bd) bd.addEventListener('click', () => {
     if (typeof window._runGenerate === 'function') {
-      toast('妥協なしモードで再計算します（1部門あたり最大10分）', 'info', 4000);
+      toast('妥協なしモードで再計算します（1部門あたり最大約11分）', 'info', 4000);
       window._runGenerate({ deepMode: true, newTiering: true });
     }
   });
@@ -1021,7 +1030,8 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
 function setupGeneratePanel() {
   const btn = document.getElementById('btnGenerate');          // 🎯 じっくり生成（証明あり）
   const btnFast = document.getElementById('btnGenerateFast');  // ⚡ 速い生成（証明なし）
-  const BTN_LABEL = { proof: '🎯 じっくり生成（証明あり・最大10分）', fast: '⚡ 速い生成（証明なし・最大60秒）' };
+  // じっくり生成は中で1分生成も作って比べるので、最大で約11分
+  const BTN_LABEL = { proof: '🎯 じっくり生成（証明あり・最大約11分）', fast: '⚡ 速い生成（証明なし・最大60秒）' };
   const setBusy = (busy) => {
     [btn, btnFast].forEach(b => { if (b) b.disabled = busy; });
     if (busy) { if (btn) btn.textContent = '⏳ 計算中...'; if (btnFast) btnFast.textContent = '⏳ 計算中...'; }
