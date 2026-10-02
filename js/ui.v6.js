@@ -2092,6 +2092,13 @@ function changesOfChangeAndCalc(base0, mid) {
  * 取り違えていた（おすすめが止まる・🎓の候補が作り直されて選び直しが消える）。
  */
 function contentFingerprint() {
+  const clean = _fpClean;
+  return JSON.stringify([AppState.settings.targetMonth, clean(AppState.shifts), clean(AppState.requests),
+    clean(AppState.fixedShifts), clean(AppState.dailyRequirements), clean(AppState.dailyRequirementsCast),
+    (AppState.staff || []).map(s => [s.id, s.paidLeave])]);
+}
+/** 空の入れ物を無視して並べ直したもの（指紋用） */
+function _fpClean(o) {
   const clean = (o) => {
     if (!o || typeof o !== 'object' || Array.isArray(o)) return o;
     const r = {};
@@ -2103,9 +2110,29 @@ function contentFingerprint() {
     });
     return r;
   };
-  return JSON.stringify([AppState.settings.targetMonth, clean(AppState.shifts), clean(AppState.requests),
-    clean(AppState.fixedShifts), clean(AppState.dailyRequirements), clean(AppState.dailyRequirementsCast),
-    (AppState.staff || []).map(s => [s.id, s.paidLeave])]);
+  return clean(o);
+}
+/**
+ * 表を作るもとになる入力（希望・必要人数・担当など）の指紋。生成した直後に控え（genBase.inputFp）、
+ * いまと違えば「表が古い（希望や設定を変えたあと）」とみなす。🔒固定と表そのものは入れない
+ * （手で直したマスや途中から作り直すの🔒で、古いと言わないように）。
+ */
+function genInputFp() {
+  const c = _fpClean;
+  return JSON.stringify([AppState.settings.targetMonth, c(AppState.requests),
+    c(AppState.dailyRequirements), c(AppState.dailyRequirementsCast),
+    c(AppState.roleRequirements), c(AppState.roleRequirementsCast), c(AppState.skills), c(AppState.dailySkills),
+    (AppState.staff || []).map(s => [s.id, s.allowedShifts, s.paidLeave, s.maxOff, s.positionType, s.department])]);
+}
+/** いまの表の状態: 'none'（まだ作っていない・別の月）/ 'stale'（作ったあとに希望・設定を変えた）/ 'ok' */
+function genTableState() {
+  const made = !!(AppState.generated && Object.keys(AppState.shifts || {}).length);
+  if (!made) return 'none';
+  const gb = AppState.genBase;
+  if (gb && gb.month && gb.month !== AppState.settings.targetMonth) return 'none';
+  if (AppState._needsRegen) return 'stale';
+  if (gb && gb.inputFp && gb.inputFp !== genInputFp()) return 'stale';
+  return 'ok';
 }
 
 /** 変えた所だけの履歴を積む（余の解消が実行されたとき） */
@@ -2459,6 +2486,7 @@ function genBaseTake() {
     shifts: JSON.parse(JSON.stringify(AppState.shifts || {})),
     fixed: JSON.parse(JSON.stringify(AppState.fixedShifts || {})),
     vsum: _editVsum(AppState.violations || checkViolations(AppState.shifts)),
+    inputFp: genInputFp(),   // 表が古くなったか（余の使い道で使う）
   };
   AppState.editLog = [];
   renderEditSummary();
@@ -4605,11 +4633,16 @@ function _tutorsOn(day, band, shifts) {
     .sort((a, b) => rank[a.s.positionType] - rank[b.s.positionType]);
 }
 
-// 教わる人を決めて「指導役がいる日に追加で出勤させる」候補を探す。
-// 生成する前なので誰がどこに入るかはまだ決まっていない。そこで
-//   ・その日その時間帯に入れる指導役が何人いるか（希望休でない人）
-//   ・その時間帯を0人に設定していないか
-// で並べ、上から採れば外れにくいようにする。
+// 教わる人を決めて「指導役のいる日に、その人のぶん必要人数を1人増やす」候補を探す。
+// いまの表で、その日の教わる人のマスによって3つに分ける（v242）。
+//   (a) 'work' 出勤日に足す: その時間帯にもう出勤している日。必要人数を+1して、生成し直すと
+//       余のある人がもう1人入る（＝余を使う）。教わる人の公休は変わらない。
+//   (c) 'yo'   自分の余の日に足す: 教わる人がその日「余」。余は公休に数えないので公休は減らない。
+//   (b) 'off'  休みの日に足す: 休み・空きの日。教わる人の出勤が増え、公休が減る。
+// 1日1人の役（責任者・総務）を+1すると同じ時間帯に2人になるので、その日は同じ時間帯の
+// ふつうのシフト（担当できるもの）で入れる。研修（研）は人数に数えないので使わない。
+// 表が無い・別の月のときは (a) が分からないので、呼ぶ側で「まず一度生成して」と案内する。
+const _isSoloKey = (k) => (typeof SOLO_SHIFT_KEYS !== 'undefined' && SOLO_SHIFT_KEYS.includes(k)) || /責|総務/.test(k || '');
 function _trainingCandidates(learnerId, band, tutorIds) {
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const L = AppState.staff.find(x => x.id === learnerId);
@@ -4619,36 +4652,60 @@ function _trainingCandidates(learnerId, band, tutorIds) {
   const g = getDepartmentGroups(AppState.staff).find(x => x.staff.some(y => y.id === L.id))
             || { reqs: AppState.roleRequirements, dailyReqs: AppState.dailyRequirements };
   const inBand = (k) => band === 'any' ? (isEarlyCategory(k) || isLate(k)) : (band === 'e' ? isEarlyCategory(k) : isLate(k));
-  const myKeys = (L.allowedShifts || []).filter(k => inBand(k) && !isTraining(k));
+  const myKeys = (L.allowedShifts || []).filter(k => inBand(k) && !isTraining(k) && isWork(k));
+  const normKeys = myKeys.filter(k => !_isSoloKey(k));   // 1日1人の役でない、ふつうのシフト
   if (!myKeys.length) return [];
-  const tutors = (AppState.staff || []).filter(t => tutorIds.indexOf(t.id) >= 0 && t.id !== L.id);
+  const tutorSet = new Set((tutorIds || []).filter(id => id !== L.id));
   const maxC  = (typeof getMaxConsFor === 'function') ? getMaxConsFor(L) : (parseInt(AppState.settings.maxConsecutive) || 0);
   const prevC = (typeof getPrevMonthEnd === 'function') ? (getPrevMonthEnd(L).cons || 0) : 0;
   const bandKeysAll = (typeof getWorkShiftKeys === 'function' ? getWorkShiftKeys() : []).filter(k => inBand(k));
-  // すでに固定で入れてある日（前に反映した分）も分かるようにする
   const fixedOf = (d) => (AppState.fixedShifts[L.id] || {})[d] || '';
+  const row0 = (AppState.shifts || {})[L.id] || {};
+  const bandOf = (k) => isEarlyCategory(k) ? 'e' : 'l';
+  const sameCat = (a, b) => (isEarlyCategory(a) && isEarlyCategory(b)) || (isLate(a) && isLate(b));
 
   const out = [];
   for (let d = 1; d <= days; d++) {
     const st = staffDayState(L, d);
     const already = fixedOf(d);
-    if (st !== 'free' && !already) continue;            // 希望休・有給の日だけ外す
+    const cur = row0[d] || '';
+    // 分ける: いまの表のマスで決める
+    let kind;
+    if (cur && isWork(cur) && !isTraining(cur)) {
+      if (!inBand(cur)) continue;                 // 別の時間帯に出勤している日は対象外
+      kind = 'work';
+    } else if (cur && isTraining(cur)) continue;  // 研修の日は外す
+    else if (cur === '余') kind = 'yo';
+    else if (!cur || isPublicOff(cur)) kind = 'off';
+    else continue;                                // 有給など公休でない休みの日は外す（有給を消してしまうため）
+    // 希望休・有給・🔒の日は外す。ただし、出勤日で🔒・希望が表と同じシフトの日（前に反映した分など）は残す
+    if (st !== 'free') {
+      const fixedSame = kind === 'work' && /^fixed:/.test(st) && st.slice(6) === cur;
+      if (!fixedSame && !(already && kind === 'work')) continue;
+    }
     const warn = [];
-    // 前月末からの連勤が上限に達しているなら、1日目は必ず連勤超過になる
-    if (d === 1 && prevC >= maxC && maxC > 0) warn.push(`前月末から${prevC}連勤中のため、1日に入れると連勤超過になります`);
-    // その時間帯の人数を意図的に減らしている日（キャスト出勤日など）
+    if (d === 1 && prevC >= maxC && maxC > 0 && kind !== 'work') warn.push(`前月末から${prevC}連勤中のため、1日に入れると連勤超過になります`);
     const reduced = bandKeysAll.some(k2 => {
       const v = (store[k2] || {})[d];
       return v != null && v < ((g.reqs || {})[k2] || 0);
     });
     if (reduced) warn.push('この日は人数を減らす設定にしています（キャスト出勤日など）');
-    // その日いられる指導役
-    const av = tutors.filter(t => staffDayState(t, d) === 'free' && (t.allowedShifts || []).some(k => inBand(k)));
-    if (!av.length) warn.push('この日は指導役が全員お休みです');
-    // どのシフトで入れるか（すでに固定済みならそれ、無ければ最初の候補）
-    const k = already && myKeys.indexOf(already) >= 0 ? already : myKeys[0];
-    const need = getDayReq(g.reqs, g.dailyReqs || {}, k, d);
-    // 前後の日の予定とつじつまが合うか（遅番の翌日が早番・研修 など）
+    // どのシフトで入れるか。出勤日は、いまのシフトがふつうのシフトならそのまま。
+    // 1日1人の役なら、同じ時間帯のふつうのシフトにする（+1すると責任者・総務が2人になるため）。
+    let keys, k, roleNote = '', blocked = '';
+    if (kind === 'work') {
+      if (!_isSoloKey(cur)) { keys = normKeys.indexOf(cur) >= 0 ? normKeys : [cur].concat(normKeys); k = cur; }
+      else {
+        keys = normKeys.filter(x => sameCat(x, cur));
+        if (!keys.length) keys = normKeys.slice();
+        k = keys[0] || '';
+        if (!k) blocked = `いまは「${cur}」（1日1人の役）です。同じ時間帯のふつうのシフトを担当していないので、この日には足せません`;
+      }
+    } else {
+      keys = normKeys.slice();
+      if (!keys.length) continue;                 // ふつうのシフトを担当していない
+      k = (already && keys.indexOf(already) >= 0) ? already : keys[0];
+    }
     const confAt = (dd) => {
       if (dd < 1 || dd > days) return '';
       const fx = (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(L.id, dd) : null;
@@ -4656,6 +4713,7 @@ function _trainingCandidates(learnerId, band, tutorIds) {
     };
     const nm = (v) => isTraining(v) ? '研修' : v;
     const neighborWarn = (kk) => {
+      if (kind === 'work' && sameCat(kk, cur)) return [];   // 時間帯が変わらないので前後のつながりも変わらない
       const w = [], pv = confAt(d - 1), nx = confAt(d + 1), n2 = confAt(d + 2), p2 = confAt(d - 2);
       if (AppState.settings.forbidLateEarly !== false) {
         if (isLate(kk) && nx && isWork(nx) && isEarlyCategory(nx))
@@ -4669,22 +4727,37 @@ function _trainingCandidates(learnerId, band, tutorIds) {
         w.push(`${d - 1}日が休みで ${d - 2}日 が「${nm(p2)}」のため、遅→休→早になります`);
       return w;
     };
-    const w2 = warn.concat(neighborWarn(k));
-    // どのシフトなら前後とぶつからないかも調べておく（選び直しの目安）
-    const okKeys = myKeys.filter(kk => neighborWarn(kk).length === 0);
+    if (k && kind !== 'work') { const ok = keys.filter(kk => !neighborWarn(kk).length); if (ok.length && !already) k = ok[0]; }
+    const w2 = k ? warn.concat(neighborWarn(k)) : warn;
+    const okKeys = keys.filter(kk => neighborWarn(kk).length === 0);
+    const need = k ? getDayReq(g.reqs, g.dailyReqs || {}, k, d) : 0;
+    if (kind === 'work' && k && k !== cur)
+      roleNote = `いまは「${cur}」（1日1人の役）なので、「${k}」にして「${k}」を${need}→${need + 1}人にします。「${cur}」には生成し直すと別の人が入ります`;
     out.push({
-      d, k, keys: myKeys, okKeys, from: need, to: need + 1, cast,
-      learnerId: L.id, learnerName: L.name, tutorCand: av,
-      warn: w2, zeroed: reduced, already: !!already, neighborWarn,
-      score: (av.length ? 0 : 2) + (reduced ? 2 : 0) + (w2.length ? 1 : 0),
-      checked: !!already,
+      d, k, keys, okKeys, from: need, to: need + 1, cast, kind, cur, roleNote, blocked,
+      learnerId: L.id, learnerName: L.name, band: k ? bandOf(k) : bandOf(cur),
+      tutorIds: Array.from(tutorSet),
+      warn: w2, zeroed: reduced, already: !!(already && kind === 'work' ? already === k : already), neighborWarn,
+      checked: !!already && !blocked,
     });
   }
-  // 警告は「こうなるかもしれない」という注意書きでしかなく、どれを選べばよいかが
-  // 分からなかった。実際にその日へ入れて数え直し、エラーが何件増えるかを付ける。
-  out.forEach(r => { r.delta = _measureSurplusPick(r); });
-  return out;   // 絞らない。並べ替えと選択は画面側でする
+  out.forEach(r => { r.tutorsHere = _tutorsHere(r); r.delta = r.blocked ? null : _measureSurplusPick(r); });
+  return out;
 }
+// その日その時間帯に、いまの表で出勤している指導役（選んだ候補の中から）
+function _tutorsHere(r, shifts) {
+  const set = new Set(r.tutorIds || []);
+  return _tutorsOn(r.d, r.band, shifts).filter(x => set.has(x.s.id));
+}
+// 3つの種類の見出し（並べる順もこの順）
+const SP_KINDS = [
+  { kind: 'work', head: '(a) 出勤日に足す（トレーニング・余を使う）',
+    note: 'もう出勤している日に、その時間帯の必要人数を1人増やします。生成し直すと、余のある人がもう1人入ります。教わる人の公休は変わりません。' },
+  { kind: 'yo', head: '(c) 自分の余の日に足す（公休は減りません）',
+    note: '教わる人がその日「余」の日です。余は公休に数えないので、入れても公休は減りません。' },
+  { kind: 'off', head: '(b) 休みの日に足す（公休が減ります）',
+    note: '⚠️ 教わる人の休みの日に出勤を入れます。選んだ日数だけ、教わる人の公休が減ります。' },
+];
 
 // 「入れてみた前後」を比べる共通の物差し（optimizer.js の scoreViolations と同じ）。
 // 良し悪しは scoreBetter（どの🚨も増えず、どれかが減る）、並べ替えは scoreCompare
@@ -4751,6 +4824,15 @@ function _spDeltaTag(r) {
   return `<span style="margin-left:8px;font-size:12px;color:${col}">（${_diffWords(r.sd)}）</span>`;
 }
 
+// 出勤日（kind 'work'）は、必要人数を+1した枠が作り直す前は空いているのが当たり前なので、
+// その日のその枠（足すシフトと、1日1人の役から外したシフト）の人員不足は前後とも数えない
+// （数えると、どの出勤日も「悪くなります（🚨 +1）」に見えていた）。生成し直すと余のある人が入る。
+function _spDropOwnSlot(r, list) {
+  if (r.kind !== 'work') return list;
+  const esc = (k) => String(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pats = [r.k, r.cur].filter(Boolean).map(k => new RegExp(`日 (キャスト )?${esc(k)} が`));
+  return list.filter(v => !(v.type === 'understaff' && v.day === r.d && pats.some(p => p.test(v.message || ''))));
+}
 function _measureSurplusPick(r) {
   if (typeof checkViolations !== 'function' || !AppState.shifts) return null;
   try {
@@ -4759,13 +4841,18 @@ function _measureSurplusPick(r) {
     if (!row) return null;
     const store = r.cast ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
                          : (AppState.dailyRequirements || (AppState.dailyRequirements = {}));
+    const hadKey = Object.prototype.hasOwnProperty.call(store, r.k);
     store[r.k] = store[r.k] || {};
     const hadShift = row[r.d], hadReq = store[r.k][r.d];
     row[r.d] = r.k; store[r.k][r.d] = r.to;
-    const nowV = checkViolations(AppState.shifts);
-    row[r.d] = hadShift;
-    if (hadReq === undefined) delete store[r.k][r.d]; else store[r.k][r.d] = hadReq;
-    r.sd = _diffOfLists(baseV, nowV);
+    let nowV;
+    try { nowV = checkViolations(AppState.shifts); }
+    finally {
+      row[r.d] = hadShift;
+      if (hadReq === undefined) delete store[r.k][r.d]; else store[r.k][r.d] = hadReq;
+      if (!hadKey && !Object.keys(store[r.k]).length) delete store[r.k];
+    }
+    r.sd = _diffOfLists(_spDropOwnSlot(r, baseV), _spDropOwnSlot(r, nowV));
     return r.sd.dn;
   } catch (e) { r.sd = null; return null; }
 }
@@ -4823,6 +4910,8 @@ function showSurplusPlanModal() {
     tutors: (AppState.staff || []).filter(x => rank[x.positionType] != null).map(x => x.id),
     pinTutor: false,
   };
+  // 試し計算（🧪 試しに作って確かめる）の結果と、計算中かどうか
+  let trial = null, trialRunning = false, trialStopped = false, noTable = false;
 
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
@@ -4830,9 +4919,17 @@ function showSurplusPlanModal() {
   // 古い候補のまま反映しない（候補の日がもう入れられない日になっていることがある）。
   let rowsFp = '', rowsLearner = false;
   const fpNow = () => contentFingerprint();
+  const kindOrder = { work: 0, yo: 1, off: 2 };
+  const learnerGroup = () => getDepartmentGroups(AppState.staff).find(g => g.staff.some(s => s.id === sel.learner));
+  const learnerCap = () => { const g = learnerGroup(); return g ? caps.find(c => c.key === g.key) : null; };
   const recountLearner = (why) => {
-    rows = _trainingCandidates(sel.learner, sel.band, sel.tutors);
-    rows.sort((a, b) => _diffCmp(a.sd, b.sd) || (a.d - b.d));
+    noTable = genTableState() === 'none';
+    rows = noTable ? [] : _trainingCandidates(sel.learner, sel.band, sel.tutors);
+    // (a) 出勤日 → (c) 自分の余の日 → (b) 休みの日。その中では、指導役のいる日・結果の良い日・日付の順
+    rows.sort((a, b) => (kindOrder[a.kind] - kindOrder[b.kind])
+      || ((b.tutorsHere.length ? 1 : 0) - (a.tutorsHere.length ? 1 : 0))
+      || (a.blocked ? 1 : 0) - (b.blocked ? 1 : 0)
+      || _diffCmp(a.sd, b.sd) || (a.d - b.d));
     rowsFp = fpNow(); rowsLearner = true;
     render();
     if (why) toast('🔄 表が変わったので、入れられる日を数え直しました。選び直してください', 'warning', 6000);
@@ -4842,11 +4939,111 @@ function showSurplusPlanModal() {
     if (typeof calcBusy === 'function' && calcBusy()) return;
     if (rowsLearner && rows && sel.learner && fpNow() !== rowsFp) recountLearner(true);
   }, 800);
+
+  // 選んだ日を、渡した入れ物（本物の AppState か、試し計算用の写し）に書き込む。
+  // 必要人数を+1し、教わる人をその日そのシフトに🔒。指導役も🔒するなら、その日その時間帯に
+  // いまの表で出勤している指導役（🔒が無い人の先頭）を、いまのシフトのまま🔒する。
+  const writePicks = (pick, T) => {
+    pick.forEach(r => {
+      const key = r.cast ? 'dailyRequirementsCast' : 'dailyRequirements';
+      T[key] = T[key] || {};
+      T[key][r.k] = T[key][r.k] || {};
+      T[key][r.k][r.d] = r.to;
+      T.fixedShifts[r.learnerId] = T.fixedShifts[r.learnerId] || {};
+      T.fixedShifts[r.learnerId][r.d] = r.k;
+      const t = sel.pinTutor ? _pinTutorOf(r, T.fixedShifts) : null;
+      if (t) { T.fixedShifts[t.s.id] = T.fixedShifts[t.s.id] || {}; T.fixedShifts[t.s.id][r.d] = t.v; }
+    });
+  };
+  const _pinTutorOf = (r, FX) => (r.tutorsHere || []).find(t => {
+    const f = ((FX || AppState.fixedShifts)[t.s.id] || {})[r.d];
+    return !f || f === t.v;
+  }) || null;
+  const pickedRows = () => rows ? rows.filter(r => r.checked && !r.blocked) : [];
+  const pickKey = () => JSON.stringify([pickedRows().map(r => [r.d, r.k]), sel.pinTutor, sel.learner]);
+
+  const kindTag = (r) => {
+    if (r.kind !== 'work' || !r.sd) return _spDeltaTag(r);
+    const sg = _diffSign(r.sd);
+    const regen = '生成し直すと、余のある人が入ります';
+    if (sg === 0) return `<span style="margin-left:8px;font-size:12px;color:var(--success, #2e7d32)">（${regen}）</span>`;
+    const col = sg > 0 ? 'var(--danger)' : (sg < 0 ? 'var(--success, #2e7d32)' : 'var(--text-dim, inherit)');
+    return `<span style="margin-left:8px;font-size:12px;color:var(--success, #2e7d32)">（${regen}）</span>`
+         + `<div style="font-size:12px;color:${col}">ほかに: ${_diffWords(r.sd)}</div>`;
+  };
+  const rowHtml = (r, i) => {
+    const tu = r.tutorsHere || [];
+    const pinT = sel.pinTutor ? _pinTutorOf(r) : null;
+    const curTxt = r.kind === 'work' ? `いま「${escapeHtml(r.cur)}」` : r.kind === 'yo' ? 'いま「余」' : `いま「${escapeHtml(r.cur || '空き')}」`;
+    return `
+      <div style="border-bottom:1px solid var(--border);padding:8px 10px;${r.checked && !r.blocked ? 'background:color-mix(in srgb, var(--accent) 8%, transparent)' : ''}" data-sprow="${i}">
+        <label style="display:flex;gap:10px;align-items:flex-start;cursor:${r.blocked ? 'not-allowed' : 'pointer'}">
+          <input type="checkbox" data-sp="${i}" ${r.checked && !r.blocked ? 'checked' : ''} ${r.blocked ? 'disabled' : ''} style="margin-top:3px"/>
+          <span style="flex:1">
+            <b>${r.blocked ? '🚫' : _spMark(r)} ${r.d}日(${wdOf(r.d)})</b>
+            <span class="hint" style="margin-left:6px">${curTxt}</span>
+            ${r.blocked ? '' : kindTag(r)}
+            ${r.blocked ? '' : `<div style="margin-top:2px">${r.keys && r.keys.length > 1
+                ? `<select data-spk="${i}">${r.keys.map(k => `<option value="${k}" ${r.k === k ? 'selected' : ''}>${k}${(r.okKeys && r.okKeys.indexOf(k) >= 0) ? ' ◯' : ''}</option>`).join('')}</select>`
+                : `<b>${escapeHtml(r.k)}</b>`}
+              <span style="margin-left:6px">で入れ、「${escapeHtml(r.k)}」を ${r.from}人 → ${r.to}人</span>
+              ${r.already ? '<span class="hint" style="margin-left:6px">（設定済み）</span>' : ''}</div>`}
+            <div class="hint" style="margin-top:2px">
+              ${r.blocked ? `<span style="color:var(--danger)">${escapeHtml(r.blocked)}</span><br>` : ''}
+              ${r.roleNote ? `🔁 ${escapeHtml(r.roleNote)}<br>` : ''}
+              ${tu.length
+                ? '指導役（いまの表で同じ時間帯）: ' + tu.map(t => `${escapeHtml(t.s.name)}（${escapeHtml(t.v)}）`).join('・')
+                : '<span style="color:var(--danger)">⚠️ この時間帯に指導役がいません（いまの表）</span>'}
+              ${pinT ? `<br>🔒 ${escapeHtml(pinT.s.name)}さんを「${escapeHtml(pinT.v)}」で固定します` : ''}
+              ${(r.warn || []).map(w => `<br><span style="color:var(--danger)">⚠️ ${escapeHtml(w)}</span>`).join('')}
+            </div>
+          </span>
+        </label>
+      </div>`;
+  };
+
+  // 選んだ日数と余のつり合い（教わる人を選んだとき）
+  const restText = () => {
+    const P = pickedRows();
+    const n = P.length, na = P.filter(r => r.kind === 'work').length, nc = P.filter(r => r.kind === 'yo').length, nb = P.filter(r => r.kind === 'off').length;
+    const c = learnerCap(); const t = c ? Math.max(0, c.surplus) : 0;
+    let h = `余り ${t}人日 ／ 選んだ日 <b>${n}日</b>（出勤日 ${na}・自分の余 ${nc}・休みの日 ${nb}）`
+          + ` → 生成し直したあとの余の見込み <b>${Math.max(0, t - n)}人日</b>`;
+    if (nb) h += `<br><span style="color:var(--danger)">⚠️ 休みの日を ${nb}日 選んでいます。教わる人の公休が ${nb}日 減ります。</span>`;
+    if (n > t) h += `<br><span style="color:var(--danger)"><b>⚠️ 余りより ${n - t}日 多く選んでいます。</b>人が足りない日が出るか、ほかの人の公休が減ります。</span>`;
+    return h;
+  };
+  const trialHtml = () => {
+    if (trialRunning) return `<div class="hint">⏳ 試しに作っています（1分生成と同じ計算。本物の表は変えません）…
+      <button id="spTrialStop" class="btn" style="margin-left:8px">⏹ 中止</button></div>`;
+    if (!trial) return '';
+    const stale = trial.fp !== fpNow() || trial.key !== pickKey();
+    const d = trial.diff, sg = _diffSign(d);
+    const mustUp = scoreWorsened(d.a, d.b).filter(x => x.key !== 'soft');
+    const td = (a, b) => `<td style="padding:3px 8px">${a}</td><td style="padding:3px 8px">${b}</td>`;
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px">
+      <div style="font-weight:700;margin-bottom:4px">🧪 試しに作った結果（${trial.n}日を選んだ場合・本物の表は変えていません）</div>
+      ${stale ? '<div style="color:var(--danger)">⚠️ 選び方か表が変わったので、この結果は古くなっています。もう一度押してください。</div>' : ''}
+      <table style="border-collapse:collapse;font-size:13px">
+        <tr><th></th><th style="padding:3px 8px">いまの表</th><th style="padding:3px 8px">試しに作った表</th></tr>
+        <tr><td style="padding:3px 8px">表の「余」のマス（この部門）</td>${td(trial.yo0 + '人日', '<b>' + trial.yo1 + '人日</b>')}</tr>
+        <tr><td style="padding:3px 8px">${escapeHtml(trial.name)}さんの公休</td>${td(trial.off0 + '日', '<b>' + trial.off1 + '日</b>')}</tr>
+        <tr><td style="padding:3px 8px">選んだ日に入った</td>${td('―', trial.placed + '/' + trial.n + '日')}</tr>
+        <tr><td style="padding:3px 8px">選んだ日に指導役がいた</td>${td(trial.tut0 + '/' + trial.n + '日', trial.tut1 + '/' + trial.n + '日')}</tr>
+        <tr><td style="padding:3px 8px">⛔ 6連勤以上</td>${td(d.b.comp + '件', d.a.comp + '件')}</tr>
+        <tr><td style="padding:3px 8px">🚨（⛔を除く）</td>${td((d.b.must - d.b.comp) + '件', (d.a.must - d.a.comp) + '件')}</tr>
+        <tr><td style="padding:3px 8px">🟡</td>${td(d.b.soft + '件', d.a.soft + '件')}</tr>
+      </table>
+      <div style="margin-top:4px;color:${mustUp.length || d.compUp ? 'var(--danger)' : 'inherit'}">${_diffWords(d)}</div>
+      ${mustUp.length || d.compUp ? '<div style="color:var(--danger)"><b>🚨 が増えます。</b>選ぶ日を減らすか、別の日にしてください。</div>' : ''}
+      <div class="hint">生成は1回ごとに少し変わります。実際に生成し直した結果とは少し違うことがあります。</div>
+    </div>`;
+  };
+
   const render = () => {
     const capTxt = caps.map(c => c.surplus > 0
       ? `${caps.length > 1 ? '【' + c.label + '】' : ''}必要 ${c.required}人日 ／ 出せる ${c.avail}人日 → <b style="color:var(--accent)">余り ${c.surplus}人日</b>`
       : `${caps.length > 1 ? '【' + c.label + '】' : ''}余りはありません（${c.surplus < 0 ? (-c.surplus) + '人日 不足' : 'ちょうど'}）`).join('<br>');
-    const total0 = caps.reduce((a, c) => a + Math.max(0, c.surplus), 0);
     const staffOpt = (AppState.staff || []).map(x =>
       `<option value="${x.id}" ${sel.learner === x.id ? 'selected' : ''}>${escapeHtml(x.name)}</option>`).join('');
     const tutorBox = (AppState.staff || []).filter(x => rank[x.positionType] != null)
@@ -4854,12 +5051,20 @@ function showSurplusPlanModal() {
       .map(x => `<label style="margin-right:10px;white-space:nowrap">
           <input type="checkbox" data-tu="${x.id}" ${sel.tutors.indexOf(x.id) >= 0 ? 'checked' : ''}/>
           ${escapeHtml(x.name)}<span class="hint">(${x.positionType === 'viceManager' ? '副店長' : 'チーフ'})</span></label>`).join('');
+    const tst = genTableState();
+    const tableNote = !sel.learner ? ''
+      : tst === 'none' ? `<div id="spNoTable" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--danger) 12%, var(--surface))">
+          ⚠️ この月の表をまだ作っていないので、教わる人がどの日に出勤するか（(a) 出勤日）が分かりません。<b>まず一度生成してから使ってください。</b></div>`
+      : tst === 'stale' ? `<div id="spStale" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--warning, #f9a825) 16%, var(--surface))">
+          ⚠️ 表を作ったあとに、希望や設定（必要人数・担当など）を変えています。いまの表で出勤日・休みの日を分けていますが、
+          古い表なので、<b>生成し直してから使うと確かです。</b></div>` : '';
     const picker = `<div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px">
-      <div style="font-weight:700;margin-bottom:6px">🎓 教える相手を決めて入れる</div>
+      <div style="font-weight:700;margin-bottom:6px">🎓 教える相手を決めて入れる（トレーニング）</div>
       <div class="hint" style="margin-bottom:8px">
-        余った人日を使って、<b>この人を追加で出勤させます</b>。入れられる日を全部出しますので、
-        実際にその日へ入れて数え直した結果を「エラー増えません」「エラー +1件」として出しています。
-        ⭐＝増えない日、⚠️＝増える日です。増えない日から選べば失敗しません。
+        余った人日を使って、<b>教わる人を指導役のいる日に入れます</b>。いまの表で、教わる人が
+        <b>(a) もう出勤している日</b>・<b>(c) 自分の余の日</b>・<b>(b) 休みの日</b> に分けて出します。
+        (a) は必要人数を1人増やすので、生成し直すと余のある人がもう1人入ります（教わる人の公休は変わりません）。
+        研修（研）ではなく、人数に数えるふつうのシフトで入れます。
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px">
         <span>教わる人:</span>
@@ -4874,46 +5079,59 @@ function showSurplusPlanModal() {
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:13px;margin-top:8px">
         <span>指導役の候補:</span>${tutorBox || '<span class="hint">副店長・チーフが登録されていません</span>'}
       </div>
+      <label style="display:block;font-size:13px;margin-top:6px">
+        <input type="checkbox" id="spPinTutor" ${sel.pinTutor ? 'checked' : ''}/>
+        その日の指導役も🔒で固定する（生成し直すと指導役が動いて、いなくなることがあるため）</label>
+      ${tableNote}
     </div>`;
-    const list = rows === null
-      ? `${picker}<div class="hint" style="padding:10px 0">
+    let list;
+    if (rows === null) {
+      list = `${picker}<div class="hint" style="padding:10px 0">
            <b>教わる人を選んで「候補を出す」</b>を押すと、入れられる日が全部出ます（すぐ出ます）。<br>
-           選ばずに押した場合は、最適化に一番傷が浅い場所を計算させます（1分ほどかかります）。</div>`
-      : rows.length === 0
-        ? `${picker}<div class="hint" style="padding:10px 0">入れられる日が見つかりませんでした。時間帯や担当シフトをご確認ください。</div>`
-        : `${picker}<div style="max-height:44vh;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px">` + rows.map((r, i) => `
+           選ばずに押した場合は、最適化に一番傷が浅い場所を計算させます（1分ほどかかります）。</div>`;
+    } else if (rows.length === 0) {
+      list = `${picker}<div class="hint" style="padding:10px 0">${noTable
+        ? '表が無いので、候補を出せません。まず一度生成してください。'
+        : '入れられる日が見つかりませんでした。時間帯や担当シフトをご確認ください。'}</div>`;
+    } else if (rowsLearner) {
+      list = picker + `<div style="max-height:44vh;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px">`
+        + SP_KINDS.map(K => {
+            const idx = rows.map((r, i) => r.kind === K.kind ? i : -1).filter(i => i >= 0);
+            if (!idx.length) return '';
+            return `<div data-spkind="${K.kind}" style="margin:6px 0 2px;padding:6px 8px;border-radius:6px;background:var(--surface-2)">
+                <b style="${K.kind === 'off' ? 'color:var(--danger)' : ''}">${K.head}</b>（${idx.length}日）
+                <div class="hint">${K.note}</div></div>` + idx.map(i => rowHtml(rows[i], i)).join('');
+          }).join('') + '</div>';
+    } else {
+      list = `${picker}<div style="max-height:44vh;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px">` + rows.map((r, i) => `
           <div style="border-bottom:1px solid var(--border);padding:8px 10px;${r.checked ? 'background:color-mix(in srgb, var(--accent) 8%, transparent)' : ''}">
             <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
               <input type="checkbox" data-sp="${i}" ${r.checked ? 'checked' : ''} style="margin-top:3px"/>
               <span style="flex:1">
                 <b>${_spMark(r)} ${r.d}日(${wdOf(r.d)})</b>${_spDeltaTag(r)}
                 <span style="margin-left:8px">${r.from}人 → ${r.to}人</span>
-                ${r.keys && r.keys.length > 1
-                  ? `<select data-spk="${i}" style="margin-left:8px">${r.keys.map(k => `<option value="${k}" ${r.k === k ? 'selected' : ''}>${k}${(r.okKeys && r.okKeys.indexOf(k) >= 0) ? ' ◯' : ''}</option>`).join('')}</select>`
-                  : `<span style="margin-left:8px"><b>${escapeHtml(r.k)}</b></span>`}
-                ${r.learnerName ? `<span style="margin-left:6px">に ${escapeHtml(r.learnerName)}さん</span>` : ''}
-                ${r.already ? '<span class="hint" style="margin-left:6px">（設定済み）</span>' : ''}
+                <span style="margin-left:8px"><b>${escapeHtml(r.k)}</b></span>
                 <div class="hint" style="margin-top:2px">
-                  ${(r.tutorCand && r.tutorCand.length) ? '指導役: ' + r.tutorCand.map(t => escapeHtml(t.name)).join('・') : ''}
-                  ${(r.warn || []).map(w => `<br><span style="color:var(--danger)">⚠️ ${escapeHtml(w)}</span>`).join('')}
+                  ${(r.tutors && r.tutors.length) ? '指導役: ' + r.tutors.map(t => escapeHtml(t.s.name)).join('・') : ''}
                 </div>
               </span>
             </label>
           </div>`).join('') + '</div>';
-    const picked = rows ? rows.filter(r => r.checked).length : 0;
+    }
+    const picked = rows ? rows.filter(r => r.checked && !r.blocked).length : 0;
     const total = caps.reduce((a, c) => a + Math.max(0, c.surplus), 0);
     const found = rows ? rows.reduce((a, r) => a + (r.to - r.from), 0) : 0;
-    const isTrain = !!(rows && rows.length && rows[0].learnerId);
+    const isTrain = !!(rows && rows.length && rowsLearner);
     const restTxt = (rows && rows.length)
       ? (isTrain
-          ? `<div class="hint" id="spRest" style="margin-top:8px">余り ${total}人日 のうち ${picked}日 を選んでいます。</div>`
+          ? `<div id="spRest" style="margin-top:8px;line-height:1.7">${restText()}</div>`
           : (found >= total
               ? `<div class="hint" style="margin-top:8px">全部チェックすると余はゼロになります。</div>`
               : `<div class="hint" style="margin-top:8px">見つかった置き場所は ${found}人日ぶんです。
                    残り ${total - found}人日 は、どこに入れても他のルールが崩れるため休み（余）のまま残ります。
                    <b>「教わる人」を選んで出し直すと、もっと多くの候補が出ます。</b></div>`))
       : '';
-    modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:700px;width:100%;max-height:85vh;overflow:auto;padding:20px">
+    modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:720px;width:100%;max-height:88vh;overflow:auto;padding:20px">
       <h3 style="margin:0 0 4px">⚖️ 余の使い道を決める</h3>
       <p class="hint" style="margin:0 0 10px">
         出せる人日が必要人日より多いと、その差は「余（あまり）」として休みになります。
@@ -4927,9 +5145,11 @@ function showSurplusPlanModal() {
            background:color-mix(in srgb, var(--danger) 14%, var(--surface));
            border:1px solid color-mix(in srgb, var(--danger) 45%, transparent)"></div>
       ${restTxt}
+      <div id="spTrial" style="margin-top:8px">${isTrain ? trialHtml() : ''}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center">
-        <button id="spCalc" class="btn ${rows === null ? 'btn-primary' : ''}">${rows === null ? '候補を出す' : '出し直す'}</button>
-        ${rows && rows.length ? `<button id="spApply" class="btn btn-primary">選んだ ${picked}件 を必要人数に反映する</button>` : ''}
+        <button id="spCalc" class="btn ${rows === null ? 'btn-primary' : ''}" ${trialRunning ? 'disabled' : ''}>${rows === null ? '候補を出す' : '出し直す'}</button>
+        ${isTrain ? `<button id="spTrialGo" class="btn" ${trialRunning || !picked ? 'disabled' : ''}>🧪 試しに作って確かめる（1分ほど）</button>` : ''}
+        ${rows && rows.length ? `<button id="spApply" class="btn btn-primary" ${trialRunning ? 'disabled' : ''}>選んだ ${picked}件 を必要人数に反映する</button>` : ''}
         <span style="flex:1"></span>
         <span class="hint" id="spCount2">余り ${total}人日 / 選択 ${picked}件</span>
         <button id="spClose" class="btn">閉じる</button>
@@ -4938,18 +5158,25 @@ function showSurplusPlanModal() {
     bind();
   };
 
+  const close = () => {
+    if (trialRunning) { trialStopped = true; if (typeof cancelMILP === 'function') cancelMILP(); }
+    modal.remove();
+  };
+
   const bind = () => {
     const $c = modal.querySelector('#spCalc'), $a = modal.querySelector('#spApply'), $x = modal.querySelector('#spClose');
-    if ($x) $x.addEventListener('click', () => modal.remove());
+    if ($x) $x.addEventListener('click', close);
+    const $stop = modal.querySelector('#spTrialStop');
+    if ($stop) $stop.addEventListener('click', () => { trialStopped = true; if (typeof cancelMILP === 'function') cancelMILP(); });
     // チェックのたびに全部描き直すと、長い一覧でスクロール位置が飛んでしまう。
     // 選んだ数と行の色だけをその場で更新する。
     const refreshCounts = () => {
-      const n = rows ? rows.filter(r => r.checked).length : 0;
-      // 連勤の見通しをその場で出す
+      const n = rows ? rows.filter(r => r.checked && !r.blocked).length : 0;
       const $w = modal.querySelector('#spConsWarn');
       if ($w) {
-        const lid = rows && rows.length && rows[0].learnerId;
-        const cc = lid ? _consCheckForPick(lid, rows.filter(r => r.checked).map(r => r.d)) : null;
+        const lid = rowsLearner && rows && rows.length && rows[0].learnerId;
+        // 出勤日はもう出勤しているので、連勤の見通しは (b)(c) の日だけを足して数える
+        const cc = lid ? _consCheckForPick(lid, rows.filter(r => r.checked && !r.blocked && r.kind !== 'work').map(r => r.d)) : null;
         if (cc && cc.runs.length) {
           const name = rows[0].learnerName;
           $w.style.display = 'block';
@@ -4962,17 +5189,24 @@ function showSurplusPlanModal() {
       const t = caps.reduce((a, c) => a + Math.max(0, c.surplus), 0);
       const $ap = modal.querySelector('#spApply');
       if ($ap) $ap.textContent = `選んだ ${n}件 を必要人数に反映する`;
+      const $tg = modal.querySelector('#spTrialGo');
+      if ($tg) $tg.disabled = trialRunning || !n;
       const $ct = modal.querySelector('#spCount2');
       if ($ct) $ct.textContent = `余り ${t}人日 / 選択 ${n}件`;
       const $rest = modal.querySelector('#spRest');
-      if ($rest) $rest.textContent = n > t
-        ? `余りより ${n - t}日 多く選んでいます。その分は他の人の出勤が減るか、エラーになります。`
-        : n === t ? '全部使い切ります。' : `余り ${t}人日 のうち ${n}日 を選んでいます。残り ${t - n}人日 は、別の人で出し直すと使えます。`;
+      if ($rest) {
+        if (rowsLearner) $rest.innerHTML = restText();
+        else $rest.textContent = n > t
+          ? `余りより ${n - t}日 多く選んでいます。その分は他の人の出勤が減るか、エラーになります。`
+          : n === t ? '全部使い切ります。' : `余り ${t}人日 のうち ${n}日 を選んでいます。`;
+      }
+      const $tr = modal.querySelector('#spTrial');
+      if ($tr && rowsLearner && trial && !trialRunning) $tr.innerHTML = trialHtml();
     };
     modal.querySelectorAll('[data-sp]').forEach(cb => cb.addEventListener('change', () => {
       const r = rows[parseInt(cb.dataset.sp)];
       r.checked = cb.checked;
-      const row = cb.closest('div');
+      const row = cb.closest('[data-sprow]') || cb.closest('div');
       if (row) row.style.background = cb.checked ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : '';
       refreshCounts();
     }));
@@ -4980,31 +5214,35 @@ function showSurplusPlanModal() {
     modal.querySelectorAll('[data-spk]').forEach(sl => sl.addEventListener('change', () => {
       const r = rows[parseInt(sl.dataset.spk)];
       r.k = sl.value;
-      // シフトを変えたら、前後の噛み合わせを計算し直す
       if (typeof r.neighborWarn === 'function') {
         const base = (r.warn || []).filter(w => !/翌日|前日|遅→休→早/.test(w));
         r.warn = base.concat(r.neighborWarn(r.k));
       }
-      // シフトを変えたら「いま何人必要か」も取り直す
       const g2 = getDepartmentGroups(AppState.staff).find(x => x.staff.some(y => y.id === r.learnerId));
       const need = getDayReq((g2 || {}).reqs || AppState.roleRequirements, (g2 || {}).dailyReqs || AppState.dailyRequirements, r.k, r.d);
       r.from = need; r.to = need + 1;
+      if (r.kind === 'work' && r.roleNote) r.roleNote = `いまは「${r.cur}」（1日1人の役）なので、「${r.k}」にして「${r.k}」を${need}→${need + 1}人にします。「${r.cur}」には生成し直すと別の人が入ります`;
+      r.band = isEarlyCategory(r.k) ? 'e' : 'l';
+      r.tutorsHere = _tutorsHere(r);
       r.delta = _measureSurplusPick(r);
       render();
     }));
     const $le = modal.querySelector('#spLearner'), $bd = modal.querySelector('#spBand');
-    if ($le) $le.addEventListener('change', () => { sel.learner = $le.value; rows = null; render(); });
-    if ($bd) $bd.addEventListener('change', () => { sel.band = $bd.value; rows = null; render(); });
+    if ($le) $le.addEventListener('change', () => { sel.learner = $le.value; rows = null; trial = null; render(); });
+    if ($bd) $bd.addEventListener('change', () => { sel.band = $bd.value; rows = null; trial = null; render(); });
+    const $pt = modal.querySelector('#spPinTutor');
+    if ($pt) $pt.addEventListener('change', () => { sel.pinTutor = $pt.checked; render(); });
     modal.querySelectorAll('[data-tu]').forEach(cb => cb.addEventListener('change', () => {
       sel.tutors = Array.from(modal.querySelectorAll('[data-tu]')).filter(x => x.checked).map(x => x.dataset.tu);
-      rows = null; render();
+      rows = null; trial = null; render();
     }));
     if ($c) $c.addEventListener('click', async () => {
       // 教わる人を選んでいる場合は、その人を入れられる日をすぐ探す（生成は不要）
       if (sel.learner) {
-        // 実際に入れて数えた結果が良い順に並べる（同点なら日付順）
+        trial = null;
         recountLearner(false);
-        if (!rows.length) toast('入れられる日が見つかりませんでした。時間帯や担当シフトをご確認ください', 'error', 6000);
+        if (noTable) toast('まず一度生成してから使ってください（出勤日が分かりません）', 'warning', 6000);
+        else if (!rows.length) toast('入れられる日が見つかりませんでした。時間帯や担当シフトをご確認ください', 'error', 6000);
         return;
       }
       rowsLearner = false;
@@ -5025,36 +5263,74 @@ function showSurplusPlanModal() {
       } finally { calcEnd(); }
       render();
     });
+    // 🧪 選んだ日で試しに作る（1分生成と同じ計算。必要人数+1・🔒は写しにだけ入れる。本物の表は変えない）
+    const $tg = modal.querySelector('#spTrialGo');
+    if ($tg) $tg.addEventListener('click', async () => {
+      const pick = pickedRows();
+      if (!pick.length) return;
+      if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+      if (rowsLearner && sel.learner && fpNow() !== rowsFp) { recountLearner(true); return; }
+      const T = {
+        fixedShifts: JSON.parse(JSON.stringify(AppState.fixedShifts || {})),
+        dailyRequirements: JSON.parse(JSON.stringify(AppState.dailyRequirements || {})),
+        dailyRequirementsCast: JSON.parse(JSON.stringify(AppState.dailyRequirementsCast || {})),
+      };
+      writePicks(pick, T);
+      if (!calcBegin('余の使い道を確かめる')) return;
+      trialRunning = true; trialStopped = false; trial = null;
+      const fp0 = fpNow(), key0 = pickKey();
+      render();
+      try {
+        const res = await optimizeScheduleMILP(null, { fastMode: true, noApply: true, inputPatch: T });
+        if (trialStopped) throw new Error(MILP_CANCEL_MSG);
+        const SH = res._shifts || res.shifts || {};
+        const g = learnerGroup();
+        const ids = g ? g.staff.map(s => s.id) : [];
+        const yoOf = (X) => ids.reduce((a, id) => a + Object.values(X[id] || {}).filter(v => v === '余').length, 0);
+        const offOf = (X) => Object.values(X[sel.learner] || {}).filter(v => isPublicOff(v)).length;
+        const L = AppState.staff.find(s => s.id === sel.learner) || {};
+        trial = {
+          fp: fp0, key: key0, n: pick.length, name: L.name || '',
+          yo0: yoOf(AppState.shifts || {}), yo1: yoOf(SH),
+          off0: offOf(AppState.shifts || {}), off1: offOf(SH),
+          placed: pick.filter(r => (SH[r.learnerId] || {})[r.d] === r.k).length,
+          tut0: pick.filter(r => _tutorsHere(r).length).length,
+          tut1: pick.filter(r => _tutorsHere(r, SH).length).length,
+          diff: _diffOfLists(checkViolations(AppState.shifts), res.violations || []),
+        };
+      } catch (e) {
+        if (/^cancel/.test(e.message || '') || trialStopped) toast('試し計算を中止しました', 'info');
+        else toast('試し計算に失敗しました: ' + e.message, 'error');
+      } finally { trialRunning = false; calcEnd(); }
+      if (modal.isConnected) render();
+    });
     if ($a) $a.addEventListener('click', () => {
-      const pick = rows.filter(r => r.checked);
+      const pick = rows.filter(r => r.checked && !r.blocked);
       if (!pick.length) { toast('反映する場所が選ばれていません', 'error'); return; }
       if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
       // 🎓の候補を出したあとに表が変わっていたら、古い候補のまま反映しない
       if (rowsLearner && sel.learner && fpNow() !== rowsFp) { recountLearner(true); return; }
       const histBase = captureChangeBase();   // 反映で変えた所を、元に戻すの履歴に積むため
-      pick.forEach(r => {
+      if (rowsLearner) writePicks(pick, AppState);
+      else pick.forEach(r => {
         const store = r.cast ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
                              : (AppState.dailyRequirements || (AppState.dailyRequirements = {}));
         store[r.k] = store[r.k] || {};
         store[r.k][r.d] = r.to;
-        // 教わる人が決まっているときは、その枠にその人を固定する。
-        // 固定しないと、増やした枠に別の人が入ってしまい、教育にならない。
-        if (r.learnerId) {
-          AppState.fixedShifts[r.learnerId] = AppState.fixedShifts[r.learnerId] || {};
-          AppState.fixedShifts[r.learnerId][r.d] = r.k;
-        }
       });
       recordDeltaHistory(changesSince(histBase));
       autoSave(); refreshAllUI();
-      const who = pick[0] && pick[0].learnerName;
-      toast(`${pick.length}件を反映しました${who ? '（' + who + 'さんをその日そのシフトに固定しました）' : ''}。続けて生成してください`, 'success', 7000);
+      const who = rowsLearner && pick[0] && pick[0].learnerName;
+      const nb = pick.filter(r => r.kind === 'off').length;
+      toast(`${pick.length}件を反映しました${who ? '（' + who + 'さんをその日そのシフトに🔒固定しました' + (sel.pinTutor ? '。指導役も🔒しました' : '') + '）' : ''}。`
+        + (nb ? `休みの日 ${nb}日 ぶん公休が減ります。` : '') + '続けて生成し直してください（↩ で元に戻せます）', 'success', 8000);
       modal.remove();
     });
   };
 
   // 試し計算の表から「必要人数より多く入っている場所」を拾う＝最適化が足したかった場所
-  function _collectSurplusRows(trial) {
-    const SH = trial || AppState.shifts;
+  function _collectSurplusRows(trialShifts) {
+    const SH = trialShifts || AppState.shifts;
     const out = [];
     const keys = getWorkShiftKeys().filter(k => { const t = AppState.shiftTypes.find(x => x.key === k); return t && !t.isTraining; });
     getDepartmentGroups(AppState.staff).forEach(g => {
@@ -5078,7 +5354,7 @@ function showSurplusPlanModal() {
   }
 
   document.body.appendChild(modal);
-  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
   render();
 }
 
