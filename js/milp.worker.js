@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=239', 'optimizer.js?v=239', 'milp-core.js?v=239');
+self.importScripts('data.js?v=240', 'optimizer.js?v=240', 'milp-core.js?v=240');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=239'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=240'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -82,6 +82,9 @@ async function runMilp(msg, emit) {
     const TIME_LIMIT = 600;   // 秒 = 10分（証明ありモードの上限）
     const FAST_LIMIT = 60;    // 秒 = 1分（証明なしモードの上限）
     let allOptimal = true;   // 全グループで最適が証明できたか（false=時間切れで打ち切り）
+    // 案Bで段の答えを戻した回数。戻した段は「確かめ済み」にしないが、時間切れとは別に数える
+    // （同じ false では、画面が「時間切れ・設定を緩めて」と誤って出していた）
+    let screenRejected = 0;
     let usedGap = false;     // 早期停止(gap許容)を使ったか＝じっくりモードで改善余地あり
     // 段階最適化を使うか（既定ON。設定でOFFにすると従来どおり一括で解く）
     const tiered = (incoming.settings || {}).tieredOptimize !== false;
@@ -426,7 +429,7 @@ async function runMilp(msg, emit) {
             const nw = screenOf(s2);
             const j = judge(nw, curScr);
             traceScreen(t.label, j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
-            if (j.ok) curScr = nw; else { taken = false; tierProven = false; }
+            if (j.ok) curScr = nw; else { taken = false; screenRejected++; }
           }
           if (taken) sol = s2;
           // 案A: 立ったままの印を落としてから、この段の件数を上限にする
@@ -478,7 +481,7 @@ async function runMilp(msg, emit) {
                   if (!curScr) curScr = screenOf(sol);
                   const nw = screenOf(s6); const j = judge(nw, curScr);
                   traceScreen('詰め直し: ' + p.t.label, j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
-                  if (!j.ok) { tierProven = false; continue; }
+                  if (!j.ok) { screenRejected++; continue; }
                   curScr = nw;
                 }
                 sol = s6;
@@ -513,7 +516,7 @@ async function runMilp(msg, emit) {
               const nw = screenOf(s4); const j = judge(nw, curScr);
               traceScreen('仕上げの探し直し', j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
               // 戻しても打ち切らない。同じ答えをくり返さないよう、次はこの答えより良いものだけを探す
-              if (!j.ok) { best = now; continue; }
+              if (!j.ok) { best = now; screenRejected++; continue; }
               curScr = nw;
             }
             sol = s4; best = now;
@@ -570,7 +573,10 @@ async function runMilp(msg, emit) {
         tierLog.push(`${t.label}: ${n}件`);
       });
     }
-    return { type: 'done', shifts, violations, allOptimal, deep, fast, usedGap, tiered, tierLog, variant, variantLabel: VARLABEL, adjustRejected };
+    // allOptimal: 全部の段を確かめられたか（案Bで戻した段があれば false）。solverProven: ソルバーの時間切れ・
+    // 解ききれない段が無かったか（案Bで戻したことは含めない）。画面は2つを分けて文を出す。
+    return { type: 'done', shifts, violations, allOptimal: allOptimal && screenRejected === 0, solverProven: allOptimal, screenRejected,
+             deep, fast, usedGap, tiered, tierLog, variant, variantLabel: VARLABEL, adjustRejected };
   }
 }
 
@@ -596,7 +602,9 @@ self.addEventListener('message', async (e) => {
       });
       const c = scoreCompare(scoreViolations(q.violations || []), scoreViolations(d.violations || []));
       const pick = c < 0 ? q : d;
+      // 1分生成の答えを採ったときも、じっくり側が時間切れだったか（deepSolverProven）を画面に渡す
       emit(Object.assign({}, pick, { deep: d.deep, fast: d.fast, usedGap: d.usedGap, safetyPick: c < 0 ? 'fast' : 'deep',
+        deepSolverProven: d.solverProven, deepScreenRejected: d.screenRejected,
         safetyOther: { violations: (c < 0 ? d : q).violations } }));
     } else {
       emit(await runMilp(msg, emit));

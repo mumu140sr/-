@@ -913,7 +913,8 @@ function showFeasibilityModal() {
  * 生成結果が「数学的に最良と証明できた」のか「時間切れで打ち切った」のかを表示する。
  * 打ち切りだった場合は、時間を延ばして再計算するボタンを出す（＝まだ減る可能性がある）。
  */
-function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFast, tierLog) {
+// info: 🎯 じっくり生成（newTiering）の結果の内訳（optimalityInfo）。時間切れ・案Bで戻した・案Dで1分生成の答えを採った、を分けて出す
+function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFast, tierLog, info) {
   const $report = document.getElementById('reportCard');
   if (!$report) return;
   const old = document.getElementById('optimalityNotice');
@@ -935,6 +936,23 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
       (vioCount > 0
         ? '<br><button id="btnProofOptimize" class="btn btn-primary" style="margin-top:8px">🎯 じっくり生成で解き直す（証明あり・最大10分）</button>'
         : '');
+  } else if (cutOff && info && (info.pickedFast || (!info.timedOut && info.screenRejected > 0))) {
+    // 時間切れではない理由で「確かめ済み」にならなかったとき。設定を緩めるすすめは出さない
+    // （以前は時間切れと同じ「解ききれませんでした・緩めてください」を出していた）
+    box.style.background = 'color-mix(in srgb, var(--accent) 12%, var(--surface))';
+    box.style.border = '1px solid color-mix(in srgb, var(--accent) 32%, transparent)';
+    const head = info.pickedFast
+      ? `🎯 <b>じっくり生成で完了しました（${elapsed}秒）</b>：じっくり生成の答えと1分生成の答えを、画面と同じ並べ方で比べました。
+         <b>1分生成の答えのほうが良かったので、そちらを採りました</b>。`
+      : `🎯 <b>じっくり生成で完了しました（${elapsed}秒・時間切れはありません）</b>：画面と同じ検査で悪くなる答えを外して、
+         良いほうを採りました。`;
+    box.innerHTML = head + (info.timedOut
+      ? `<br>じっくり生成の側には、時間内に最後まで計算しきれない段がありました。残り ${vioCount}件は<b>「避けられない」とは限りません</b>。
+         ⑤自動生成の「🔍 実現性チェック」で人手の不足を確認し、有給日数・日別必要人数・公休数のいずれかを緩めてください。`
+      : (info.pickedFast ? `時間切れではありません。` : '') + (info.screenRejected > 0
+          ? `<br>答えを外した段があるため、「これ以上良い組み合わせは無い」とまでは確認していません。`
+          : `<br>計算の上の最良と、画面の検査での良し悪しが少し違うため、画面で良いほうを採りました。`) +
+        (vioCount > 0 ? `残り ${vioCount}件を減らすには、設定（必要人数・公休数・担当シフト・希望休など）を見直してください。` : ''));
   } else if (!cutOff) {
     box.style.background = 'color-mix(in srgb, var(--success) 14%, var(--surface))';
     box.style.border = '1px solid color-mix(in srgb, var(--success) 35%, transparent)';
@@ -1057,8 +1075,17 @@ function setupGeneratePanel() {
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
       const cutOff = (res.allOptimal === false);   // 時間切れで打ち切られた＝最良解とは限らない
+      // 🎯 じっくり生成（newTiering）の内訳: 1分生成の答えを採ったか・本当に時間切れか・案Bで答えを外したか
+      const info = opts.newTiering ? {
+        pickedFast: res.safetyPick === 'fast',
+        timedOut: res.safetyPick === 'fast' ? res.deepSolverProven === false : res.solverProven === false,
+        screenRejected: res.safetyPick === 'fast' ? (res.deepScreenRejected || 0) : (res.screenRejected || 0),
+      } : null;
+      const notTimeout = info && cutOff && !info.timedOut;
       $text.textContent = `完了！ 違反 ${res.violations.length}件（${elapsed}秒）` +
                           (opts.fastMode ? '｜⚡ 速い生成（証明なし）'
+                                         : (info && info.pickedFast) ? '｜🎯 1分生成の答えのほうが良かったので、そちらを採りました'
+                                         : notTimeout ? '｜🎯 画面の検査で悪くなる答えを外して、良いほうを採りました（時間切れではありません）'
                                          : cutOff ? '｜⏱ 時間内でいちばん良い答え（最良とは確認できていません）'
                                                   : '｜✅ これ以上良い組み合わせは無いと確認済み');
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
@@ -1070,7 +1097,7 @@ function setupGeneratePanel() {
         renderReport({ success: res.success, score: res.score, violations: res.violations,
           candidateSummary: `数理最適化で生成 — 違反${res.violations.length}件（${elapsed}秒）` });
       } catch (rErr) { console.error('[generate] レポート表示でエラー（表は表示します）:', rErr); }
-      showOptimalityNotice(cutOff, res.violations.length, elapsed, !!opts.deepMode, res.usedGap === true, !!opts.fastMode, res.tierLog);
+      showOptimalityNotice(cutOff, res.violations.length, elapsed, !!opts.deepMode, res.usedGap === true, !!opts.fastMode, res.tierLog, info);
       renderResultTable();
       setTimeout(() => {
         const rt = document.querySelector('.tab[data-tab="result"]'); if (rt) rt.click();
