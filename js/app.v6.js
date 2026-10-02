@@ -987,14 +987,14 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
   if (bp) bp.addEventListener('click', () => {
     if (typeof window._runGenerate === 'function') {
       toast('じっくり生成で解き直します（1部門あたり最大10分）', 'info', 4000);
-      window._runGenerate({});
+      window._runGenerate({ newTiering: true });
     }
   });
   const bd = document.getElementById('btnDeepOptimize');
   if (bd) bd.addEventListener('click', () => {
     if (typeof window._runGenerate === 'function') {
       toast('妥協なしモードで再計算します（1部門あたり最大10分）', 'info', 4000);
-      window._runGenerate({ deepMode: true });
+      window._runGenerate({ deepMode: true, newTiering: true });
     }
   });
 }
@@ -1053,7 +1053,7 @@ function setupGeneratePanel() {
         throw new Error('数理最適化モジュールが未読込です。ページを再読み込み（Ctrl+Shift+R）してください。');
       }
       const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + msg; };
-      const res = await optimizeScheduleMILP(prog, { deepMode: !!opts.deepMode, fastMode: !!opts.fastMode });
+      const res = await optimizeScheduleMILP(prog, { deepMode: !!opts.deepMode, fastMode: !!opts.fastMode, newTiering: !!opts.newTiering });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
       const cutOff = (res.allOptimal === false);   // 時間切れで打ち切られた＝最良解とは限らない
@@ -1100,7 +1100,8 @@ function setupGeneratePanel() {
     }
   };
   window._runGenerate = runGenerate;   // 「証明ありで解き直す」等から呼ぶ
-  btn.addEventListener('click', () => runGenerate({}));
+  // 🎯 じっくり生成: 新しいしくみ（newTiering）を使う。ほかの呼び出しは本番 v239 と同じ計算
+  btn.addEventListener('click', () => runGenerate({ newTiering: true }));
   if (btnFast) btnFast.addEventListener('click', () => runGenerate({ fastMode: true }));
 
   // キャンセルボタン

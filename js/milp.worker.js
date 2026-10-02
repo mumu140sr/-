@@ -91,7 +91,9 @@ async function runMilp(msg, emit) {
       post(20 + Math.floor((gi / groups.length) * 60),
            `【${g.label || g.key}】を数理最適化で計算中...` +
            (fast ? '（速い・最大60秒）' : deep ? '（じっくりモード）' : ''));
-      const m = MILP.buildGroupModel(g.staff, g.reqs, g.dailyReqs);
+      // newTiering: 🎯 じっくり生成・妥協なしで再計算のボタンから呼んだときだけ付く印。新しいしくみ（責任者の順位の
+      // 新しい数え方・案A・案B・案D）はこの印があるときだけ働く。印が無ければ本番 v239 と同じ計算。
+      const m = MILP.buildGroupModel(g.staff, g.reqs, g.dailyReqs, { newHier: !!msg.newTiering });
       // 1部門あたりの計算時間の上限（最大10分）。
       // 20人以下は gap=0（最適の証明）を狙い、20人超は「ほぼ最良で早期停止」に
       // 切り替えて高速化する（じっくりモードでは早期停止を無効にする）。
@@ -269,7 +271,7 @@ async function runMilp(msg, emit) {
         const CELLS = /^[xy]_/;
         let tightenMs = 0;
         const tighten = (s0, types) => {
-          if (!s0 || msg.noTighten) return s0;
+          if (!s0 || !msg.newTiering || msg.noTighten) return s0;
           const q0 = Date.now();
           const z = solver.solve(MILP.composeLP(m.parts, { types, budgets, neighbor: { ones: MILP.onesOf(s0), k: 0, only: CELLS } }),
                                  Object.assign({}, opts, { time_limit: 5, mip_rel_gap: 0, mip_abs_gap: 0 }));
@@ -310,7 +312,7 @@ async function runMilp(msg, emit) {
         };
         const CORE_LABELS = new Set(TIER_RAW.slice(0, 5).map(x => x.label));
         let curScr = null;   // いまの答え（sol）の画面の検査の結果
-        const useB = !msg.noScreenGuard;
+        const useB = !!msg.newTiering && !msg.noScreenGuard;
         const traceScreen = (label, sc, decision, rule) => {
           if (msg.trace) emit({ type: 'trace-screen', label, must: sc.sc.must, comp: sc.sc.comp, soft: sc.sc.soft, iki: sc.iki, decision, rule });
         };
@@ -580,15 +582,15 @@ self.addEventListener('message', async (e) => {
   if (msg.type !== 'milp') return;
   const emit = (m) => self.postMessage(m);
   try {
-    // 🎯 じっくり生成（fastMode も deepMode も無し）と、妥協なしモード（deepMode）で働く。
-    // 1分生成・微調整・自動修正の「全部直す」（noSafety）では働かない。
-    if (!msg.fastMode && !msg.adjustMode && !msg.noSafety) {
-      const q = await runMilp(Object.assign({}, msg, { deepMode: false, fastMode: true }), (m) => {
+    // 🎯 じっくり生成・妥協なしで再計算のボタンから呼んだとき（newTiering の印）だけ働く。
+    // 中で作る1分生成の答えは、印を外した本番と同じ1分生成。
+    if (msg.newTiering && !msg.fastMode && !msg.adjustMode) {
+      const q = await runMilp(Object.assign({}, msg, { deepMode: false, fastMode: true, newTiering: false }), (m) => {
         if (m.type === 'progress') emit({ type: 'progress', pct: Math.floor((m.pct || 0) * 0.15),
                                           label: '（先に1分生成と同じ答えを作っています）' + (m.label || '') });
         else if (msg.trace) emit(Object.assign({}, m, { pass: 'fast' }));
       });
-      const d = await runMilp(Object.assign({}, msg, { noSafety: true }), (m) => {
+      const d = await runMilp(msg, (m) => {
         if (m.type === 'progress') emit({ type: 'progress', pct: 15 + Math.floor((m.pct || 0) * 0.85), label: m.label });
         else emit(msg.trace ? Object.assign({}, m, { pass: 'deep' }) : m);
       });

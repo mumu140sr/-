@@ -51,7 +51,7 @@
   ];
 
   // 1部門グループ分の LP を作る。戻り値 { lp, vars, roles, gStaff, days }
-  function buildGroupModel(gStaff, reqs, dailyReqs) {
+  function buildGroupModel(gStaff, reqs, dailyReqs, mopts) {
     const days = getDaysInMonth(AppState.settings.targetMonth);
     const allRoles = getWorkShiftKeys().filter(k => {
       const t = AppState.shiftTypes.find(x => x.key === k);
@@ -704,6 +704,9 @@
       }
     });
 
+    // 責任者の順位（ヒエラルキー）: 🎯 じっくり生成・妥協なしで再計算（newHier）だけ、画面の検査と同じ数え方にする。
+    // それ以外（1分生成・試し計算・自動修正など）は、本番 v239 と同じ数え方のまま（測っていない所を変えないため）。
+    if (mopts && mopts.newHier) {
     // ヒエラルキー（早責/遅責）
     // 画面の検査（checkViolations の hierarchy）と同じ数え方にする:
     //  ・その日・その責任者シフトごとに1件（責任者より上の人が何人いても1件）。以前は「責任者×上の人」の組ごとに
@@ -745,6 +748,34 @@
       });
     }
 
+    } else {
+    // ヒエラルキー（早責/遅責）
+    const wH = ruleW('hierarchy', P.hierarchyViolation || 3000);
+    if (wH > 0) {
+      [['e', earlyRoles], ['l', lateRoles]].forEach(([band, bandRoles]) => {
+        bandRoles.filter(r => SOLO.has(r)).forEach(resp => {
+          const capable = gStaff.filter(s => (s.allowedShifts || []).includes(resp));
+          for (let d = 1; d <= days; d++) {
+            capable.forEach(lo => {
+              let loResp = null;
+              if (fx(lo, d) === resp) loResp = '1c';
+              else if (free(lo, d)) loResp = V(sidOf[lo.id], d, roleIdx[resp]);
+              else return;
+              capable.forEach(hi => {
+                if (hi.id === lo.id || getStaffPriority(hi) >= getStaffPriority(lo)) return;
+                const o = cellTerms(hi, d); const bandArr = band === 'e' ? o.e : o.l;
+                const hiT = realT(bandArr), hiC = constOf(bandArr);
+                if (loResp === '1c') { if (hiT.length) { const v = `h_${band}_${d}_${sidOf[lo.id]}_${sidOf[hi.id]}`; addSlack(v, 1, wH, 'hierarchy'); cons.push(`${v}c: ${hiT.join(' + ')} - ${v} <= ${1 - hiC}`); } return; }
+                const v = `h_${band}_${d}_${sidOf[lo.id]}_${sidOf[hi.id]}`; addSlack(v, 1, wH, 'hierarchy');
+                const t = [loResp, ...hiT, `- ${v}`]; cons.push(`${v}c: ${t.join(' + ').replace(/\+ -/g, '-')} <= ${1 - hiC}`);
+              });
+            });
+          }
+        });
+      });
+    }
+
+    }
     if (!obj.length) obj.push('0 z_dummy'), gen.add('z_dummy'), bnd.push('0 <= z_dummy <= 0');
     const parts = { objEntries, cons, bnd, bin: [...bin], gen: [...gen], slackByType };
     const lp = composeLP(parts, null);
