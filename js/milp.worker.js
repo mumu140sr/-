@@ -315,8 +315,8 @@ async function runMilp(msg, emit) {
         };
         const CORE_LABELS = new Set(TIER_RAW.slice(0, 5).map(x => x.label));
         let curScr = null;   // いまの答え（sol）の画面の検査の結果
-        // 案3・案1 は、じっくり生成（newTiering・deep）のときだけ。1分生成（中で作るものも含む）は印が無いので働かない。
-        const deepSeed = !!msg.newTiering && deep && !msg.noDeepSeed;
+        // 案3・案1 は、じっくり生成（newTiering で速い生成でないとき。🎯 は deepMode を付けないので deep では見ない）だけ。1分生成（中で作るものも含む）は印が無いので働かない。
+        const deepSeed = !!msg.newTiering && !fast && !msg.noDeepSeed;
         const seedFast = deepSeed ? msg.fastSeed : null;
         let seedTried = false;
         const useB = !!msg.newTiering && !msg.noScreenGuard;
