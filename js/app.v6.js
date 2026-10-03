@@ -1081,6 +1081,8 @@ function setupGeneratePanel() {
         throw new Error('数理最適化モジュールが未読込です。ページを再読み込み（Ctrl+Shift+R）してください。');
       }
       const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + msg; };
+      // 生成する前の表を控える。生成のあと元に戻すの履歴に積み、↩ で戻れるようにする（v243）
+      const preGen = (typeof genHistorySnapshot === 'function') ? genHistorySnapshot() : null;
       const res = await optimizeScheduleMILP(prog, { deepMode: !!opts.deepMode, fastMode: !!opts.fastMode, newTiering: !!opts.newTiering });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
@@ -1098,7 +1100,10 @@ function setupGeneratePanel() {
                                          : notTimeout ? '｜🎯 画面の検査で悪くなる答えを外して、良いほうを採りました（時間切れではありません）'
                                          : cutOff ? '｜⏱ 時間内でいちばん良い答え（最良とは確認できていません）'
                                                   : '｜✅ これ以上良い組み合わせは無いと確認済み');
-      if (typeof resetShiftHistory === 'function') resetShiftHistory();
+      // 生成する前の表を元に戻すの履歴に積む（何回か作り直して、良い表へ ↩ で戻れるように）。
+      // 前の表が無い（初めて作った・別の月）ときは、今までどおり履歴を空にする。
+      if (typeof pushGenHistory === 'function') pushGenHistory(preGen);
+      else if (typeof resetShiftHistory === 'function') resetShiftHistory();
       // 生成した直後の表を控える（途中から作り直したときも撮り直す）。
       // このあと手などで変えたマスを「生成から変えたマス」として数える。
       if (typeof genBaseTake === 'function') genBaseTake();

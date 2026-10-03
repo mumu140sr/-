@@ -359,6 +359,9 @@ async function runMilp(msg, emit) {
           let s2 = solver.solve(MILP.composeLP(m.parts, { types: t.types, budgets }),
                                 Object.assign({}, topts, { time_limit: sol ? Math.max(3, Math.floor(cap * 0.6)) : Math.max(3, cap) }));
           let okStrict = MILP.solutionIsValid(s2, m.parts, budgets);
+          // 検証用: 段の答えをどの解き方で得たか（strict=条件付きで一から / nbh=近くだけを探し直す / keep=前の答えのまま）
+          let path = okStrict ? 'strict' : 'none';
+          const strictInfo = msg.trace ? { status: String(s2 && s2.Status), got: okStrict ? MILP.slackTotal(s2, m.parts, t.types) : null } : null;
           // 「最後まで計算できた」と言えるのは、この段を条件付きで一から解いて Optimal に
           // なったときだけ。近くだけを探し直した答え（近傍探索）の Optimal は「近くの中で
           // 一番良い」という意味で全体の最良ではない。前の答えを使い回したときも同じ。
@@ -384,7 +387,7 @@ async function runMilp(msg, emit) {
               MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(sol), k: NBK } }),
               Object.assign({}, topts, { time_limit: Math.max(3, cap - Math.round((Date.now() - t0) / 1000)) }));
             // 近傍探索でも「前の段を悪化させていないか」は必ず確認する
-            if (MILP.solutionIsValid(s3, m.parts, budgets)) { s2 = s3; okStrict = true; provenHere = false; }
+            if (MILP.solutionIsValid(s3, m.parts, budgets)) { s2 = s3; okStrict = true; provenHere = false; path = 'nbh'; }
           } else if (okStrict && String(s2.Status) !== 'Optimal' && sol) {
             // ②' 時間切れで中途半端な答えしか出なかった場合、残り時間を捨てずに
             //     近傍探索でもう一度探し、件数が少ない方を採用する。
@@ -394,16 +397,17 @@ async function runMilp(msg, emit) {
                 MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(sol), k: NBK } }),
                 Object.assign({}, topts, { time_limit: rest }));
               if (MILP.solutionIsValid(s3, m.parts, budgets) &&
-                  MILP.slackTotal(s3, m.parts, t.types) < MILP.slackTotal(s2, m.parts, t.types)) { s2 = s3; provenHere = false; }
+                  MILP.slackTotal(s3, m.parts, t.types) < MILP.slackTotal(s2, m.parts, t.types)) { s2 = s3; provenHere = false; path = 'nbh'; }
             }
           }
           // 段の結果が、いま持っている答えより悪ければ、いまの答えを使う。
           // 実測で、早遅バランスの段が、前の答えでは0なのに 25・81 を返していた。
           //     いまの答えは前の段までの上限をすべて守っているので、必ず使える。
           if (!msg.noGuard && okStrict && sol &&
-              MILP.slackTotal(s2, m.parts, t.types) > MILP.slackTotal(sol, m.parts, t.types)) { s2 = sol; provenHere = false; }
+              MILP.slackTotal(s2, m.parts, t.types) > MILP.slackTotal(sol, m.parts, t.types)) { s2 = sol; provenHere = false; path = 'keep'; }
           // 検証用の記録（画面からは使わない）
-          if (msg.trace) emit({ type: 'trace', ti, label: t.label, cap,
+          if (msg.trace) emit({ type: 'trace', ti, label: t.label, cap, path, strict: strictInfo,
+            budgets: budgets.map(b => b.max),
             sec: Math.round((Date.now() - t0) / 1000), status: String(s2 && s2.Status), okStrict,
             prev: sol ? MILP.slackTotal(sol, m.parts, t.types) : null,
             got: okStrict ? MILP.slackTotal(s2, m.parts, t.types) : null });

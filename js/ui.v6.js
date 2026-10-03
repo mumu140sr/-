@@ -2168,6 +2168,44 @@ function recordShiftHistory() {
   updateHistoryButtons();
 }
 
+/**
+ * 生成する直前の表の控え（v243）。生成し直したあとも ↩ で前の表へ戻れるように、元に戻すの履歴に積む。
+ * 表と🔒に加えて、生成直後の控え（genBase）と変えたマスの記録（editLog）も持つ（戻したあと、前の表から
+ * 変えたマスを「生成から変えたマス」として数え直さないように）。まだ表が無い・別の月のときは null
+ * （初めて作ったときは空の表には戻さない）。
+ */
+function genHistorySnapshot() {
+  if (typeof genTableState === 'function' && genTableState() === 'none') return null;
+  const st = _snapshotShiftState();
+  st.gen = { genBase: JSON.parse(JSON.stringify(AppState.genBase || null)),
+             editLog: JSON.parse(JSON.stringify(AppState.editLog || [])) };
+  return st;
+}
+/** 生成のあとに呼ぶ。生成する前の表があれば履歴に積み、無ければ今までどおり履歴を空にする */
+function pushGenHistory(snap) {
+  if (!snap) { resetShiftHistory(); return; }
+  _undoStack.push(snap);
+  if (_undoStack.length > 100) _undoStack.shift();
+  _redoStack = []; _redoBeforeRecord = null;
+  updateHistoryButtons();
+}
+// 生成をまたいで戻す・やり直すとき: 控えと記録も入れ替え、条件が違う表なら知らせる
+function _swapGenState(st) {
+  const cur = _snapshotShiftState();
+  cur.gen = { genBase: JSON.parse(JSON.stringify(AppState.genBase || null)),
+              editLog: JSON.parse(JSON.stringify(AppState.editLog || [])) };
+  AppState.genBase = st.gen.genBase;
+  AppState.editLog = st.gen.editLog || [];
+  _applyShiftState(st);
+  if (typeof renderEditSummary === 'function') renderEditSummary();
+  return cur;
+}
+function _genSwapNote(what) {
+  const stale = typeof genTableState === 'function' && genTableState() === 'stale';
+  toast(`${what}。` + (stale ? 'この表は、いまの希望・設定とは違う条件で作った古い表です（エラーはいまの設定で数え直しています）' : ''),
+        stale ? 'warning' : 'info', stale ? 7000 : 2500);
+}
+
 /** 生成直後などに履歴をリセット（この状態が一番最初の戻り先になる） */
 function resetShiftHistory() {
   _undoStack = [];
@@ -2190,6 +2228,11 @@ function undoShiftEdit() {
     _applyChangeList(st.delta, 'undo');
     _redoStack.push(st);
     _afterHistoryApply(st.delta.some(c => c[0] === 'paid'));
+  } else if (st.gen) {                          // 生成する前の表へ戻す
+    _redoStack.push(_swapGenState(st));
+    updateHistoryButtons();
+    _genSwapNote('生成する前の表に戻しました（↪ やり直すで、生成した表に戻れます）');
+    return;
   } else {
     _redoStack.push(_snapshotShiftState());
     _applyShiftState(st);
@@ -2205,6 +2248,11 @@ function redoShiftEdit() {
     _applyChangeList(st.delta, 'redo');
     _undoStack.push(st);
     _afterHistoryApply(st.delta.some(c => c[0] === 'paid'));
+  } else if (st.gen) {                          // 生成した表へ進める
+    _undoStack.push(_swapGenState(st));
+    updateHistoryButtons();
+    _genSwapNote('生成した表に戻しました');
+    return;
   } else {
     _undoStack.push(_snapshotShiftState());
     _applyShiftState(st);
