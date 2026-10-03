@@ -315,6 +315,10 @@ async function runMilp(msg, emit) {
         };
         const CORE_LABELS = new Set(TIER_RAW.slice(0, 5).map(x => x.label));
         let curScr = null;   // いまの答え（sol）の画面の検査の結果
+        // 案3・案1 は、じっくり生成（newTiering・deep）のときだけ。1分生成（中で作るものも含む）は印が無いので働かない。
+        const deepSeed = !!msg.newTiering && deep && !msg.noDeepSeed;
+        const seedFast = deepSeed ? msg.fastSeed : null;
+        let seedTried = false;
         const useB = !!msg.newTiering && !msg.noScreenGuard;
         const traceScreen = (label, sc, decision, rule) => {
           if (msg.trace) emit({ type: 'trace-screen', label, must: sc.sc.must, comp: sc.sc.comp, soft: sc.sc.soft, iki: sc.iki, decision, rule });
@@ -330,6 +334,27 @@ async function runMilp(msg, emit) {
                `【${g.label || g.key}】第${ti + 1}段「${t.label}」を0に近づけています…`);
           const t0 = Date.now();
           const topts = tierOpts(t);
+          // 案3（じっくり生成だけ）: 🚨の段（先頭の5段）を解き終えて🟡の段に入るとき、先に作った1分生成の答え（fastSeed）が
+          // ここまでの上限をすべて守っていれば、それを出発点にする。じっくり側は前の段を解き切ったぶん上限がそろって厳しく、
+          // 🟡の段を一から解いても答えが見つからずに、近くの探し直しで止まっていた（利用者の実データで8回中5回）。
+          if (seedFast && !seedTried && sol && !CORE_LABELS.has(t.label)) {
+            seedTried = true;
+            const ones = {};
+            g.staff.forEach(s => {
+              const si = m.sidOf[s.id];
+              for (let d = 1; d <= m.days; d++) {
+                const v = (seedFast[s.id] || {})[d];
+                if (!v) continue;
+                if (v === '有') ones[`y_${si}_${d}`] = 1;
+                else if (m.roleIdx[v] != null) ones[`x_${si}_${d}_${m.roleIdx[v]}`] = 1;
+              }
+            });
+            const z = solver.solve(MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones, k: 0, only: CELLS } }),
+                                   Object.assign({}, opts, { time_limit: 10, mip_rel_gap: 0, mip_abs_gap: 0 }));
+            const okZ = MILP.solutionIsValid(z, m.parts, budgets);
+            if (msg.trace) emit({ type: 'trace-seed', label: t.label, ok: okZ });
+            if (okZ) { sol = z; curScr = null; }
+          }
           // コンプラ（6連勤以上）の段: 目的が6連勤の罰だけなので「誰も出勤しない」答えが最適に
           // なる。これを「解けなかった」として捨てていたため、固定の出勤マスが無い部門では
           // 上限が記録されず、6連勤以上が防げていなかった。出勤0件の答えも受け入れて、
@@ -398,6 +423,21 @@ async function runMilp(msg, emit) {
                 Object.assign({}, topts, { time_limit: rest }));
               if (MILP.solutionIsValid(s3, m.parts, budgets) &&
                   MILP.slackTotal(s3, m.parts, t.types) < MILP.slackTotal(s2, m.parts, t.types)) { s2 = s3; provenHere = false; path = 'nbh'; }
+            }
+          }
+          // 案1（じっくり生成だけ）: この段の持ち時間が残っていれば、見つかった答えの近くを探し直すことを繰り返す
+          // （1回では、一から解くのが時間切れになったあと近くの探し直しで止まり、持ち時間を余らせていた）。
+          if (deepSeed && okStrict && MILP.slackTotal(s2, m.parts, t.types) > 0) {
+            for (let it = 0; it < 20; it++) {
+              const rest = cap - Math.round((Date.now() - t0) / 1000);
+              if (rest < 6) break;
+              const s3 = solver.solve(
+                MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones: MILP.onesOf(s2), k: NBK } }),
+                Object.assign({}, topts, { time_limit: Math.min(rest, Math.max(5, Math.floor(cap / 4))) }));
+              if (!(MILP.solutionIsValid(s3, m.parts, budgets) &&
+                    MILP.slackTotal(s3, m.parts, t.types) < MILP.slackTotal(s2, m.parts, t.types))) break;
+              s2 = s3; provenHere = false; path = 'nbh+';
+              if (MILP.slackTotal(s2, m.parts, t.types) === 0) break;
             }
           }
           // 段の結果が、いま持っている答えより悪ければ、いまの答えを使う。
@@ -600,7 +640,7 @@ self.addEventListener('message', async (e) => {
                                           label: '（先に1分生成と同じ答えを作っています）' + (m.label || '') });
         else if (msg.trace) emit(Object.assign({}, m, { pass: 'fast' }));
       });
-      const d = await runMilp(msg, (m) => {
+      const d = await runMilp(Object.assign({}, msg, { fastSeed: q.shifts }), (m) => {
         if (m.type === 'progress') emit({ type: 'progress', pct: 15 + Math.floor((m.pct || 0) * 0.85), label: m.label });
         else emit(msg.trace ? Object.assign({}, m, { pass: 'deep' }) : m);
       });
