@@ -427,13 +427,8 @@ async function runMilp(msg, emit) {
             continue;
           }
           // 案B: 前の答えがあるときは、画面と同じ検査で採るかを決める
-          // 利用者が「絶対」にした段（ラベルの最後が「（絶対）」）にはかけない（v243）。まだ順番が来ていない段の
-          // 🚨（上下関係など）が増えただけで、その段の答え（切替 27→0 など、🚨の合計が減るもの）まで戻していた。
-          // かけなかった段は答えをそのまま採るので、次の段で比べる元（curScr）は採った答えから作り直す。
           let taken = true;
-          const mustTier = /（絶対）$/.test(t.label);
-          if (useB && mustTier) curScr = null;
-          if (useB && sol && !CORE_LABELS.has(t.label) && !mustTier) {
+          if (useB && sol && !CORE_LABELS.has(t.label)) {
             if (!curScr) curScr = screenOf(sol);
             const nw = screenOf(s2);
             const j = judge(nw, curScr);
