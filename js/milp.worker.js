@@ -303,15 +303,23 @@ async function runMilp(msg, emit) {
         // 案Bは🚨の段（先頭の5段）にはかけない。計算と画面で数え方が違う種類があり、計算の上では守れている
         // 良い答えまで戻してしまい、🚨が大きく増えた（1分生成 583→765）。🟡の段（「絶対」にした段も含む）・
         // 詰め直す回・最後の探し直しでは、🚨の全部の種類で比べる。
-        const judge = (nw, pv) => {
-          const up = scoreWorsened(nw.sc, pv.sc).filter(w => w.key !== 'soft');
-          if (up.length || compWorsened(pv.vs, nw.vs).length) return { ok: false, rule: 1 };
+        // B（「絶対」の段だけ）: only を渡すと、比べる🚨の種類を、順番が済んだ種類（protect）＋その段の種類と、
+        // ⛔・連勤の超過日数・公休の足りない日数（・切り替えが済んでいれば切り替えの超過回数）に限る。
+        // まだ順番が来ていない種類が増えたことは、ignored として記録だけする。
+        const judge = (nw, pv, only) => {
+          const inScope = (k) => !only || only.has(k) || k === 'comp' || k === 'over' || k === 'offShort' ||
+                                 (k === 'bsOver' && only.has('band-switch'));
+          const up0 = scoreWorsened(nw.sc, pv.sc).filter(w => w.key !== 'soft');
+          const up = up0.filter(w => inScope(w.key));
+          const ignored = up0.filter(w => !inScope(w.key)).map(w => `${w.key} ${w.from}→${w.to}`);
+          if (up.length || compWorsened(pv.vs, nw.vs).length) return { ok: false, rule: 1, ignored };
           const a = nw.sc, b = pv.sc;
-          let down = a.comp < b.comp || a.over < b.over || (a.offShort || 0) < (b.offShort || 0) || (a.bsOver || 0) < (b.bsOver || 0);
-          new Set(Object.keys(a.byMust).concat(Object.keys(b.byMust))).forEach(k => { if ((a.byMust[k] || 0) < (b.byMust[k] || 0)) down = true; });
+          let down = a.comp < b.comp || a.over < b.over || (a.offShort || 0) < (b.offShort || 0) || ((a.bsOver || 0) < (b.bsOver || 0) && inScope('bsOver'));
+          new Set(Object.keys(a.byMust).concat(Object.keys(b.byMust))).forEach(k => { if (inScope(k) && (a.byMust[k] || 0) < (b.byMust[k] || 0)) down = true; });
+          if (down) return { ok: true, rule: 2, ignored };
           if (down) return { ok: true, rule: 2 };
-          if (a.soft > b.soft || nw.iki > pv.iki) return { ok: false, rule: 3 };
-          return { ok: true, rule: 3 };
+          if (a.soft > b.soft || nw.iki > pv.iki) return { ok: false, rule: 3, ignored };
+          return { ok: true, rule: 3, ignored };
         };
         const CORE_LABELS = new Set(TIER_RAW.slice(0, 5).map(x => x.label));
         let curScr = null;   // いまの答え（sol）の画面の検査の結果
@@ -320,8 +328,9 @@ async function runMilp(msg, emit) {
         const seedFast = deepSeed ? msg.fastSeed : null;
         let seedTried = false;
         const useB = !!msg.newTiering && !msg.noScreenGuard;
-        const traceScreen = (label, sc, decision, rule) => {
-          if (msg.trace) emit({ type: 'trace-screen', label, must: sc.sc.must, comp: sc.sc.comp, soft: sc.sc.soft, iki: sc.iki, decision, rule });
+        const traceScreen = (label, sc, decision, rule, ignored, byMust) => {
+          if (msg.trace) emit({ type: 'trace-screen', label, must: sc.sc.must, comp: sc.sc.comp, soft: sc.sc.soft, iki: sc.iki, decision, rule,
+                                ignored: ignored || [], byMust: byMust || sc.sc.byMust });
         };
         for (let ti = 0; ti < tiers.length; ti++) {
           const t = tiers[ti];
@@ -471,8 +480,10 @@ async function runMilp(msg, emit) {
           if (useB && sol && !CORE_LABELS.has(t.label)) {
             if (!curScr) curScr = screenOf(sol);
             const nw = screenOf(s2);
-            const j = judge(nw, curScr);
-            traceScreen(t.label, j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
+            // B: 「絶対」の段だけ、比べる種類を絞る（順番が済んだ種類＋この段の種類）
+            const onlyB = /（絶対）$/.test(t.label) && !msg.noOnlyB ? new Set(protect.concat(t.types || [])) : null;
+            const j = judge(nw, curScr, onlyB);
+            traceScreen(t.label, j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule, j.ignored, nw.sc.byMust);
             if (j.ok) curScr = nw; else { taken = false; screenRejected++; }
           }
           if (taken) sol = s2;
