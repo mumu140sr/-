@@ -3137,7 +3137,12 @@ function checkViolations(shifts) {
         const tol  = Math.max(0, parseInt(settings.balanceTolerance) || 0);
         const want = total * ratio.earlyRatio;
         const gap  = earlyBand - want;                 // ＋なら早番が多すぎ
-        if (Math.abs(gap) > tol + 1e-9) {
+        // 「早番多め／遅番多め」は“その側が多ければよい”指定なので、寄りすぎた側は数えない（生成の計算と同じ。
+        // milp-core の ball_/balh_ は片側だけ）。両側で数えていたため、遅番多めの人が遅番に寄りきると、
+        // 計算では0なのに画面では「早遅バランスのずれ」になっていた（v244）。「均等」だけは両側。
+        const wantE = ratio.earlyRatio > ratio.lateRatio, wantL = ratio.lateRatio > ratio.earlyRatio;
+        const counted = (gap > 0 && !wantE) || (gap < 0 && !wantL);
+        if (counted && Math.abs(gap) > tol + 1e-9) {
           const over = gap > 0 ? '早番' : '遅番';
           // 許容幅を超えた「日数ぶん」を件数として数える。
           // 1件固定だと、2日のずれも13日のずれも同じ重さになり、
