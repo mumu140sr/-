@@ -313,6 +313,10 @@ async function runMilp(msg, emit) {
           const up = up0.filter(w => inScope(w.key));
           const ignored = up0.filter(w => !inScope(w.key)).map(w => `${w.key} ${w.from}→${w.to}`);
           if (up.length || compWorsened(pv.vs, nw.vs).length) return { ok: false, rule: 1, ignored };
+          // B1: 「絶対」の段（only あり）でも、⛔を含む🚨の合計（まだ順番が来ていない種類も含める）が増える答えは採らない。
+          // B だけでは、最初の「絶対」の段が自分の種類を減らす代わりに、あとの段の種類（連勤中の時間帯切替 3→22 など）を
+          // 大きく増やし、🚨の合計が51件になった答えを採り、あとの段が上限に縛られて取り戻せなかった（作り物の1週間有給の月）。
+          if (only && nw.sc.must > pv.sc.must) return { ok: false, rule: 'B1', ignored };
           const a = nw.sc, b = pv.sc;
           let down = a.comp < b.comp || a.over < b.over || (a.offShort || 0) < (b.offShort || 0) || ((a.bsOver || 0) < (b.bsOver || 0) && inScope('bsOver'));
           new Set(Object.keys(a.byMust).concat(Object.keys(b.byMust))).forEach(k => { if (inScope(k) && (a.byMust[k] || 0) < (b.byMust[k] || 0)) down = true; });
