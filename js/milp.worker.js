@@ -595,7 +595,11 @@ async function runMilp(msg, emit) {
     // 🚨のどれかの種類・⛔・連勤の超過日数が、出発点の表より悪くなるなら、出発点の表に戻す。
     if (adjust) {
       try {
-        const vS = checkViolations(seedShifts), vN = checkViolations(shifts);
+        // B5: 余はこのあと付く。出発点の表（余が付いている）と比べるので、答えも写しに余を付けてから数える
+        // （案Bの screenOf と同じ。付ける前の表では連休の長さなどが画面と違い、正しい答えを捨てていた）
+        const tmpN = {}; Object.keys(shifts).forEach(id => { tmpN[id] = Object.assign({}, shifts[id]); });
+        try { if (typeof markSurplusRest === 'function') markSurplusRest(tmpN); } catch (_) {}
+        const vS = checkViolations(seedShifts), vN = checkViolations(tmpN);
         const worse = scoreWorsened(scoreViolations(vN), scoreViolations(vS)).filter(x => x.key !== 'soft');
         if (worse.length || compWorsened(vS, vN).length) {
           Object.keys(seedShifts).forEach(id => { shifts[id] = Object.assign({}, seedShifts[id]); });
