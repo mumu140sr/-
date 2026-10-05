@@ -1387,11 +1387,23 @@ function renderStaffTable() {
     btn.addEventListener('click', e => {
       const id = e.target.closest('button[data-del]').dataset.del;
       if (confirm('このスタッフを削除しますか？')) {
+        // A8: 消す直前のいまの表を数えておき、消したあと数え直す（人員不足が出ず、古い一覧が残っていた）
+        const bSc = (AppState.generated && AppState.shifts) ? scoreViolations(checkViolations(AppState.shifts)) : null;
         AppState.staff = AppState.staff.filter(s => s.id !== id);
         delete AppState.requests[id];
         delete AppState.shifts[id];
+        if (AppState.fixedShifts) delete AppState.fixedShifts[id];   // 消した人の🔒も残さない
+        // 🔒を消すと newStaffId の守りが外れるので、同じIDを次の人に付けないよう通し番号を進める
+        const m = /^S(\d+)$/.exec(id || '');
+        if (m) _staffIdCounter = Math.max(_staffIdCounter, parseInt(m[1], 10) + 1);
         renderStaffTable();
         autoSave();
+        const re = (typeof recheckAfterStaffChange === 'function') ? recheckAfterStaffChange(bSc) : null;
+        if (re) {
+          const up = re.a.comp > re.b.comp || re.a.must > re.b.must;
+          toast(`スタッフを削除しました。いまの表のエラーを数え直しました（削除する前 ${scoreSummary(re.b)} → 削除したあと ${scoreSummary(re.a)}）。表は作り直していません`,
+                up ? 'warning' : 'info', 8000);
+        }
       }
     });
   });
