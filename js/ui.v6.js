@@ -2034,15 +2034,18 @@ function _snapshotShiftState() {
 // 表まるごと（希望・必要人数・有給日数まで）を戻すと、あとで④などで入れた値まで消えるので、
 // 変えたマスと項目だけを、いまもその値のままのときに戻す。
 // 種類: 'shifts' 'requests' 'fixedShifts' 'dailyRequirements' 'dailyRequirementsCast' 'paid'（有給日数）
-function _applyChangeList(list, dir) {
+// T: 当てる先（既定は AppState。🧭・🩹の控えにも当てる）。kinds: 当てる種類（無ければ全部）
+function _applyChangeList(list, dir, T, kinds) {
+  T = T || AppState;
   (list || []).forEach(([k, id, d, from, to]) => {
+    if (kinds && !kinds.includes(k)) return;
     const want = dir === 'undo' ? to : from, set = dir === 'undo' ? from : to;
     if (k === 'paid') {
-      const s = (AppState.staff || []).find(x => x.id === id);
+      const s = (T.staff || []).find(x => x.id === id);
       if (s && s.paidLeave === want) s.paidLeave = set;
       return;
     }
-    const M = AppState[k] || (AppState[k] = {});
+    const M = T[k] || (T[k] = {});
     const row = M[id] || {};
     if (row[d] !== want) return;                 // あとから変えられた所は触らない
     if (set === undefined) { delete row[d]; if (M[id] && !Object.keys(M[id]).length) delete M[id]; }
@@ -2136,9 +2139,16 @@ function genTableState() {
   return 'ok';
 }
 
+// A3: 🧭・🩹が開いている間に積まれた「変えた所だけ」の変更を、その画面の「戻す」の控えにも当てる
+// （控えを丸ごと戻すと、その間に⚖️余の解消などで入れた変更まで消えていた）
+const _snapRebasers = new Set();
+function _rebaseSnaps(list, dir) {
+  _snapRebasers.forEach(f => { try { f(list, dir); } catch (e) { console.warn('rebase', e); } });
+}
 /** 変えた所だけの履歴を積む（余の解消が実行されたとき） */
 function recordDeltaHistory(list) {
   if (!list || !list.length) return;
+  _rebaseSnaps(list, 'redo');
   _undoStack.push({ delta: list });
   if (_undoStack.length > 100) _undoStack.shift();
   _redoStack = []; _redoBeforeRecord = null;
@@ -2227,6 +2237,7 @@ function undoShiftEdit() {
   const st = _undoStack.pop();
   if (st.delta) {                               // 変えた所だけを戻す
     _applyChangeList(st.delta, 'undo');
+    _rebaseSnaps(st.delta, 'undo');
     _redoStack.push(st);
     _afterHistoryApply(st.delta.some(c => c[0] === 'paid'));
   } else if (st.gen) {                          // 生成する前の表へ戻す
@@ -2247,6 +2258,7 @@ function redoShiftEdit() {
   const st = _redoStack.pop();
   if (st.delta) {
     _applyChangeList(st.delta, 'redo');
+    _rebaseSnaps(st.delta, 'redo');
     _undoStack.push(st);
     _afterHistoryApply(st.delta.some(c => c[0] === 'paid'));
   } else if (st.gen) {                          // 生成した表へ進める
@@ -2880,7 +2892,16 @@ function showRelaxModal() {
   </div>`;
   document.body.appendChild(modal);
 
-  const close = () => modal.remove();
+  const RELAX_KINDS = ['dailyRequirements', 'dailyRequirementsCast', 'paid'];
+  const relaxRebase = (list, dir) => {
+    if (!modal.isConnected) { _snapRebasers.delete(relaxRebase); return; }
+    if (!_relaxUndo) return;
+    const d = JSON.parse(_relaxUndo);
+    _applyChangeList(list, dir, d, RELAX_KINDS);
+    _relaxUndo = JSON.stringify(d);
+  };
+  _snapRebasers.add(relaxRebase);
+  const close = () => { _snapRebasers.delete(relaxRebase); modal.remove(); };
   modal.querySelector('#relaxClose').addEventListener('click', close);
   modal.addEventListener('click', e => { if (e.target === modal) close(); });
 
@@ -2912,6 +2933,7 @@ function showRelaxModal() {
     if (!_relaxUndo) return;
     restoreFromRelax(_relaxUndo);
     _relaxUndo = null;
+    if (AppState.shifts && Object.keys(AppState.shifts).length) AppState.violations = checkViolations(AppState.shifts);
     autoSave();
     refreshAllUI();
     $done.innerHTML = '↩ <b>変更を元に戻しました。</b>';
@@ -5598,9 +5620,17 @@ function showGenerateWizard() {
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const openSnap = snap();          // 開いた時点
   let stepSnap = snap();            // いまのページに入った時点
+  // A3: 開いている間に⚖️余の解消などで入れた「変えた所だけ」の変更は、戻すの控えにも当てる（戻しても消さない）
+  const WZ_KINDS = ['requests', 'fixedShifts', 'dailyRequirements', 'dailyRequirementsCast', 'paid'];
+  const wzRebase = (list, dir) => {
+    if (!modal.isConnected) { _snapRebasers.delete(wzRebase); return; }
+    _applyChangeList(list, dir, openSnap, WZ_KINDS);
+    _applyChangeList(list, dir, stepSnap, WZ_KINDS);
+  };
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9980;padding:16px';
   modal.classList.add('calc-lock-area');   // A2: 計算中は入力を受け付けない
+  _snapRebasers.add(wzRebase);
   const days = () => getDaysInMonth(AppState.settings.targetMonth);
   const WD = ['日', '月', '火', '水', '木', '金', '土'];
   const wdOf = (d) => { const [y, m] = String(AppState.settings.targetMonth).split('-').map(Number); return WD[new Date(y, m - 1, d).getDay()]; };
