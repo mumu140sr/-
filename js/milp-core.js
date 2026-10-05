@@ -61,7 +61,11 @@
     const roles = allRoles.filter(k => {
       if ((reqs || {})[k] > 0) return true;
       const dr = (dailyReqs || {})[k] || {};
-      return Object.keys(dr).some(d => dr[d] > 0);
+      if (Object.keys(dr).some(d => dr[d] > 0)) return true;
+      // B4: 必要人数のルールだけで人数が決まる種類（既定0人・ある日だけ1人など）も入れる。
+      // 入れないと誰も配置されず、その日に人員不足が残るのに「確認済み」と出ていた（画面の検査は getDayReq でルール込み）
+      for (let d = 1; d <= days; d++) if (getDayReq(reqs || {}, dailyReqs || {}, k, d) > 0) return true;
+      return false;
     });
     const roleIdx = {}; roles.forEach((k, i) => roleIdx[k] = i);
     const earlyRoles = roles.filter(k => cat(k) === 'e');
