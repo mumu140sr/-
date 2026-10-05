@@ -1566,6 +1566,8 @@ function renderFixPlans(root) {
       let plans = [];
       try { plans = findConcreteFixes({ deep: true, maxResults: 6 }) || []; }
       catch (e) { plans = []; }
+      // A9: 案を作ったときの表。押したときに今の表と同じかを確かめる
+      const fp0 = (typeof contentFingerprint === 'function') ? contentFingerprint() : null;
       if (!plans.length) {
         box.innerHTML = `<div class="diag-item" style="background:#fffaf0;border-left:4px solid #f6ad55;margin-bottom:8px">
           <div class="diag-title" style="color:#744210">🔧 入れ替えでは減らせません</div>
@@ -1608,6 +1610,28 @@ function renderFixPlans(root) {
         const p = plans[parseInt(btn.dataset.fixplan)];
         if (!p) return;
         if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+        // A9: 1つ反映したあとの残りの案・取り込みや月の切り替えのあとの古い案で、表を壊していた。
+        // 表が案を作ったときと同じで、2つのマスがまだ案のままで、入れ替えると改善するときだけ入れる
+        const cur = AppState.shifts || {};
+        const sameFp = fp0 === null || (typeof contentFingerprint === 'function' && contentFingerprint() === fp0);
+        const cellsOk = p.steps.every(m => cur[m.aId] && cur[m.bId] && cur[m.aId][m.day] === m.aVal && cur[m.bId][m.day] === m.bVal);
+        let better = false;
+        if (sameFp && cellsOk) {
+          try {
+            const trial = JSON.parse(JSON.stringify(cur));
+            p.steps.forEach(m => { const t = trial[m.aId][m.day]; trial[m.aId][m.day] = trial[m.bId][m.day]; trial[m.bId][m.day] = t; });
+            const bv = checkViolations(cur), av = checkViolations(trial);
+            better = scoreBetter(scoreViolations(av), scoreViolations(bv)) && !compWorsened(bv, av).length;
+          } catch (e) { better = false; }
+        }
+        if (!sameFp || !cellsOk || !better) {
+          box.innerHTML = '';
+          renderFixPlans(root);
+          box.insertAdjacentHTML('afterbegin', `<div class="diag-item" style="background:#fff5f5;border-left:4px solid #fc8181;margin-bottom:8px">
+              <div class="diag-title" style="color:#742a2a">表が変わったので、この案は使えません</div>
+              <div class="diag-detail" style="color:#9b2335">表は変えていません。もう一度探してください。</div></div>`);
+          return;
+        }
         if (typeof recordShiftHistory === 'function') recordShiftHistory();
         const beforeFix = JSON.parse(JSON.stringify(AppState.shifts));
         p.steps.forEach(m => {
@@ -1620,6 +1644,7 @@ function renderFixPlans(root) {
         if (typeof autoSave === 'function') autoSave();
         if (typeof refreshAllUI === 'function') refreshAllUI();
         if (typeof toast === 'function') toast(`直しました（エラー ${AppState.violations.length}件）`, 'success');
+        renderFixPlans(root);   // 残りの案は古いので消して「探す」に戻す
       }));
     }, 30);
   });
