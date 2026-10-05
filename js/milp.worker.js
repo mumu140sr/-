@@ -330,6 +330,9 @@ async function runMilp(msg, emit) {
         // 案3・案1 は、じっくり生成（newTiering で速い生成でないとき。🎯 は deepMode を付けないので deep では見ない）だけ。1分生成（中で作るものも含む）は印が無いので働かない。
         const deepSeed = !!msg.newTiering && !fast && !msg.noDeepSeed;
         const seedFast = deepSeed ? msg.fastSeed : null;
+        // B2(1): 1分生成の仕上げ（余・入れ替え）のあとの表は、計算の上では先頭5段の上限を超えることがあり、種として捨てられていた。
+        // 仕上げ後 → 入れ替え前 の順に試す（noPreSeed で外せる）
+        const seedPre = (deepSeed && !msg.noPreSeed) ? msg.fastSeedPre : null;
         let seedTried = false;
         const useB = !!msg.newTiering && !msg.noScreenGuard;
         const traceScreen = (label, sc, decision, rule, ignored, byMust) => {
@@ -352,21 +355,24 @@ async function runMilp(msg, emit) {
           // 🟡の段を一から解いても答えが見つからずに、近くの探し直しで止まっていた（利用者の実データで8回中5回）。
           if (seedFast && !seedTried && sol && !CORE_LABELS.has(t.label)) {
             seedTried = true;
-            const ones = {};
-            g.staff.forEach(s => {
-              const si = m.sidOf[s.id];
-              for (let d = 1; d <= m.days; d++) {
-                const v = (seedFast[s.id] || {})[d];
-                if (!v) continue;
-                if (v === '有') ones[`y_${si}_${d}`] = 1;
-                else if (m.roleIdx[v] != null) ones[`x_${si}_${d}_${m.roleIdx[v]}`] = 1;
-              }
-            });
-            const z = solver.solve(MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones, k: 0, only: CELLS } }),
-                                   Object.assign({}, opts, { time_limit: 10, mip_rel_gap: 0, mip_abs_gap: 0 }));
-            const okZ = MILP.solutionIsValid(z, m.parts, budgets);
-            if (msg.trace) emit({ type: 'trace-seed', label: t.label, ok: okZ });
-            if (okZ) { sol = z; curScr = null; }
+            for (const [which, seedT] of [['post', seedFast], ['pre', seedPre]]) {
+              if (!seedT) continue;
+              const ones = {};
+              g.staff.forEach(s => {
+                const si = m.sidOf[s.id];
+                for (let d = 1; d <= m.days; d++) {
+                  const v = (seedT[s.id] || {})[d];
+                  if (!v) continue;
+                  if (v === '有') ones[`y_${si}_${d}`] = 1;
+                  else if (m.roleIdx[v] != null) ones[`x_${si}_${d}_${m.roleIdx[v]}`] = 1;
+                }
+              });
+              const z = solver.solve(MILP.composeLP(m.parts, { types: t.types, budgets, neighbor: { ones, k: 0, only: CELLS } }),
+                                     Object.assign({}, opts, { time_limit: 10, mip_rel_gap: 0, mip_abs_gap: 0 }));
+              const okZ = MILP.solutionIsValid(z, m.parts, budgets);
+              if (msg.trace) emit({ type: 'trace-seed', label: t.label, ok: okZ, which });
+              if (okZ) { sol = z; curScr = null; break; }
+            }
           }
           // コンプラ（6連勤以上）の段: 目的が6連勤の罰だけなので「誰も出勤しない」答えが最適に
           // なる。これを「解けなかった」として捨てていたため、固定の出勤マスが無い部門では
@@ -480,8 +486,9 @@ async function runMilp(msg, emit) {
             continue;
           }
           // 案B: 前の答えがあるときは、画面と同じ検査で採るかを決める
-          let taken = true;
+          let taken = true, judgedB = false;
           if (useB && sol && !CORE_LABELS.has(t.label)) {
+            judgedB = true;
             if (!curScr) curScr = screenOf(sol);
             const nw = screenOf(s2);
             // B: 「絶対」の段だけ、比べる種類を絞る（順番が済んだ種類＋この段の種類）
@@ -498,6 +505,16 @@ async function runMilp(msg, emit) {
           bIdx[ti] = budgets.length;
           budgets.push({ names: MILP.slackNames(m.parts, t.types), max: got });
           (t.types || []).forEach(ty => protect.push(ty));
+          // B2(2): 案Bで段の答えを採ると、比べる元（curScr）はこの答えになるのに、前の段の上限は前の答えのまま。
+          // 表を変えずに前の段までの印を落として、上限をこの答えにそろえる。この段の件数が上がるなら、そろえない（noBudgetSync で外せる）
+          if (useB && !msg.noBudgetSync && taken && judgedB) {
+            const s7 = tighten(sol, protect.slice());
+            if (s7 !== sol && MILP.slackTotal(s7, m.parts, t.types) <= got) {
+              sol = s7;
+              tiers.forEach((t2, i2) => { if (i2 <= ti && bIdx[i2] != null) {
+                const bb = budgets[bIdx[i2]]; bb.max = Math.min(bb.max, MILP.slackTotal(sol, m.parts, t2.types)); } });
+            }
+          }
         }
 
         // ── じっくりモード: 0にならなかった段を、何度でも詰め直す ──────
@@ -558,12 +575,18 @@ async function runMilp(msg, emit) {
         // 段が一通り終わったら、余った時間で「いまの解の近く」を何度も探し直し、
         // 全ルールの合計罰点を下げる。良くならなければ即やめるので無駄がない。
         let polish = polishLeft, best = null;      // 取り置き分＋段で余った分
+        // B2(3): 案Bで戻したあとは、同じ式を解き直して同じ答えが出て打ち切っていた。戻した答えより
+        // 目的値が小さい答えだけを探す上限（pcut）を足して続ける（noPolishCut で外せる）。
+        // 重みは小数（0.1刻み）もあるので、整数になる倍率を選ぶ
+        let pcut = null;
+        const pcutScale = [1, 10, 100, 1000].find(k => m.parts.objEntries.every(e => Math.abs(e.w * k - Math.round(e.w * k)) < 1e-9)) || 1000;
         while (polish >= 4 && sol) {
           const p0 = Date.now();
           // budgets を付けるのが重要。付けないと、細かいルールを良くするために
           // 人員不足や公休不足を悪化させた解が「総罰点が下がった」と誤判定される。
           // （段ごとの解では、その段に関係しない罰点変数の値が抑えられていないため）
-          const s4 = solver.solve(MILP.composeLP(m.parts, { budgets, neighbor: { ones: MILP.onesOf(sol), k: NBK } }),
+          const s4 = solver.solve(MILP.composeLP(m.parts, { budgets, neighbor: { ones: MILP.onesOf(sol), k: NBK },
+                                                            extraCons: pcut ? [pcut] : [] }),
                                   Object.assign({}, opts, { time_limit: Math.min(8, polish) }));
           polish -= Math.max(1, Math.round((Date.now() - p0) / 1000));
           if (!MILP.solutionIsValid(s4, m.parts, budgets)) break;
@@ -575,7 +598,14 @@ async function runMilp(msg, emit) {
               const nw = screenOf(s4); const j = judge(nw, curScr);
               traceScreen('仕上げの探し直し', j.ok ? nw : curScr, j.ok ? '採る' : '戻す', j.rule);
               // 戻しても打ち切らない。同じ答えをくり返さないよう、次はこの答えより良いものだけを探す
-              if (!j.ok) { best = now; screenRejected++; continue; }
+              if (!j.ok) {
+                best = now; screenRejected++;
+                if (!msg.noPolishCut) {
+                  const terms = m.parts.objEntries.map(e => `${Math.round(e.w * pcutScale)} ${e.name}`);
+                  pcut = `pcut: ${terms.join(' + ')} <= ${Math.round(now * pcutScale) - 1}`;
+                }
+                continue;
+              }
               curScr = nw;
             }
             sol = s4; best = now;
@@ -608,6 +638,8 @@ async function runMilp(msg, emit) {
       } catch (_) {}
     }
     post(85, '仕上げ中：公休を整理中...');
+    // B2(1): 仕上げ（余・入れ替え）の前の表も控える（じっくり生成の種に使う。画面へは渡さない）
+    const prePolish = msg.keepPrePolish ? JSON.parse(JSON.stringify(shifts)) : null;
     AppState.shifts = shifts;
     try { if (typeof markSurplusRest === 'function') markSurplusRest(shifts); }
     catch (e1) { emit({ type: 'progress', pct: 88, label: '公休整理をスキップ（' + e1.message + '）' }); }
@@ -639,7 +671,8 @@ async function runMilp(msg, emit) {
     // allOptimal: 全部の段を確かめられたか（案Bで戻した段があれば false）。solverProven: ソルバーの時間切れ・
     // 解ききれない段が無かったか（案Bで戻したことは含めない）。画面は2つを分けて文を出す。
     return { type: 'done', shifts, violations, allOptimal: allOptimal && screenRejected === 0, solverProven: allOptimal, screenRejected,
-             deep, fast, usedGap, tiered, tierLog, variant, variantLabel: VARLABEL, adjustRejected };
+             deep, fast, usedGap, tiered, tierLog, variant, variantLabel: VARLABEL, adjustRejected,
+             ...(prePolish ? { prePolish } : {}) };
   }
 }
 
@@ -654,12 +687,13 @@ self.addEventListener('message', async (e) => {
     // 🎯 じっくり生成・妥協なしで再計算のボタンから呼んだとき（newTiering の印）だけ働く。
     // 中で作る1分生成の答えは、印を外した本番と同じ1分生成。
     if (msg.newTiering && !msg.fastMode && !msg.adjustMode) {
-      const q = await runMilp(Object.assign({}, msg, { deepMode: false, fastMode: true, newTiering: false }), (m) => {
+      const q = await runMilp(Object.assign({}, msg, { deepMode: false, fastMode: true, newTiering: false, keepPrePolish: !msg.noPreSeed }), (m) => {
         if (m.type === 'progress') emit({ type: 'progress', pct: Math.floor((m.pct || 0) * 0.15),
                                           label: '（先に1分生成と同じ答えを作っています）' + (m.label || '') });
         else if (msg.trace) emit(Object.assign({}, m, { pass: 'fast' }));
       });
-      const d = await runMilp(Object.assign({}, msg, { fastSeed: q.shifts }), (m) => {
+      const fastSeedPre = q.prePolish || null; delete q.prePolish;   // 画面へは渡さない
+      const d = await runMilp(Object.assign({}, msg, { fastSeed: q.shifts, fastSeedPre }), (m) => {
         if (m.type === 'progress') emit({ type: 'progress', pct: 15 + Math.floor((m.pct || 0) * 0.85), label: m.label });
         else emit(msg.trace ? Object.assign({}, m, { pass: 'deep' }) : m);
       });
