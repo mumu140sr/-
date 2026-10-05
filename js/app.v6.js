@@ -1042,14 +1042,14 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
   if (bp) bp.addEventListener('click', () => {
     if (typeof window._runGenerate === 'function') {
       toast('じっくり生成で解き直します（1部門あたり最大約11分）', 'info', 4000);
-      window._runGenerate({ newTiering: true });
+      window._runGenerate({ newTiering: true, keepIfWorse: true });
     }
   });
   const bd = document.getElementById('btnDeepOptimize');
   if (bd) bd.addEventListener('click', () => {
     if (typeof window._runGenerate === 'function') {
       toast('妥協なしモードで再計算します（1部門あたり最大約11分）', 'info', 4000);
-      window._runGenerate({ deepMode: true, newTiering: true });
+      window._runGenerate({ deepMode: true, newTiering: true, keepIfWorse: true });
     }
   });
 }
@@ -1113,8 +1113,31 @@ function setupGeneratePanel() {
       // 途中から作り直すときは、🔒をかける前に撮った控えを使う（↩ 1回で作り直す前に戻る。A1）
       const preGen = opts.preGen !== undefined ? opts.preGen
                    : (typeof genHistorySnapshot === 'function') ? genHistorySnapshot() : null;
-      const res = await optimizeScheduleMILP(prog, { deepMode: !!opts.deepMode, fastMode: !!opts.fastMode, newTiering: !!opts.newTiering });
+      // B3: ⏳ 妥協なしで再計算・🎯 じっくり生成で解き直す は、いまの表より良くなければ表を変えない。
+      // 答えはいったん反映せずに受け取り（noApply。Worker へ渡す中身は同じ）、画面と同じ検査で
+      // いまの表と scoreCompare で比べる（同点なら新しい答えを採る。4通りから選ぶ所・案D と同じ）
+      const keepIfWorse = !!opts.keepIfWorse && typeof genTableState === 'function' && genTableState() === 'ok';
+      const res = await optimizeScheduleMILP(prog, { deepMode: !!opts.deepMode, fastMode: !!opts.fastMode, newTiering: !!opts.newTiering,
+                                                     noApply: keepIfWorse });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+      if (keepIfWorse) {
+        const vCur = checkViolations(AppState.shifts);
+        const vNew = checkViolations(res._shifts || {});
+        const sCur = scoreViolations(vCur), sNew = scoreViolations(vNew);
+        if (scoreCompare(sNew, sCur) > 0) {
+          // 表・違反・genBase・editLog・履歴・保存には触らない
+          $bar.style.width = '100%';
+          const what = opts.deepMode ? '⏳ 妥協なしで再計算' : '🎯 じっくり生成で解き直す';
+          const msg = `${what}の答え（${scoreSummary(sNew)}）は、いまの表（${scoreSummary(sCur)}）より良くなかったので、表は変えていません。` +
+                      (res.solverProven === false ? '時間切れで解ききれませんでした。' : '');
+          $text.textContent = msg + `（${elapsed}秒）`;
+          $report.style.display = 'block';
+          if (typeof syncGenerateResult === 'function') syncGenerateResult();
+          toast(msg, 'info', 9000);
+          return;
+        }
+        _milpApply(res, {});
+      }
       $bar.style.width = '100%';
       const cutOff = (res.allOptimal === false);   // 時間切れで打ち切られた＝最良解とは限らない
       // 🎯 じっくり生成（newTiering）の内訳: 1分生成の答えを採ったか・本当に時間切れか・案Bで答えを外したか

@@ -3091,7 +3091,8 @@ function checkViolations(shifts) {
       let got = 0, asked = 0;
       for (let d = 1; d <= days; d++) {
         if (((shifts[s.id] || {})[d]) === '有') got++;
-        const lk = (AppState.requests[s.id] || {})[d] ||
+        // B1: 🔒を先に読む（表・生成と同じ）
+        const lk = (AppState.fixedShifts[s.id] || {})[d] || (AppState.requests[s.id] || {})[d] ||
                    (typeof getFixedShiftAt === 'function' ? getFixedShiftAt(s.id, d) : null);
         if (lk === '有') asked++;
       }
@@ -4746,9 +4747,10 @@ function buildRelaxPlans(violations) {
 //   'fixed:キー' … その役割で確定
 //   'free'     … 自由（担当シフトの中から選べる）
 function staffDayState(s, d) {
+  // B1: 🔒を先に読む。④の希望がある日を表で直して🔒にしたときは🔒の値（表・生成と同じ）
   const rq = (AppState.requests[s.id] || {})[d];
-  if (rq && isOff(rq)) return 'off';
   const fx = (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(s.id, d) : null;
+  if (!fx && rq && isOff(rq)) return 'off';
   if (fx && isOff(fx))      return 'off';
   if (fx && isTraining(fx)) return 'training';
   if (fx)                   return 'fixed:' + fx;
@@ -5407,7 +5409,7 @@ function analyzeLowerBound() {
         if (st !== 'off') continue;
         const rq = (AppState.requests[s.id] || {})[d];
         const fx = (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(s.id, d) : null;
-        const off = (rq && isOff(rq)) ? rq : (fx || '');
+        const off = fx || rq || '';   // B1: 🔒を先に読む（ここは staffDayState が 'off' の日だけ）
         if (off === '有') paidN++; else if (off && !isPublicOff(off)) otherOffN++;
       }
       const needPaid  = Math.max(paidN, parseInt(s.paidLeave) || 0);
@@ -5433,10 +5435,11 @@ function analyzeLowerBound() {
       const c = Math.min(getMaxConsFor(s), COMPLIANCE_CONS_DAYS - 1);
       if (!(c >= 1)) return;
       const offAt = (d) => {
-        const rq = (AppState.requests[s.id] || {})[d];
-        if (rq && isOff(rq)) return true;
+        // B1: 🔒を先に読む
         const fx = (typeof getFixedShiftAt === 'function') ? getFixedShiftAt(s.id, d) : null;
-        return !!(fx && isOff(fx));
+        if (fx) return isOff(fx);
+        const rq = (AppState.requests[s.id] || {})[d];
+        return !!(rq && isOff(rq));
       };
       let fixedOff = 0;
       for (let d = 1; d <= days; d++) if (offAt(d)) fixedOff++;
@@ -5489,7 +5492,8 @@ function analyzeLowerBound() {
         const st = [0], fixK = [''];
         for (let d = 1; d <= days; d++) {
           const x = staffDayState(s, d);
-          const rq = (AppState.requests[s.id] || {})[d] || '';
+          // B1: 🔒を先に読む
+          const rq = (AppState.fixedShifts[s.id] || {})[d] || (AppState.requests[s.id] || {})[d] || '';
           const half = typeof isHalfWork === 'function' && isHalfWork(rq);
           fixK[d] = '';
           if (half) st[d] = 1;

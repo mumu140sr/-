@@ -61,7 +61,11 @@
     const roles = allRoles.filter(k => {
       if ((reqs || {})[k] > 0) return true;
       const dr = (dailyReqs || {})[k] || {};
-      return Object.keys(dr).some(d => dr[d] > 0);
+      if (Object.keys(dr).some(d => dr[d] > 0)) return true;
+      // B4: 必要人数のルールだけで人数が決まる種類（既定0人・ある日だけ1人など）も入れる。
+      // 入れないと誰も配置されず、その日に人員不足が残るのに「確認済み」と出ていた（画面の検査は getDayReq でルール込み）
+      for (let d = 1; d <= days; d++) if (getDayReq(reqs || {}, dailyReqs || {}, k, d) > 0) return true;
+      return false;
     });
     const roleIdx = {}; roles.forEach((k, i) => roleIdx[k] = i);
     const earlyRoles = roles.filter(k => cat(k) === 'e');
@@ -81,6 +85,9 @@
     // 固定シフト（手動固定＋④で指定した出勤系シフト）。旧データ互換も含む。
     const fx  = (s, d) => getFixedShiftAt(s.id, d) || undefined;
     const rq  = (s, d) => (AppState.requests[s.id] || {})[d];
+    // B1: 表と検査は🔒を先に読む（getFixedShiftAt・applyGroupSolution）。④の希望がある日を表で直して🔒にしたとき、
+    // 生成も🔒を先に読む（有給の目標・半休・休みが決まっている日）。④と🔒が食い違わないデータでは同じ値になる
+    const lockedAt = (s, d) => (AppState.fixedShifts[s.id] || {})[d] || rq(s, d) || '';
     const allowRoles = s => (s.allowedShifts || []).filter(k => roles.includes(k));
     // その日、役割を割り当て可能か（休/有/固定/研 でない）
     const free = (s, d) => {
@@ -104,8 +111,7 @@
       // 「前半の有給がまだ残っている」と誤認し、後半に有給を二重で入れてしまう。
       let reqPaid = 0;
       for (let d = 1; d <= days; d++) {
-        const r = (AppState.requests[s.id] || {})[d];
-        const locked = r || getFixedShiftAt(s.id, d) || '';
+        const locked = lockedAt(s, d) || getFixedShiftAt(s.id, d) || '';
         if (locked === '有') reqPaid++;
       }
       paidTarget[s.id] = Math.max(0, (parseInt(s.paidLeave) || 0) - reqPaid);
@@ -155,9 +161,11 @@
         const need = getDayReq(reqs || {}, dailyReqs || {}, k, d);
         const terms = [];
         gStaff.forEach(s => {
+          // B6: 固定（担当外のシフトを🔒・④で指定したときも）は、担当の判定より先に数える。
+          // 担当外の固定を数えず別の人を入れ、定数オーバー・責任者の重複になっていた（画面の検査は数えている）
+          if (fx(s, d) === k) { terms.push('1c'); return; } // 固定で入る（定数）
           if (!(s.allowedShifts || []).includes(k)) return;
-          if (fx(s, d) === k) terms.push('1c'); // 固定で入る（定数）
-          else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k]));
+          if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k]));
         });
         const cconst = terms.filter(x => x === '1c').length;
         const vterms = terms.filter(x => x !== '1c');
@@ -197,9 +205,9 @@
         gStaff.forEach(s => {
           if (!(s.skills || []).includes(sk.name)) return;
           bandRoles.forEach(k => {
+            if (fx(s, d) === k) { c++; return; }   // B6: 担当外の固定も数える
             if (!(s.allowedShifts || []).includes(k)) return;
-            if (fx(s, d) === k) c++;
-            else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k]));
+            if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k]));
           });
         });
         const lhs = terms.length ? terms.join(' + ') : '';
@@ -216,7 +224,8 @@
       const w = ruleW('vicemanager-absent', P.viceManagerDailyAbsent || 9000);
       if (w > 0) for (let d = 1; d <= days; d++) {
         const terms = []; let c = 0;
-        vms.forEach(s => { allowRoles(s).forEach(k => { if (fx(s, d) === k) c++; else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k])); }); });
+        // B6: 担当外のシフトに固定した日も、出勤として数える
+        vms.forEach(s => { if (roles.includes(fx(s, d))) { c++; return; } allowRoles(s).forEach(k => { if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k])); }); });
         if (c === 0) { const va = `va_${d}`; addSlack(va, 1, w, 'vicemanager-absent'); cons.push(`vice_${d}: ${(terms.length ? terms.join(' + ') + ' + ' : '')}${va} >= 1`); }
       }
     }
@@ -253,9 +262,9 @@
           // 前日の夜勤（固定ぶんは定数、未確定ぶんは変数）
           const nTerms = [], nConst = [];
           nightRoles.forEach(k => {
+            if (fx(s, d) === k) { nConst.push(1); return; }   // B6: 担当外の固定も数える
             if (!(s.allowedShifts || []).includes(k)) return;
-            if (fx(s, d) === k) nConst.push(1);
-            else if (free(s, d)) nTerms.push(V(si, d, roleIdx[k]));
+            if (free(s, d)) nTerms.push(V(si, d, roleIdx[k]));
           });
           if (!nTerms.length && !nConst.length) continue;
           // 翌日の出勤
@@ -282,9 +291,9 @@
         if (!roles.includes(role)) continue;
         const terms = []; let c = 0;
         vms.forEach(s => {
+          if (fx(s, d) === role) { c++; return; }   // B6: 担当外の固定も数える
           if (!(s.allowedShifts || []).includes(role)) return;
-          if (fx(s, d) === role) c++;
-          else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[role]));
+          if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[role]));
         });
         if (c === 0 && terms.length) {
           const v = `sp_${d}`; addSlack(v, 1, wSP, 'special-day');
@@ -303,7 +312,7 @@
       // 時間帯は早番扱い（遅→半、遅→休→半 などの並びの判定に使う）。
       // ただし早番・遅番の割合を数えるときは除く（half フラグで見分ける）。
       {
-        const hv = (AppState.requests[s.id] || {})[d] || fx(s, d) || '';
+        const hv = lockedAt(s, d) || fx(s, d) || '';
         if (typeof isHalfWork === 'function' && isHalfWork(hv)) { o.c = 1; o.half = true; o.e.push('_'); return o; }
       }
       if (!free(s, d)) return o;
@@ -368,9 +377,8 @@
             // 公休系(休/公/☆)は maxOff に含まれるので加算しないが、有給・半休・
             // 季節休暇・慶弔休・引継は maxOff の外なので個別に差し引く必要がある。
             // （差し引かないと「1日多く働ける」と誤認し、結果として公休が不足する）
-            const r  = rq(s, d);
-            const fv = (AppState.fixedShifts[s.id] || {})[d];
-            const lockedOff = (r && isOff(r)) ? r : ((fv && isOff(fv)) ? fv : '');
+            const lv = lockedAt(s, d);
+            const lockedOff = (lv && isOff(lv)) ? lv : '';
             if (lockedOff) {
               if (lockedOff === '有') paidN++;
               else if (!isPublicOff(lockedOff)) otherOffN++;   // 半 / 季 / 慶 / 引 など
