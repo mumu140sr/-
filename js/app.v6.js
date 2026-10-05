@@ -1933,7 +1933,7 @@ function exportToExcel() {
   const colorMap = {};
   AppState.shiftTypes.forEach(t => {
     // Excelの色形式: RRGGBB (# を除く6桁)
-    colorMap[t.key] = t.color.replace('#', '').toUpperCase().padStart(6, '0');
+    colorMap[t.key] = safeColor(t.color, '#e2e8f0').replace('#', '').toUpperCase().padStart(6, '0');
   });
   // 固定の休み系
   Object.assign(colorMap, {

@@ -600,9 +600,9 @@ function renderRoleTable() {
         </label>
       </td>
       <td style="white-space:nowrap">
-        <input type="color" value="${type.color}" data-idx="${idx}" data-field="color"
+        <input type="color" value="${safeColor(type.color, '#e2e8f0')}" data-idx="${idx}" data-field="color"
                style="width:46px;height:28px;border:none;cursor:pointer;border-radius:4px;vertical-align:middle"/>
-        <span class="shift-preview" style="background-color:${type.color}">
+        <span class="shift-preview" style="background-color:${safeColor(type.color, '#e2e8f0')}">
           ${escapeHtml(type.key)}
         </span>
       </td>
@@ -1116,7 +1116,7 @@ function renderStaffTable() {
     // allowedShifts チェックボックス群
     const checkboxes = AppState.shiftTypes.map(t => {
       const checked = (s.allowedShifts || []).includes(t.key);
-      const bg = checked ? t.color : '#edf2f7';
+      const bg = checked ? safeColor(t.color, '#edf2f7') : '#edf2f7';
       return `<label class="allowed-label" style="background:${bg}"
                      data-id="${s.id}" data-key="${escapeHtml(t.key)}">
         <input type="checkbox" data-allowed="${escapeHtml(t.key)}" data-id="${s.id}"
@@ -1296,7 +1296,7 @@ function renderStaffTable() {
       if (e.target.checked) {
         if (!staff.allowedShifts.includes(shiftKey)) staff.allowedShifts.push(shiftKey);
         const t = AppState.shiftTypes.find(t => t.key === shiftKey);
-        if (label) label.style.background = t ? t.color : '#edf2f7';
+        if (label) label.style.background = t ? safeColor(t.color, '#edf2f7') : '#edf2f7';
       } else {
         staff.allowedShifts = staff.allowedShifts.filter(k => k !== shiftKey);
         if (label) label.style.background = '#edf2f7';
@@ -1364,7 +1364,7 @@ function renderShiftChips() {
     btn.className = 'chip-btn';
     btn.dataset.mark = t.key;
     btn.textContent  = t.key;
-    btn.style.background = t.color;
+    btn.style.background = safeColor(t.color, '#e2e8f0');
     // 現在選択中なら outline でアクティブを表現（inline bg が CSS .active を上書きするため）
     if (t.key === selectedMark) {
       btn.classList.add('active');
@@ -1439,7 +1439,7 @@ function renderCalendar() {
         const shCls = getShiftClass(cur);
         const shSty = getShiftStyle(cur);
         html += `<td class="${cls}" data-sid="${s.id}" data-day="${d}">
-          <span class="shift-cell ${shCls}" style="${shSty}">${cur}</span>
+          <span class="shift-cell ${shCls}" style="${shSty}">${escapeHtml(cur)}</span>
         </td>`;
       }
       tr.innerHTML = html;
@@ -1626,7 +1626,7 @@ function renderShiftLegend() {
   if (!el) return;
   let html = AppState.shiftTypes.map(t =>
     `<div class="legend-item">
-      <span class="legend-color" style="background-color:${t.color}"></span>
+      <span class="legend-color" style="background-color:${safeColor(t.color, '#e2e8f0')}"></span>
       <span>${escapeHtml(t.key)}: ${escapeHtml(t.label)}</span>
     </div>`
   ).join('');
@@ -1732,7 +1732,7 @@ function renderResultTable() {
         else if (shift === '余') surplusCount++;
         else if (isOff(shift)) otherOffCount++;
         cells += `<td class="${wcls}${fixCls}" data-sid="${s.id}" data-day="${d}">
-          <span class="shift-cell ${cls}${vio}" style="${sty}" draggable="true" ${titleAttr}>${shift}</span>
+          <span class="shift-cell ${cls}${vio}" style="${sty}" draggable="true" ${titleAttr}>${escapeHtml(shift)}</span>
         </td>`;
       }
       // 差 = 公休 - 目標公休（+は余剰、-は不足）
@@ -1922,7 +1922,7 @@ function renderModalOptions() {
     btn.dataset.shift = t.key;
     btn.textContent   = t.key;
     btn.title         = t.label;
-    btn.style.cssText = `background:${t.color};border-color:${t.color};color:#333`;
+    btn.style.cssText = `background:${safeColor(t.color, '#e2e8f0')};border-color:${safeColor(t.color, '#e2e8f0')};color:#333`;
     container.appendChild(btn);
   });
 
@@ -3539,7 +3539,7 @@ function showSurplusResolveModal() {
           <select id="workStaff" style="min-width:150px">${staffOptions(selWork.id)}</select>
           <select id="workDay" style="min-width:130px">${dayOptions(selWork.id, selWork.day)}</select>
           ${cands.length
-            ? `<select id="workKey" style="min-width:100px">${cands.map(k => `<option value="${k}" ${selWork.key === k ? 'selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>
+            ? `<select id="workKey" style="min-width:100px">${cands.map(k => `<option value="${escapeHtml(k)}" ${selWork.key === k ? 'selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>
                <button id="workGo" class="btn btn-primary">出勤にする（定数+1）</button>`
             : '<span class="hint">この人が入れるシフトがありません（責任者・総務は1日1人のため増やせません）</span>'}
         </div>
@@ -4589,7 +4589,7 @@ function renderReqRules(hostId) {
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;margin-top:8px">
         <span><b>その日の</b></span>
         <select data-rr="key" data-i="${i}">
-          ${keys.map(k => `<option value="${k}" ${r.key === k ? 'selected' : ''}>${k}</option>`).join('')}
+          ${keys.map(k => `<option value="${escapeHtml(k)}" ${r.key === k ? 'selected' : ''}>${escapeHtml(k)}</option>`).join('')}
         </select>
         <span>を</span>
         <input type="number" data-rr="to" data-i="${i}" value="${r.to != null ? r.to : 1}" min="0" max="20" style="width:70px"/>
@@ -5033,7 +5033,7 @@ function showSurplusPlanModal() {
             <span class="hint" style="margin-left:6px">${curTxt}</span>
             ${r.blocked ? '' : kindTag(r)}
             ${r.blocked ? '' : `<div style="margin-top:2px">${r.keys && r.keys.length > 1
-                ? `<select data-spk="${i}">${r.keys.map(k => `<option value="${k}" ${r.k === k ? 'selected' : ''}>${k}${(r.okKeys && r.okKeys.indexOf(k) >= 0) ? ' ◯' : ''}</option>`).join('')}</select>`
+                ? `<select data-spk="${i}">${r.keys.map(k => `<option value="${escapeHtml(k)}" ${r.k === k ? 'selected' : ''}>${escapeHtml(k)}${(r.okKeys && r.okKeys.indexOf(k) >= 0) ? ' ◯' : ''}</option>`).join('')}</select>`
                 : `<b>${escapeHtml(r.k)}</b>`}
               <span style="margin-left:6px">で入れ、「${escapeHtml(r.k)}」を ${r.from}人 → ${r.to}人</span>
               ${r.already ? '<span class="hint" style="margin-left:6px">（設定済み）</span>' : ''}</div>`}
@@ -5657,9 +5657,9 @@ function showGenerateWizard() {
         const src = manual != null ? '手入力' : 'ルール';
         diff.push(`<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px">
           ${escapeHtml(k)} ${base}→
-          <input type="number" data-wzq="${k}|${d}" value="${now}" min="0" max="20" style="width:58px"/>人
+          <input type="number" data-wzq="${escapeHtml(k)}|${d}" value="${now}" min="0" max="20" style="width:58px"/>人
           <span class="hint">(${src})</span>
-          ${manual != null ? `<button class="btn" data-wzdel="${k}|${d}" style="padding:1px 7px;font-size:11px">手入力を消す</button>` : ''}
+          ${manual != null ? `<button class="btn" data-wzdel="${escapeHtml(k)}|${d}" style="padding:1px 7px;font-size:11px">手入力を消す</button>` : ''}
         </span>`);
       });
       if (diff.length) rowsOut.push(`<div style="padding:6px 10px;border-bottom:1px solid var(--border)"><b>${d}日(${wdOf(d)})</b> ${diff.join('')}</div>`);
@@ -5676,7 +5676,7 @@ function showGenerateWizard() {
         ${notes}
         <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px">
           <span>別の日を足す:</span>
-          <select id="wzAddKey">${keys.map(k => `<option value="${k}">${escapeHtml(k)}</option>`).join('')}</select>
+          <select id="wzAddKey">${keys.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('')}</select>
           <input type="number" id="wzAddDay" placeholder="日" min="1" max="31" style="width:64px"/>
           <input type="number" id="wzAddNum" placeholder="人数" min="0" max="20" style="width:74px"/>
           <button id="wzAddReq" class="btn">追加</button>

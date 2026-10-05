@@ -477,7 +477,46 @@ function getShiftClass(shift) {
 // 出勤シフトのインラインスタイル文字列
 function getShiftStyle(shift) {
   const t = getShiftType(shift);
-  return t ? `background-color:${t.color};` : '';
+  return t ? `background-color:${safeColor(t.color, '#e2e8f0')};` : '';
+}
+
+// 色として使ってよい値（#rgb・#rrggbb）だけを通す（v248、A5）。取り込んだファイルの色に HTML や style を仕込まれても、
+// そのまま画面に入らないようにする。合わなければ fallback を返す。
+function safeColor(c, fallback) {
+  return (typeof c === 'string' && /^#(?:[0-9a-fA-F]{3}){1,2}$/.test(c)) ? c : (fallback || '#e2e8f0');
+}
+
+// 取り込むファイルのスタッフIDと数の欄を確かめる（v248、A5）。合わなければ例外にして取り込まない。
+// 出口でのエスケープだけでは、ID が属性や data- の中に入る所を守りきれないため、入口で断る。
+// 起動時の読込（loadFromStorage）では確かめない（保存済みのデータが読めずにサンプルで上書きされるため）。
+function validateImportIdsAndNumbers(d) {
+  const ID = /^[A-Za-z0-9_-]{1,40}$/;
+  const num = (v, where) => {
+    if (v == null || v === '') return;
+    if (typeof v === 'boolean' || !Number.isFinite(Number(v))) throw new Error(`${where} が数ではありません`);
+  };
+  (d.staff || []).forEach((s, i) => {
+    if (!s || typeof s !== 'object') throw new Error(`${i + 1}人目のスタッフの形が正しくありません`);
+    if (!ID.test(String(s.id))) throw new Error(`${i + 1}人目のスタッフのIDが正しくありません`);
+    ['maxOff', 'paidLeave', 'prevConsecutive', 'personalMaxCons', 'personalMaxOff', 'pairRestTarget']
+      .forEach(k => num(s[k], `${i + 1}人目のスタッフの ${k}`));
+  });
+  ['requests', 'shifts', 'fixedShifts'].forEach(k => {
+    const m = d[k];
+    if (m == null) return;
+    if (typeof m !== 'object' || Array.isArray(m)) throw new Error(`${k} の形が正しくありません`);
+    Object.keys(m).forEach(id => { if (!ID.test(id)) throw new Error(`${k} のスタッフIDが正しくありません`); });
+  });
+  ['roleRequirements', 'roleRequirementsCast'].forEach(k => {
+    const m = d[k]; if (m == null) return;
+    if (typeof m !== 'object') throw new Error(`${k} の形が正しくありません`);
+    Object.keys(m).forEach(x => num(m[x], `${k} の ${x}`));
+  });
+  ['dailyRequirements', 'dailyRequirementsCast'].forEach(k => {
+    const m = d[k]; if (m == null) return;
+    if (typeof m !== 'object') throw new Error(`${k} の形が正しくありません`);
+    Object.keys(m).forEach(x => { const r = m[x]; if (r && typeof r === 'object') Object.keys(r).forEach(dd => num(r[dd], `${k} の ${x}`)); });
+  });
 }
 
 // ===== ローカルストレージ =====
