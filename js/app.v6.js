@@ -2030,11 +2030,20 @@ function classifyRemainingMust(violations, tierStat) {
     if (t !== 'comp-cons' && !isMust(v.type)) return;
     cnt[t] = (cnt[t] || 0) + 1;
   });
+  // 人員不足は、作る前の見込み（analyzeLowerBound の understaffMin＝人数の下限）と同じ人数なら、段が時間切れでも
+  // これ以上減らせない（v247 で、6連勤を避けると出られない日・役割ごとの何日分かの不足まで数える）
+  let usPersons = 0;
+  (violations || []).filter(v => v.type === 'understaff').forEach(v => {
+    const m = /が(\d+)人（必要(\d+)人）/.exec(v.message || ''); if (m) usPersons += (+m[2]) - (+m[1]);
+  });
+  let usMin = null;
+  try { if (cnt.understaff && typeof analyzeLowerBound === 'function') usMin = analyzeLowerBound().understaffMin; } catch (_) {}
   const out = [];
   Object.keys(cnt).forEach(t => {
     const ts = (tierStat || []).filter(x => (x.types || []).indexOf(t) >= 0);
     let kind;
-    if (!tierStat || !tierStat.length) kind = 'wait';
+    if (t === 'understaff' && usMin != null && usPersons > 0 && usPersons <= usMin) kind = 'proven';
+    else if (!tierStat || !tierStat.length) kind = 'wait';
     else if (!ts.length || ts.every(x => x.got === 0)) kind = 'unseen';
     else if (ts.filter(x => x.got !== 0).every(x => x.proven)) kind = 'proven';
     else kind = 'wait';
