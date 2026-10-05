@@ -1038,7 +1038,14 @@ function setupSkillsPanel() {
     btn._wired = true;
     btn.addEventListener('click', () => {
       if (!Array.isArray(AppState.skills)) AppState.skills = [];
-      AppState.skills.push({ name: '営業', target: 'late', req: 0 });
+      // A7: いつも「営業」にしていたので同じ名前が2つでき、改名・削除で元のスキルの保有者まで動いた。
+      // 一覧・スタッフの持つスキル・日別指定のどれとも重ならない名前にする
+      const used = new Set(AppState.skills.map(k => k.name));
+      (AppState.staff || []).forEach(st => (st.skills || []).forEach(n => used.add(n)));
+      Object.keys(AppState.dailySkills || {}).forEach(n => used.add(n));
+      let name = '営業';
+      for (let i = 2; used.has(name); i++) name = 'スキル' + i;
+      AppState.skills.push({ name, target: 'late', req: 0 });
       renderSkillsPanel();
       renderStaffTable();
       autoSave();
@@ -1106,7 +1113,24 @@ function renderSkillsPanel() {
         if (typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
       } else {
         const newName = e.target.value.trim() || '無名';
+        if (newName === oldName) { e.target.value = oldName; return; }
+        // A7: 一覧のほかのスキルと同じ名前にはしない（保有者と日別指定が混ざる）
+        if (AppState.skills.some((k, j) => j !== idx && k.name === newName)) {
+          e.target.value = oldName;
+          toast(`「${newName}」は、ほかのスキルの名前です。別の名前にしてください`, 'warning', 5000);
+          return;
+        }
+        // 一覧に無いのに、スタッフや日別指定に残っている名前なら知らせる
+        const holders = AppState.staff.filter(s => Array.isArray(s.skills) && s.skills.includes(newName)).length;
+        if ((holders || (AppState.dailySkills && AppState.dailySkills[newName])) &&
+            !confirm(`「${newName}」を持つ人が ${holders}人います（前に使っていた名前が残っています）。\nこの名前にすると、その人たちもこのスキルを持つことになります。よいですか？`)) {
+          e.target.value = oldName;
+          return;
+        }
         AppState.skills[idx].name = newName;
+        // 同じ名前のスキルがほかに残っているときは、保有者と日別指定はそちらのものとして動かさない
+        const dupOld = AppState.skills.some((k, j) => j !== idx && k.name === oldName);
+        if (!dupOld) {
         // スタッフが持つスキル名も追従させる
         AppState.staff.forEach(s => {
           if (Array.isArray(s.skills)) {
@@ -1118,6 +1142,7 @@ function renderSkillsPanel() {
         if (AppState.dailySkills && oldName !== newName && AppState.dailySkills[oldName]) {
           AppState.dailySkills[newName] = AppState.dailySkills[oldName];
           delete AppState.dailySkills[oldName];
+        }
         }
         renderStaffTable();
         if (typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
@@ -1132,12 +1157,14 @@ function renderSkillsPanel() {
       const sk = AppState.skills[idx];
       if (!sk) return;
       if (!confirm(`スキル「${sk.name}」を削除しますか？`)) return;
+      // A7: 同じ名前のスキルがほかに残るなら、一覧から外すだけ（保有者と日別指定はそちらのもの）
+      const dup = AppState.skills.some((k, j) => j !== idx && k.name === sk.name);
       // スタッフからも除去
-      AppState.staff.forEach(s => {
+      if (!dup) AppState.staff.forEach(s => {
         if (Array.isArray(s.skills)) s.skills = s.skills.filter(n => n !== sk.name);
       });
       AppState.skills.splice(idx, 1);
-      if (AppState.dailySkills) delete AppState.dailySkills[sk.name];   // 日別の上書きも消す
+      if (AppState.dailySkills && !dup) delete AppState.dailySkills[sk.name];   // 日別の上書きも消す
       renderSkillsPanel();
       renderStaffTable();
       if (typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
