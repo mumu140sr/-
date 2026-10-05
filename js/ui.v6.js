@@ -1494,6 +1494,7 @@ const REQ_ALERT_TYPE = {
   'req-le': 'late-early', 'fixed-cons': 'consecutive', 'req-role': 'role-mismatch', 'req-over': 'overstaff',
   'req-solo': 'resp-duplicate', 'event-req': 'event-absent', 'special-req': 'special-day',
   'req-offcount': 'off-count', 'paid-short': 'paid', 'day': 'understaff', 'role': 'understaff',
+  'comp-days': 'understaff',   // 6連勤を避けると出られない日の人員不足（v246）
 };
 function _reqIsMust(kind) {
   const t = REQ_ALERT_TYPE[kind];

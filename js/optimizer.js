@@ -4895,6 +4895,7 @@ function analyzeLowerBound() {
     // 同じ人に両方あるときは、同じ連勤かもしれないので多いほうだけを数える。
     const consFixed = {}, consNeed = {};
     let slotShort = 0;   // スキルの枠不足（人はいるのに入れる枠が無い＝必ず1件出る）
+    const singleShort = [0], needOf = [0];   // 日ごとの不足（下の 6連勤を避ける区間の下限で使う）
 
     for (let d = 1; d <= days; d++) {
       // その日、各役割に入れる人を数える
@@ -4941,6 +4942,7 @@ function analyzeLowerBound() {
         });
       }
       dayShort += Math.max(roleShort, totalShort);
+      singleShort[d] = Math.max(roleShort, totalShort); needOf[d] = needAll;
 
       // ③ スキルの最低ライン
       (AppState.skills || []).forEach(sk => {
@@ -5471,9 +5473,90 @@ function analyzeLowerBound() {
         text: `${pfx}月全体: 必要 ${cap.required}人日 に対し、出せるのは ${cap.avail}人日 です（不足 ${monthShort}人日）`,
       });
     }
+    // ⑦ 6連勤（⛔）を避けると出られない日（v246）。日ごとの数え方は「その日出勤できる人」を、前月末からの連勤や
+    //    🔒・出勤の希望で決まった連勤を考えずに数えていたため、月初などで少なく出ていた（見込み 12 → 生成の最小 15 など）。
+    //    続いた日の区間 [a,b] ごとに、各人が6連勤を作らずに出られる最大の日数を数え（前月末の連勤・🔒や出勤の希望で
+    //    決まった出勤・希望休を守る）、「必要な人日 − 出せる人日」を不足の下限にする。分からない所は出られる側に
+    //    倒して数える（区間の前の日は、決まった出勤でなければ休みとみなす）ので、実際より多くは出ない。
+    //    重ならない区間の不足は足し合わせられるので、日ごとの不足と区間の不足の組み合わせで一番大きいものを使う。
+    {
+      const CD = (typeof COMPLIANCE_CONS_DAYS !== 'undefined') ? COMPLIANCE_CONS_DAYS : 6;
+      const MAXRUN = CD - 1;
+      // 人ごとの日の状態: -1 休み確定 / 1 出勤確定（🔒・出勤希望・研修・半休。capable はその日に人数に数えるか）/ 0 空き
+      const ppl = g.staff.map(s => {
+        const st = [0], cap = [0];
+        for (let d = 1; d <= days; d++) {
+          const x = staffDayState(s, d);
+          const rq = (AppState.requests[s.id] || {})[d] || '';
+          const half = typeof isHalfWork === 'function' && isHalfWork(rq);
+          if (half) { st[d] = 1; cap[d] = 0; }
+          else if (x === 'off') { st[d] = -1; cap[d] = 0; }
+          else if (x === 'training') { st[d] = 1; cap[d] = 0; }
+          else if (x.indexOf('fixed:') === 0) { st[d] = 1; cap[d] = shiftKeys.includes(x.slice(6)) ? 1 : 0; }
+          else { st[d] = 0; cap[d] = (s.allowedShifts || []).some(k => shiftKeys.includes(k)) ? 1 : 0; }
+        }
+        const prev = Math.min(MAXRUN, (typeof getPrevMonthEnd === 'function') ? (getPrevMonthEnd(s).cons || 0) : 0);
+        return { s, st, cap, prev };
+      });
+      // 区間 [a,b] で、この人が6連勤を作らずに出られる最大の日数（人数に数える日だけ）。決まった出勤だけで
+      // 6連勤になる人は、この条件を外して数える（もともと⛔が避けられないため）
+      const maxWork = (P, a, b) => {
+        let r0 = 0;
+        if (a === 1) r0 = P.prev;
+        else { let d = a - 1; while (d >= 1 && P.st[d] === 1) { r0++; d--; } if (d === 0) r0 += P.prev; }
+        const NEG = -1e9;
+        let dp = new Array(MAXRUN + 1).fill(NEG);
+        if (r0 > MAXRUN) return null;
+        dp[r0] = 0;
+        for (let d = a; d <= b; d++) {
+          const nx = new Array(MAXRUN + 1).fill(NEG);
+          for (let r = 0; r <= MAXRUN; r++) {
+            if (dp[r] === NEG) continue;
+            if (P.st[d] !== 1) nx[0] = Math.max(nx[0], dp[r]);                       // 休む
+            if (P.st[d] !== -1 && r + 1 <= MAXRUN) nx[r + 1] = Math.max(nx[r + 1], dp[r] + P.cap[d]);   // 出る
+          }
+          dp = nx;
+        }
+        const m = Math.max(...dp);
+        return m === NEG ? null : m;
+      };
+      const free = (P, a, b) => { let n = 0; for (let d = a; d <= b; d++) if (P.st[d] !== -1) n += P.cap[d]; return n; };
+      const best = [0], from = [null];
+      for (let t = 1; t <= days; t++) {
+        best[t] = best[t - 1] + singleShort[t]; from[t] = null;
+        let needSum = 0;
+        for (let a = t; a >= 1 && t - a < 31; a--) {
+          needSum += needOf[a];
+          if (t - a + 1 < 2) continue;
+          let capSum = 0;
+          ppl.forEach(P => { const m = maxWork(P, a, t); capSum += (m == null ? free(P, a, t) : m); });
+          const sh = needSum - capSum;
+          if (sh > 0 && best[a - 1] + sh > best[t]) { best[t] = best[a - 1] + sh; from[t] = { a, need: needSum, have: capSum, sh }; }
+        }
+      }
+      if (best[days] > dayShort) {
+        // どの区間で数えたかを、理由として出す
+        const segs = [];
+        for (let t = days; t >= 1;) { const f = from[t]; if (f) { segs.push(Object.assign({ b: t }, f)); t = f.a - 1; } else t--; }
+        segs.reverse().forEach(f => {
+          let singles = 0; for (let d = f.a; d <= f.b; d++) singles += singleShort[d];
+          if (f.sh <= singles) return;
+          const who = ppl.filter(P => { const m = maxWork(P, f.a, f.b); return m != null && m < free(P, f.a, f.b); })
+            .map(P => P.s.name + (P.prev && f.a <= MAXRUN ? `（前月末から${P.prev}連勤）` : ''));
+          res.reasons.push({
+            kind: 'comp-days', from: f.a, to: f.b, need: f.need, have: f.have,
+            text: `${pfx}${f.a}日〜${f.b}日: 合計 ${f.need}人日 必要ですが、6連勤（コンプラ違反）を作らずに出せるのは最大 ${f.have}人日 です`
+                + `（不足 ${f.sh}人。日ごとに数えると ${singles}人）。`
+                + (who.length ? `連勤のため出られない日がある人: ${who.slice(0, 8).join('・')}${who.length > 8 ? ` ほか${who.length - 8}人` : ''}` : ''),
+          });
+        });
+        dayShort = best[days];
+      }
+    }
     // 日別の不足と月全体の不足は重なりうるので、大きいほうを下限として採用する
     new Set([...Object.keys(consFixed), ...Object.keys(consNeed)])
       .forEach(id => { consShort += Math.max(consFixed[id] || 0, consNeed[id] || 0); });
+    res.understaffMin = (res.understaffMin || 0) + dayShort;   // 人員不足の人数の下限（日ごと・区間ごと。検証用）
     res.minErrors += Math.max(dayShort, monthShort) + consShort + slotShort;
   });
 
