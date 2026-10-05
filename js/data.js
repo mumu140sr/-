@@ -514,12 +514,26 @@ function saveToStorage() {
   }
 }
 
-function loadFromStorage() {
-  const raw = localStorage.getItem('shiftAppData');
-  if (!raw) return false;
-  try {
-    const data = JSON.parse(raw);
-
+// ===== 保存データ・取り込んだファイルを、AppState に入れる前に直す（v248、A4） =====
+// 起動直後の既定値の写し（取り込み・読込で、ファイルに無い項目をこれで補う）。
+const DEFAULT_APP_SETTINGS = JSON.parse(JSON.stringify(AppState.settings));
+const DEFAULT_ROLE_REQUIREMENTS = JSON.parse(JSON.stringify(AppState.roleRequirements));
+function defaultAppDataBase() {
+  return { settings: JSON.parse(JSON.stringify(DEFAULT_APP_SETTINGS)),
+           roleRequirements: JSON.parse(JSON.stringify(DEFAULT_ROLE_REQUIREMENTS)) };
+}
+// AppState に入れる項目（取り込みの前に控えて、失敗したら戻すのにも使う）
+const APP_DATA_KEYS = ['settings', 'shiftTypes', 'roleRequirements', 'roleRequirementsCast', 'dailyRequirements',
+  'dailyRequirementsCast', 'skills', 'dailySkills', 'events', 'staff', 'requests', 'shifts', 'fixedShifts',
+  'specialDays', 'violations', 'generated', 'genBase', 'editLog'];
+/**
+ * 保存データ（または取り込んだファイル）を、AppState に入れられる形に直した新しいオブジェクトを返す。AppState は触らない。
+ * 以前は loadFromStorage の中で AppState を少しずつ書き換えていたため、途中で失敗するとデータが半分だけ入れ替わっていた。
+ * base: 既定値（defaultAppDataBase()）。ファイルに無い設定はこれで補う。
+ */
+function normalizeAppData(data, base) {
+  const b = base || defaultAppDataBase();
+  const out = {};
     // settings（penalties がなければデフォルトで補完）
     const penalties = Object.assign({ ...DEFAULT_PENALTIES }, (data.settings || {}).penalties || {});
     // 優先順位（定数厳守 > 公休 > 連休）を反映して旧データのペナルティを補正
@@ -537,32 +551,32 @@ function loadFromStorage() {
     // 旧デフォルト(700)のままなら新デフォルト(1500)へ引き上げ（手動調整済みなら尊重）
     if (penalties.bandConcentration == null || penalties.bandConcentration === 700)
       penalties.bandConcentration = DEFAULT_PENALTIES.bandConcentration;
-    Object.assign(AppState.settings, data.settings || {}, { penalties });
-    if (!AppState.settings.combinedShifts) AppState.settings.combinedShifts = {}; // 旧データ補完
-    if (!AppState.settings.ruleLevels || typeof AppState.settings.ruleLevels !== 'object') AppState.settings.ruleLevels = {}; // 旧データ補完
-    if (AppState.settings.balanceTolerance == null) AppState.settings.balanceTolerance = 2;      // 旧データ補完
-    if (AppState.settings.tieredOptimize == null) AppState.settings.tieredOptimize = true;      // 旧データ補完
-    if (AppState.settings.parallelSolve  == null) AppState.settings.parallelSolve  = true;      // 旧データ補完
-    if (AppState.settings.ignoreVioBeforeDay == null) AppState.settings.ignoreVioBeforeDay = 0;   // 旧データ補完
-    if (!(AppState.settings.maxConsecutiveOff >= 1)) AppState.settings.maxConsecutiveOff = 3;    // 旧データ補完
+    out.settings = Object.assign(b.settings, (data.settings && typeof data.settings === 'object') ? data.settings : {}, { penalties });
+    if (!out.settings.combinedShifts) out.settings.combinedShifts = {}; // 旧データ補完
+    if (!out.settings.ruleLevels || typeof out.settings.ruleLevels !== 'object') out.settings.ruleLevels = {}; // 旧データ補完
+    if (out.settings.balanceTolerance == null) out.settings.balanceTolerance = 2;      // 旧データ補完
+    if (out.settings.tieredOptimize == null) out.settings.tieredOptimize = true;      // 旧データ補完
+    if (out.settings.parallelSolve  == null) out.settings.parallelSolve  = true;      // 旧データ補完
+    if (out.settings.ignoreVioBeforeDay == null) out.settings.ignoreVioBeforeDay = 0;   // 旧データ補完
+    if (!(out.settings.maxConsecutiveOff >= 1)) out.settings.maxConsecutiveOff = 3;    // 旧データ補完
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
-    AppState.shiftTypes = (data.shiftTypes || getDefaultShiftTypes()).map(t =>
+    out.shiftTypes = (Array.isArray(data.shiftTypes) ? data.shiftTypes : getDefaultShiftTypes()).map(t =>
       Object.assign({ workHours: 8, isNight: false }, t));
 
     // roleRequirements
-    Object.assign(AppState.roleRequirements, data.roleRequirements || {});
-    AppState.roleRequirementsCast  = data.roleRequirementsCast  || {};
-    AppState.dailyRequirements     = data.dailyRequirements     || {};
-    AppState.dailyRequirementsCast = data.dailyRequirementsCast || {};
-    AppState.skills                = Array.isArray(data.skills) ? data.skills : [];
-    AppState.dailySkills           = data.dailySkills || {};
+    out.roleRequirements = Object.assign(b.roleRequirements, data.roleRequirements || {});
+    out.roleRequirementsCast  = data.roleRequirementsCast  || {};
+    out.dailyRequirements     = data.dailyRequirements     || {};
+    out.dailyRequirementsCast = data.dailyRequirementsCast || {};
+    out.skills                = Array.isArray(data.skills) ? data.skills : [];
+    out.dailySkills           = data.dailySkills || {};
 
     // events（v4以降）
-    AppState.events = Array.isArray(data.events) ? data.events : [];
+    out.events = Array.isArray(data.events) ? data.events : [];
 
     // スタッフ（旧データ v2: roleType → allowedShifts へマイグレーション）
-    AppState.staff = (data.staff || []).map(s => {
+    out.staff = (Array.isArray(data.staff) ? data.staff : []).map(s => {
       let allowedShifts = Array.isArray(s.allowedShifts) ? s.allowedShifts : null;
       if (!allowedShifts) {
         // 旧 roleType から allowedShifts を導出
@@ -604,31 +618,56 @@ function loadFromStorage() {
       };
     });
 
-    AppState.requests    = data.requests    || {};
-    AppState.shifts      = data.shifts      || {};
-    AppState.fixedShifts = data.fixedShifts || {};
-    AppState.specialDays = data.specialDays || {};
-    AppState.violations  = data.violations  || [];
+    out.requests    = data.requests    || {};
+    out.shifts      = data.shifts      || {};
+    out.fixedShifts = data.fixedShifts || {};
+    out.specialDays = data.specialDays || {};
+    out.violations  = Array.isArray(data.violations) ? data.violations : [];
     // 書き出したファイルには generated が入っていないことがある。
     // 表があるのに「まだ作っていない」扱いになると、Excel書き出しや
     // ルールチェックが「シフトを生成してから」と断ってしまうため、
     // 表の中身があれば作成済みとみなす。
-    AppState.generated   = data.generated === true
+    out.generated   = data.generated === true
                            || !!(data.shifts && Object.keys(data.shifts).length);
-    // 違反の一覧は、保存されていたものを使わず、いまの表から必ず数え直す。
-    // 保存されていた一覧は古い検査で作られていることがあり、それと比べると、
-    // 開いた直後の最初の手直しで「悪くなった」と誤って警告していた。
-    if (AppState.generated && typeof checkViolations === 'function') {
-      try { AppState.violations = checkViolations(AppState.shifts); } catch (e) { AppState.violations = []; }
-    }
-    AppState.genBase = data.genBase || null;
-    AppState.editLog = Array.isArray(data.editLog) ? data.editLog : [];
-    _staffIdCounter = data._staffIdCounter || (AppState.staff.length + 1);
-    return true;
+    out.genBase = data.genBase || null;
+  out.editLog = Array.isArray(data.editLog) ? data.editLog : [];
+  out._staffIdCounter = data._staffIdCounter || (out.staff.length + 1);
+  return out;
+}
+/** normalizeAppData の結果を AppState に入れる（settings・roleRequirements は同じ入れ物のまま中身を入れ替える） */
+function applyAppData(n) {
+  const replaceIn = (obj, src) => { Object.keys(obj).forEach(k => { delete obj[k]; }); Object.assign(obj, src); };
+  replaceIn(AppState.settings, n.settings);
+  replaceIn(AppState.roleRequirements, n.roleRequirements);
+  APP_DATA_KEYS.forEach(k => { if (k !== 'settings' && k !== 'roleRequirements' && k in n) AppState[k] = n[k]; });
+  if (n._staffIdCounter != null) _staffIdCounter = n._staffIdCounter;
+}
+// 保存データが読めなかったとき、元のデータを別のキーに退避しておく（次の起動でサンプルに上書きされないように）
+const UNREADABLE_KEY = 'shiftAppData_unreadable';
+let _loadUnreadable = false;
+
+function loadFromStorage() {
+  const raw = localStorage.getItem('shiftAppData');
+  _loadUnreadable = false;
+  if (!raw) return false;
+  let n;
+  try {
+    // 全部直してから入れる（途中で失敗したら AppState は1つも変わらない）
+    n = normalizeAppData(JSON.parse(raw), defaultAppDataBase());
   } catch (e) {
     console.error('読込エラー', e);
+    try { localStorage.setItem(UNREADABLE_KEY, raw); } catch (_) {}
+    _loadUnreadable = true;
     return false;
   }
+  applyAppData(n);
+  // 違反の一覧は、保存されていたものを使わず、いまの表から必ず数え直す。
+  // 保存されていた一覧は古い検査で作られていることがあり、それと比べると、
+  // 開いた直後の最初の手直しで「悪くなった」と誤って警告していた。
+  if (AppState.generated && typeof checkViolations === 'function') {
+    try { AppState.violations = checkViolations(AppState.shifts); } catch (e) { AppState.violations = []; }
+  }
+  return true;
 }
 
 function resetAll() {

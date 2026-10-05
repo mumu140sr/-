@@ -67,6 +67,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (loaded) {
     toast('前回のデータを読込みました', 'success');
+  } else if (typeof _loadUnreadable !== 'undefined' && _loadUnreadable) {
+    // 保存データが壊れていて読めなかった（元のデータは別のキーに残してある。サンプルで上書きしたことにしない）
+    toast('前回のデータを読めませんでした。元のデータは消さずに残してあります（ブラウザの保存データ「' + UNREADABLE_KEY + '」）。'
+        + '書き出したファイルがあれば「取り込み」から戻してください。いまはサンプルを表示しています。', 'error', 15000);
   } else {
     toast('シフト自動生成アプリへようこそ！', 'success');
   }
@@ -148,6 +152,8 @@ function setupHeaderActions() {
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
       refreshAllUI();
       toast('設定を読込みました', 'success');
+    } else if (typeof _loadUnreadable !== 'undefined' && _loadUnreadable) {
+      toast('保存データを読めませんでした（いまのデータはそのままです。元のデータは「' + UNREADABLE_KEY + '」に残してあります）', 'error', 10000);
     } else {
       toast('保存されたデータがありません', 'error');
     }
@@ -168,22 +174,41 @@ function setupHeaderActions() {
       if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); fileImp.value = ''; return; }
       const rd = new FileReader();
       rd.onload = () => {
+        // 確かめてから入れる（v248、A4）。以前は `_app` しか確かめず、項目を1つずつ AppState へ入れていたため、
+        // 途中で失敗すると「失敗しました」と出るのにデータが半分入れ替わって保存されていた。ファイルに無い設定は
+        // 既定値で補う（補わないと、早遅バランスの許容幅が画面では空、計算では2日になっていた）。
+        let saved = null;
         try {
           const d = JSON.parse(rd.result);
-          if (d._app !== 'shift-app') throw new Error('このアプリの書き出しファイルではありません');
+          if (!d || typeof d !== 'object' || d._app !== 'shift-app') throw new Error('このアプリの書き出しファイルではありません');
+          if (!Array.isArray(d.staff)) throw new Error('スタッフの一覧が入っていません');
+          if (!d.settings || typeof d.settings !== 'object' || Array.isArray(d.settings)) throw new Error('設定が入っていません');
+          if (typeof validateImportIdsAndNumbers === 'function') validateImportIdsAndNumbers(d);   // A5
+          const n = normalizeAppData(d, defaultAppDataBase());
           if (!confirm('いまのデータを、読み込むファイルの内容で置き換えます。よろしいですか？')) return;
-          ['settings','shiftTypes','roleRequirements','roleRequirementsCast','dailyRequirements',
-           'dailyRequirementsCast','skills','dailySkills','staff','requests','fixedShifts',
-           'specialDays','events','shifts'].forEach(k => { if (d[k] !== undefined) AppState[k] = d[k]; });
-          // 生成直後の控えと変えたマスの記録（入っていないファイルなら空にする）
-          AppState.genBase = d.genBase || null;
-          AppState.editLog = Array.isArray(d.editLog) ? d.editLog : [];
-          AppState.generated = !!(d.shifts && Object.keys(d.shifts).length);
-          AppState.violations = AppState.generated ? checkViolations(AppState.shifts) : [];
+          // いまの状態を控える（失敗したら戻す）
+          saved = { data: JSON.parse(JSON.stringify(APP_DATA_KEYS.reduce((o, k) => { o[k] = AppState[k]; return o; }, {}))),
+                    counter: _staffIdCounter, needsRegen: AppState._needsRegen };
+          applyAppData(n);
+          AppState._needsRegen = false;   // 取り込んだ表に、前のデータの「作り直してください」を残さない（A6）
+          try { AppState.violations = AppState.generated ? checkViolations(AppState.shifts) : []; }
+          catch (e2) { AppState.violations = []; }
+          refreshAllUI();
           if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 取り込む前の表には戻さない
-          saveToStorage(); refreshAllUI();
+          saveToStorage();
+          saved = null;
           toast('設定を取り込みました', 'success');
-        } catch (e) { toast('取り込みに失敗しました: ' + e.message, 'error', 6000); }
+        } catch (e) {
+          if (saved) {
+            // 途中で失敗したら、取り込む前の状態に戻す（保存データは取り込みの最後でしか書かないので、そのまま）
+            try {
+              applyAppData(Object.assign(saved.data, { _staffIdCounter: saved.counter }));
+              AppState._needsRegen = saved.needsRegen;
+              refreshAllUI();
+            } catch (_) {}
+          }
+          toast('取り込みに失敗しました（いまのデータはそのままです）: ' + e.message, 'error', 7000);
+        }
         finally { fileImp.value = ''; }
       };
       rd.readAsText(f);
