@@ -81,6 +81,9 @@
     // 固定シフト（手動固定＋④で指定した出勤系シフト）。旧データ互換も含む。
     const fx  = (s, d) => getFixedShiftAt(s.id, d) || undefined;
     const rq  = (s, d) => (AppState.requests[s.id] || {})[d];
+    // B1: 表と検査は🔒を先に読む（getFixedShiftAt・applyGroupSolution）。④の希望がある日を表で直して🔒にしたとき、
+    // 生成も🔒を先に読む（有給の目標・半休・休みが決まっている日）。④と🔒が食い違わないデータでは同じ値になる
+    const lockedAt = (s, d) => (AppState.fixedShifts[s.id] || {})[d] || rq(s, d) || '';
     const allowRoles = s => (s.allowedShifts || []).filter(k => roles.includes(k));
     // その日、役割を割り当て可能か（休/有/固定/研 でない）
     const free = (s, d) => {
@@ -104,8 +107,7 @@
       // 「前半の有給がまだ残っている」と誤認し、後半に有給を二重で入れてしまう。
       let reqPaid = 0;
       for (let d = 1; d <= days; d++) {
-        const r = (AppState.requests[s.id] || {})[d];
-        const locked = r || getFixedShiftAt(s.id, d) || '';
+        const locked = lockedAt(s, d) || getFixedShiftAt(s.id, d) || '';
         if (locked === '有') reqPaid++;
       }
       paidTarget[s.id] = Math.max(0, (parseInt(s.paidLeave) || 0) - reqPaid);
@@ -303,7 +305,7 @@
       // 時間帯は早番扱い（遅→半、遅→休→半 などの並びの判定に使う）。
       // ただし早番・遅番の割合を数えるときは除く（half フラグで見分ける）。
       {
-        const hv = (AppState.requests[s.id] || {})[d] || fx(s, d) || '';
+        const hv = lockedAt(s, d) || fx(s, d) || '';
         if (typeof isHalfWork === 'function' && isHalfWork(hv)) { o.c = 1; o.half = true; o.e.push('_'); return o; }
       }
       if (!free(s, d)) return o;
@@ -368,9 +370,8 @@
             // 公休系(休/公/☆)は maxOff に含まれるので加算しないが、有給・半休・
             // 季節休暇・慶弔休・引継は maxOff の外なので個別に差し引く必要がある。
             // （差し引かないと「1日多く働ける」と誤認し、結果として公休が不足する）
-            const r  = rq(s, d);
-            const fv = (AppState.fixedShifts[s.id] || {})[d];
-            const lockedOff = (r && isOff(r)) ? r : ((fv && isOff(fv)) ? fv : '');
+            const lv = lockedAt(s, d);
+            const lockedOff = (lv && isOff(lv)) ? lv : '';
             if (lockedOff) {
               if (lockedOff === '有') paidN++;
               else if (!isPublicOff(lockedOff)) otherOffN++;   // 半 / 季 / 慶 / 引 など
