@@ -155,9 +155,11 @@
         const need = getDayReq(reqs || {}, dailyReqs || {}, k, d);
         const terms = [];
         gStaff.forEach(s => {
+          // B6: 固定（担当外のシフトを🔒・④で指定したときも）は、担当の判定より先に数える。
+          // 担当外の固定を数えず別の人を入れ、定数オーバー・責任者の重複になっていた（画面の検査は数えている）
+          if (fx(s, d) === k) { terms.push('1c'); return; } // 固定で入る（定数）
           if (!(s.allowedShifts || []).includes(k)) return;
-          if (fx(s, d) === k) terms.push('1c'); // 固定で入る（定数）
-          else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k]));
+          if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k]));
         });
         const cconst = terms.filter(x => x === '1c').length;
         const vterms = terms.filter(x => x !== '1c');
@@ -197,9 +199,9 @@
         gStaff.forEach(s => {
           if (!(s.skills || []).includes(sk.name)) return;
           bandRoles.forEach(k => {
+            if (fx(s, d) === k) { c++; return; }   // B6: 担当外の固定も数える
             if (!(s.allowedShifts || []).includes(k)) return;
-            if (fx(s, d) === k) c++;
-            else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k]));
+            if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k]));
           });
         });
         const lhs = terms.length ? terms.join(' + ') : '';
@@ -216,7 +218,8 @@
       const w = ruleW('vicemanager-absent', P.viceManagerDailyAbsent || 9000);
       if (w > 0) for (let d = 1; d <= days; d++) {
         const terms = []; let c = 0;
-        vms.forEach(s => { allowRoles(s).forEach(k => { if (fx(s, d) === k) c++; else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k])); }); });
+        // B6: 担当外のシフトに固定した日も、出勤として数える
+        vms.forEach(s => { if (roles.includes(fx(s, d))) { c++; return; } allowRoles(s).forEach(k => { if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k])); }); });
         if (c === 0) { const va = `va_${d}`; addSlack(va, 1, w, 'vicemanager-absent'); cons.push(`vice_${d}: ${(terms.length ? terms.join(' + ') + ' + ' : '')}${va} >= 1`); }
       }
     }
@@ -253,9 +256,9 @@
           // 前日の夜勤（固定ぶんは定数、未確定ぶんは変数）
           const nTerms = [], nConst = [];
           nightRoles.forEach(k => {
+            if (fx(s, d) === k) { nConst.push(1); return; }   // B6: 担当外の固定も数える
             if (!(s.allowedShifts || []).includes(k)) return;
-            if (fx(s, d) === k) nConst.push(1);
-            else if (free(s, d)) nTerms.push(V(si, d, roleIdx[k]));
+            if (free(s, d)) nTerms.push(V(si, d, roleIdx[k]));
           });
           if (!nTerms.length && !nConst.length) continue;
           // 翌日の出勤
@@ -282,9 +285,9 @@
         if (!roles.includes(role)) continue;
         const terms = []; let c = 0;
         vms.forEach(s => {
+          if (fx(s, d) === role) { c++; return; }   // B6: 担当外の固定も数える
           if (!(s.allowedShifts || []).includes(role)) return;
-          if (fx(s, d) === role) c++;
-          else if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[role]));
+          if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[role]));
         });
         if (c === 0 && terms.length) {
           const v = `sp_${d}`; addSlack(v, 1, wSP, 'special-day');
