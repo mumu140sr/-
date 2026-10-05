@@ -2802,6 +2802,7 @@ const _RELAX_PAIN = {
 };
 
 function showRelaxModal() {
+  if (calcBusy()) { calcBusyToast(); return; }
   if (!AppState.staff.length || !AppState.settings.targetMonth) {
     toast('スタッフと対象年月を設定してください', 'error');
     return;
@@ -2820,6 +2821,7 @@ function showRelaxModal() {
 
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+  modal.classList.add('calc-lock-area');   // A2
 
   let lastGroup = null;
   const body = plans.length ? plans.map((pl, i) => {
@@ -4524,7 +4526,7 @@ function renderPartialIgnoreBanner() {
   host.innerHTML = `📅 <b>1日〜${cut - 1}日は確定済み</b>として、エラー集計から<b>${hidden}件</b>を除外しています`
     + `（もう直せないため）。<a href="#" id="pibClear" style="margin-left:6px">月全体を集計に戻す</a>`;
   const a = host.querySelector('#pibClear');
-  if (a) a.addEventListener('click', e => { e.preventDefault(); clearPartialIgnore(); });
+  if (a) a.addEventListener('click', e => { e.preventDefault(); if (calcBusy()) { calcBusyToast(); return; } clearPartialIgnore(); });
 }
 
 // ===== 必要人数のルール =====
@@ -5555,6 +5557,7 @@ function renderNextStep() {
   };
   const $go = document.getElementById('nsGo');
   if ($go) $go.addEventListener('click', () => {
+    if (calcBusy()) { calcBusyToast(); return; }
     if (st.act) {
       if (applyNextAct(st.act)) { autoSave(); refreshAllUI(); toast('直しました', 'success'); renderNextStep(); }
       return;
@@ -5579,6 +5582,7 @@ function renderNextStep() {
 // 初めて触る人でも、書いてあるとおりに［次へ］を押していけば同じ手順で作れる。
 // 途中で直すべきことがあれば、その場で直せるボタンを出す。
 function showGenerateWizard() {
+  if (calcBusy()) { calcBusyToast(); return; }
   if (!AppState.staff.length || !AppState.settings.targetMonth) {
     toast('スタッフと対象年月を設定してください', 'error'); return;
   }
@@ -5596,6 +5600,7 @@ function showGenerateWizard() {
   let stepSnap = snap();            // いまのページに入った時点
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9980;padding:16px';
+  modal.classList.add('calc-lock-area');   // A2: 計算中は入力を受け付けない
   const days = () => getDaysInMonth(AppState.settings.targetMonth);
   const WD = ['日', '月', '火', '水', '木', '金', '土'];
   const wdOf = (d) => { const [y, m] = String(AppState.settings.targetMonth).split('-').map(Number); return WD[new Date(y, m - 1, d).getDay()]; };

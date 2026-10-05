@@ -72,7 +72,7 @@ const MILP_CANCEL_MSG = 'cancel: 中止しました';
 // calcBegin で始め、終わったら必ず calcEnd を呼ぶ。計算中は下のボタンを押せなくする。
 let _calcOwner = null;
 const CALC_BUTTONS = ['btnGenerate', 'btnGenerateFast', 'btnWizard', 'btnRepair', 'btnPartialRegen',
-                      'btnSurplusPlan', 'btnRelax', 'btnResolveSurplus'];
+                      'btnSurplusPlan', 'btnRelax', 'btnResolveSurplus', 'nsGo'];
 function calcBusy() { return !!_calcOwner; }
 // ⏹ 中止ボタンがあるのは、生成・自動修正・🧪 希望の変え方を確かめる・余の解消のつじつま合わせ・④の見込みの計算中だけ。
 // ほかの計算では中止を案内しない（ボタンが無いのに「⏹ 中止を押して」と案内していた）。
@@ -97,6 +97,28 @@ function calcEnd() { _calcOwner = null; _calcButtons(false); }
 /** 鍵を持ったまま名前を替える（計算中 ⇄ 確認待ち）。鍵を持っていないときは何もしない */
 function calcRelabel(label) { if (_calcOwner) _calcOwner = label; }
 function calcOwner() { return _calcOwner; }
+// A2: 計算中は ①〜④（設定・必要人数・スタッフ・希望）と、計算を伴う画面の入力を受け付けない。
+// 計算が終わった答えが、計算中に変わったスタッフや希望の表に入ってしまうため。閉じる操作は通す。
+const CALC_INPUT_AREAS = '#panel-settings, #panel-roles, #panel-staff, #panel-calendar, .summary-req-input, .calc-lock-area';
+let _calcGuardToastAt = 0;
+function _calcInputGuard(e) {
+  if (!_calcOwner) return;
+  const t = e.target;
+  if (!t || !t.closest || !t.closest(CALC_INPUT_AREAS)) return;
+  if (e.type === 'keydown' && ['Tab', 'Shift', 'Escape'].includes(e.key)) return;
+  const b = t.closest('button');
+  if (b && /^(×|✕|閉じる)$/.test((b.textContent || '').trim())) return;
+  if (t.classList && t.classList.contains('calc-lock-area')) return;   // 暗幕そのもの（閉じる）
+  e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+  if (e.type !== 'dblclick') {
+    const now = Date.now();
+    if (now - _calcGuardToastAt > 1500) { _calcGuardToastAt = now; calcBusyToast(); }
+  }
+}
+if (typeof document !== 'undefined') {
+  ['mousedown', 'click', 'dblclick', 'keydown', 'input', 'change', 'paste', 'drop'].forEach(ev =>
+    document.addEventListener(ev, _calcInputGuard, true));
+}
 function _calcButtons(on) {
   if (typeof document === 'undefined') return;
   CALC_BUTTONS.forEach(id => {
