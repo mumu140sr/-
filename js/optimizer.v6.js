@@ -5479,78 +5479,173 @@ function analyzeLowerBound() {
     //    決まった出勤・希望休を守る）、「必要な人日 − 出せる人日」を不足の下限にする。分からない所は出られる側に
     //    倒して数える（区間の前の日は、決まった出勤でなければ休みとみなす）ので、実際より多くは出ない。
     //    重ならない区間の不足は足し合わせられるので、日ごとの不足と区間の不足の組み合わせで一番大きいものを使う。
+    //    v247: 同じ数え方を役割ごと（責任者など）にもする。役割ごとの不足は別々に数えられるので、役割ごとの下限の合計と、
+    //    全体の下限の大きいほうを使う（責任者を担当できる人が少なく、何日分かをまとめると足りない月で少なく出ていた）。
     {
       const CD = (typeof COMPLIANCE_CONS_DAYS !== 'undefined') ? COMPLIANCE_CONS_DAYS : 6;
       const MAXRUN = CD - 1;
-      // 人ごとの日の状態: -1 休み確定 / 1 出勤確定（🔒・出勤希望・研修・半休。capable はその日に人数に数えるか）/ 0 空き
+      // 人ごとの日の状態: -1 休み確定 / 1 出勤確定（🔒・出勤希望・研修・半休）/ 0 空き。fixK はその日に決まった役割
       const ppl = g.staff.map(s => {
-        const st = [0], cap = [0];
+        const st = [0], fixK = [''];
         for (let d = 1; d <= days; d++) {
           const x = staffDayState(s, d);
           const rq = (AppState.requests[s.id] || {})[d] || '';
           const half = typeof isHalfWork === 'function' && isHalfWork(rq);
-          if (half) { st[d] = 1; cap[d] = 0; }
-          else if (x === 'off') { st[d] = -1; cap[d] = 0; }
-          else if (x === 'training') { st[d] = 1; cap[d] = 0; }
-          else if (x.indexOf('fixed:') === 0) { st[d] = 1; cap[d] = shiftKeys.includes(x.slice(6)) ? 1 : 0; }
-          else { st[d] = 0; cap[d] = (s.allowedShifts || []).some(k => shiftKeys.includes(k)) ? 1 : 0; }
+          fixK[d] = '';
+          if (half) st[d] = 1;
+          else if (x === 'off') st[d] = -1;
+          else if (x === 'training') st[d] = 1;
+          else if (x.indexOf('fixed:') === 0) { st[d] = 1; fixK[d] = x.slice(6); }
+          else st[d] = 0;
         }
         const prev = Math.min(MAXRUN, (typeof getPrevMonthEnd === 'function') ? (getPrevMonthEnd(s).cons || 0) : 0);
-        return { s, st, cap, prev };
+        const allowed = (s.allowedShifts || []).filter(k => shiftKeys.includes(k));
+        return { s, st, fixK, prev, allowed };
       });
-      // 区間 [a,b] で、この人が6連勤を作らずに出られる最大の日数（人数に数える日だけ）。決まった出勤だけで
-      // 6連勤になる人は、この条件を外して数える（もともと⛔が避けられないため）
-      const maxWork = (P, a, b) => {
-        let r0 = 0;
-        if (a === 1) r0 = P.prev;
-        else { let d = a - 1; while (d >= 1 && P.st[d] === 1) { r0++; d--; } if (d === 0) r0 += P.prev; }
-        const NEG = -1e9;
-        let dp = new Array(MAXRUN + 1).fill(NEG);
-        if (r0 > MAXRUN) return null;
-        dp[r0] = 0;
-        for (let d = a; d <= b; d++) {
-          const nx = new Array(MAXRUN + 1).fill(NEG);
-          for (let r = 0; r <= MAXRUN; r++) {
-            if (dp[r] === NEG) continue;
-            if (P.st[d] !== 1) nx[0] = Math.max(nx[0], dp[r]);                       // 休む
-            if (P.st[d] !== -1 && r + 1 <= MAXRUN) nx[r + 1] = Math.max(nx[r + 1], dp[r] + P.cap[d]);   // 出る
-          }
-          dp = nx;
-        }
-        const m = Math.max(...dp);
-        return m === NEG ? null : m;
+      // その人がその日、keys のどれかとして人数に数えられるか（1/0）
+      const capOf = (P, d, keys) => {
+        if (P.st[d] === -1) return 0;
+        if (P.fixK[d]) return keys.includes(P.fixK[d]) ? 1 : 0;
+        if (P.st[d] === 1) return 0;          // 研修・半休・役割の無い固定
+        return P.allowed.some(k => keys.includes(k)) ? 1 : 0;
       };
-      const free = (P, a, b) => { let n = 0; for (let d = a; d <= b; d++) if (P.st[d] !== -1) n += P.cap[d]; return n; };
-      const best = [0], from = [null];
-      for (let t = 1; t <= days; t++) {
-        best[t] = best[t - 1] + singleShort[t]; from[t] = null;
-        let needSum = 0;
-        for (let a = t; a >= 1 && t - a < 31; a--) {
-          needSum += needOf[a];
-          if (t - a + 1 < 2) continue;
-          let capSum = 0;
-          ppl.forEach(P => { const m = maxWork(P, a, t); capSum += (m == null ? free(P, a, t) : m); });
-          const sh = needSum - capSum;
-          if (sh > 0 && best[a - 1] + sh > best[t]) { best[t] = best[a - 1] + sh; from[t] = { a, need: needSum, have: capSum, sh }; }
+      // W[a][b] = 区間 [a,b] で、全員が6連勤を作らずに keys として出られる最大の人日。区間の始まりごとに、日を進めながら数える。
+      // 決まった出勤だけで6連勤になる人は、その区間の条件を外して数える（もともと⛔が避けられないため）
+      const capTable = (keys) => {
+        const W = [];
+        for (let a = 1; a <= days; a++) W[a] = new Int32Array(days + 1);
+        const NEG = -1000000;
+        const dp = new Int32Array(MAXRUN + 1), nx = new Int32Array(MAXRUN + 1);
+        ppl.forEach(P => {
+          const c = new Int32Array(days + 1); let anyC = false;
+          for (let d = 1; d <= days; d++) { c[d] = capOf(P, d, keys); if (c[d]) anyC = true; }
+          if (!anyC) return;                    // この役割には一度も数えられない人
+          for (let a = 1; a <= days; a++) {
+            let r0 = 0;
+            if (a === 1) r0 = P.prev;
+            else { let d = a - 1; while (d >= 1 && P.st[d] === 1) { r0++; d--; } if (d === 0) r0 += P.prev; }
+            let loose = r0 > MAXRUN, freeN = 0;
+            dp.fill(NEG); if (!loose) dp[r0] = 0;
+            const Wa = W[a];
+            for (let b = a; b <= days; b++) {
+              const cb = c[b]; freeN += (P.st[b] !== -1 ? cb : 0);
+              if (!loose) {
+                nx.fill(NEG);
+                let mx = NEG;
+                const canOff = P.st[b] !== 1, canOn = P.st[b] !== -1;
+                for (let r = 0; r <= MAXRUN; r++) {
+                  const v = dp[r]; if (v === NEG) continue;
+                  if (canOff && v > nx[0]) nx[0] = v;
+                  if (canOn && r < MAXRUN && v + cb > nx[r + 1]) nx[r + 1] = v + cb;
+                }
+                for (let r = 0; r <= MAXRUN; r++) { dp[r] = nx[r]; if (nx[r] > mx) mx = nx[r]; }
+                if (mx === NEG) loose = true; else { Wa[b] += mx; continue; }
+              }
+              Wa[b] += freeN;
+            }
+          }
+        });
+        return W;
+      };
+      // 重ならない区間の不足を足して一番大きくなる組み合わせ。single[d] はその日だけの不足（ほかの数え方の日ごとの値）
+      const bestOf = (need, W, single) => {
+        const best = [0], from = [null];
+        for (let t = 1; t <= days; t++) {
+          best[t] = best[t - 1] + (single ? single[t] : 0); from[t] = null;
+          let needSum = 0;
+          for (let a = t; a >= 1; a--) {
+            needSum += need[a];
+            const sh = needSum - W[a][t];
+            if (sh > 0 && best[a - 1] + sh > best[t]) { best[t] = best[a - 1] + sh; from[t] = { a, need: needSum, have: W[a][t], sh }; }
+          }
         }
-      }
-      if (best[days] > dayShort) {
-        // どの区間で数えたかを、理由として出す
         const segs = [];
         for (let t = days; t >= 1;) { const f = from[t]; if (f) { segs.push(Object.assign({ b: t }, f)); t = f.a - 1; } else t--; }
-        segs.reverse().forEach(f => {
-          let singles = 0; for (let d = f.a; d <= f.b; d++) singles += singleShort[d];
-          if (f.sh <= singles) return;
-          const who = ppl.filter(P => { const m = maxWork(P, f.a, f.b); return m != null && m < free(P, f.a, f.b); })
-            .map(P => P.s.name + (P.prev && f.a <= MAXRUN ? `（前月末から${P.prev}連勤）` : ''));
-          res.reasons.push({
-            kind: 'comp-days', from: f.a, to: f.b, need: f.need, have: f.have,
-            text: `${pfx}${f.a}日〜${f.b}日: 合計 ${f.need}人日 必要ですが、6連勤（コンプラ違反）を作らずに出せるのは最大 ${f.have}人日 です`
-                + `（不足 ${f.sh}人。日ごとに数えると ${singles}人）。`
-                + (who.length ? `連勤のため出られない日がある人: ${who.slice(0, 8).join('・')}${who.length > 8 ? ` ほか${who.length - 8}人` : ''}` : ''),
+        return { total: best[days], segs: segs.reverse() };
+      };
+      // 全体
+      const allW = capTable(shiftKeys);
+      const allB = bestOf(needOf, allW, singleShort);
+      // 役割ごと。役割を1つずつ数えると、早責と遅責を同じ2人しか担当できない月などで足りて見えるので、役割の組み合わせ
+      // （1人は1日に1つの役割）ごとに数え、重ならない組み合わせの不足を足して一番大きくなる分け方を選ぶ
+      const roleKeys = shiftKeys.filter(k => { for (let d = 1; d <= days; d++) if (getDayReq(g.reqs, g.dailyReqs || {}, k, d) > 0) return true; return false; });
+      const RK = roleKeys.slice(0, 10);   // 分け方は 2^10 まで（それより多い役割は数えない）
+      const subB = {};
+      // 数える組み合わせは、役割1つと2つまで（全部の役割をまとめたものは「全体」で数えている。3つ以上は時間がかかるため）
+      const masks = [];
+      for (let i = 0; i < RK.length; i++) { masks.push(1 << i); for (let j = i + 1; j < RK.length; j++) masks.push((1 << i) | (1 << j)); }
+      for (const mask of masks) {
+        const keys = RK.filter((_, i) => mask & (1 << i));
+        const needK = [0]; let any = false;
+        for (let d = 1; d <= days; d++) { needK[d] = keys.reduce((a, k) => a + getDayReq(g.reqs, g.dailyReqs || {}, k, d), 0); if (needK[d] > 0) any = true; }
+        if (!any) continue;
+        const r = bestOf(needK, capTable(keys), null);
+        if (r.total > 0) subB[mask] = { keys, r };
+      }
+      // 役割の分け方: part[m] = 役割の集まり m を重ならない組み合わせに分けたときの不足の合計の最大
+      const part = [0], pick = [0];
+      for (let m = 1; m < (1 << RK.length); m++) {
+        part[m] = 0; pick[m] = 0;
+        for (let sub = m; sub > 0; sub = (sub - 1) & m) {
+          const v = (subB[sub] ? subB[sub].r.total : 0) + part[m ^ sub];
+          if (v > part[m]) { part[m] = v; pick[m] = sub; }
+        }
+      }
+      const roleB = [];
+      let roleSum = part[(1 << RK.length) - 1] || 0;
+      for (let m = (1 << RK.length) - 1; m > 0 && pick[m];) { const sub = pick[m]; if (subB[sub]) roleB.push(subB[sub]); m ^= sub; }
+      const useRole = roleSum > allB.total;
+      const newShort = Math.max(allB.total, roleSum);
+      if (newShort > dayShort) {
+        // 区間の中で、連勤のために、出られる日より少なくしか出られない人
+        const whoOf = (keys, a, b) => ppl.filter(P => {
+          let freeN = 0; for (let d = a; d <= b; d++) freeN += capOf(P, d, keys);
+          let r0 = 0;
+          if (a === 1) r0 = P.prev;
+          else { let d = a - 1; while (d >= 1 && P.st[d] === 1) { r0++; d--; } if (d === 0) r0 += P.prev; }
+          if (r0 > MAXRUN) return false;
+          const NEG = -1e9; let dp = new Array(MAXRUN + 1).fill(NEG); dp[r0] = 0;
+          for (let d = a; d <= b; d++) {
+            const nx = new Array(MAXRUN + 1).fill(NEG), c = capOf(P, d, keys);
+            for (let r = 0; r <= MAXRUN; r++) {
+              if (dp[r] === NEG) continue;
+              if (P.st[d] !== 1) nx[0] = Math.max(nx[0], dp[r]);
+              if (P.st[d] !== -1 && r + 1 <= MAXRUN) nx[r + 1] = Math.max(nx[r + 1], dp[r] + c);
+            }
+            dp = nx;
+          }
+          const m = Math.max(...dp);
+          return m > -1e8 && m < freeN;
+        }).map(P => P.s.name + (P.prev && a <= MAXRUN ? `（前月末から${P.prev}連勤）` : ''));
+        if (!useRole) {
+          allB.segs.forEach(f => {
+            let singles = 0; for (let d = f.a; d <= f.b; d++) singles += singleShort[d];
+            if (f.sh <= singles) return;
+            const who = whoOf(shiftKeys, f.a, f.b);
+            res.reasons.push({
+              kind: 'comp-days', from: f.a, to: f.b, need: f.need, have: f.have,
+              text: `${pfx}${f.a}日〜${f.b}日: 合計 ${f.need}人日 必要ですが、6連勤（コンプラ違反）を作らずに出せるのは最大 ${f.have}人日 です`
+                  + `（不足 ${f.sh}人。日ごとに数えると ${singles}人）。`
+                  + (who.length ? `連勤のため出られない日がある人: ${who.slice(0, 8).join('・')}${who.length > 8 ? ` ほか${who.length - 8}人` : ''}` : ''),
+            });
           });
-        });
-        dayShort = best[days];
+        } else {
+          roleB.forEach(({ keys, r }) => {
+            const k = keys.join('・');
+            r.segs.forEach(f => {
+              // 日ごとの「役割の不足」（①）で同じ日に出している分より多いときだけ出す
+              const one = f.a === f.b;
+              if (one && keys.length === 1 && res.reasons.some(x => x.kind === 'role' && x.day === f.a && x.role === k)) return;
+              res.reasons.push({
+                kind: 'comp-days', from: f.a, to: f.b, role: k, need: f.need, have: f.have,
+                text: `${pfx}${one ? f.a + '日' : f.a + '日〜' + f.b + '日'}の「${k}」: 合計 ${f.need}人日 必要ですが、${keys.length > 1 ? 'これらを' : '「' + k + '」を'}担当できる人が`
+                    + `6連勤（コンプラ違反）を作らずに出せるのは最大 ${f.have}人日 です（不足 ${f.sh}人）`
+                    + (() => { const w = whoOf(keys, f.a, f.b); return w.length ? `。連勤のため出られない日がある人: ${w.slice(0, 8).join('・')}${w.length > 8 ? ` ほか${w.length - 8}人` : ''}` : ''; })(),
+              });
+            });
+          });
+        }
+        dayShort = newShort;
       }
     }
     // 日別の不足と月全体の不足は重なりうるので、大きいほうを下限として採用する
