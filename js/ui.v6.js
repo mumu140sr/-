@@ -2027,6 +2027,8 @@ function _snapshotShiftState() {
   return {
     shifts: JSON.parse(JSON.stringify(AppState.shifts || {})),
     fixed:  JSON.parse(JSON.stringify(AppState.fixedShifts || {})),
+    // A1: 「◯日以前は数えない」も一緒に控える（途中から作り直すを ↩ しても残り、前半の🚨・⛔が隠れていた）
+    cut:    parseInt(AppState.settings.ignoreVioBeforeDay) || 0,
   };
 }
 
@@ -2227,6 +2229,7 @@ function resetShiftHistory() {
 function _applyShiftState(st) {
   AppState.shifts      = JSON.parse(JSON.stringify(st.shifts));
   AppState.fixedShifts = JSON.parse(JSON.stringify(st.fixed));
+  if ('cut' in st) AppState.settings.ignoreVioBeforeDay = st.cut;   // 古い控えに無ければ触らない
   _afterHistoryApply(false);
 }
 
@@ -4472,10 +4475,11 @@ function showPartialRegenModal() {
       // 中止・失敗したときは、前半の固定と「◯日以前は数えない」を元に戻す（固定だけ残っていた）
       const bkFixed = JSON.parse(JSON.stringify(AppState.fixedShifts || {}));
       const bkCut = AppState.settings.ignoreVioBeforeDay || 0;
-      opts = Object.assign({}, opts, { onAbort: () => {
+      // A1: 作り直す前の表・🔒・「◯日以前は数えない」を1つの控えにし、生成のあと ↩ 1回で戻れるようにする
+      const preGen = genHistorySnapshot();
+      opts = Object.assign({}, opts, { preGen, onAbort: () => {
         AppState.fixedShifts = bkFixed;
         AppState.settings.ignoreVioBeforeDay = bkCut;
-        if (typeof discardLastShiftHistory === 'function') discardLastShiftHistory();
         AppState.violations = checkViolations(AppState.shifts);
         saveToStorage(); refreshAllUI();
         toast('作り直しをやめたので、前半の🔒固定と「◯日以前は数えない」を元に戻しました', 'info', 6000);
@@ -4501,8 +4505,8 @@ function showPartialRegenModal() {
 }
 
 /** 1日〜(cut-1)日を、いまの表のとおりに固定する。戻り値=固定したマス数 */
+// 履歴には積まない（作り直しの生成のあとに、作り直す前の控えを1つだけ積む。A1）
 function applyPartialLock(cut) {
-  if (typeof recordShiftHistory === 'function') recordShiftHistory();
   let n = 0;
   (AppState.staff || []).forEach(s => {
     AppState.fixedShifts[s.id] = AppState.fixedShifts[s.id] || {};

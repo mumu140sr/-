@@ -1107,7 +1107,9 @@ function setupGeneratePanel() {
       }
       const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + msg; };
       // 生成する前の表を控える。生成のあと元に戻すの履歴に積み、↩ で戻れるようにする（v243）
-      const preGen = (typeof genHistorySnapshot === 'function') ? genHistorySnapshot() : null;
+      // 途中から作り直すときは、🔒をかける前に撮った控えを使う（↩ 1回で作り直す前に戻る。A1）
+      const preGen = opts.preGen !== undefined ? opts.preGen
+                   : (typeof genHistorySnapshot === 'function') ? genHistorySnapshot() : null;
       const res = await optimizeScheduleMILP(prog, { deepMode: !!opts.deepMode, fastMode: !!opts.fastMode, newTiering: !!opts.newTiering });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       $bar.style.width = '100%';
