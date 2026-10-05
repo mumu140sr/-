@@ -76,8 +76,6 @@ function refreshAllUI() {
       .filter(d => AppState.specialDays[d] === 'delivery').join(',');
   }
   if (typeof renderReqRules === 'function') renderReqRules();
-  if (typeof renderNextStep === 'function') renderNextStep();
-
   const rp = document.getElementById('ruleLevelsPanel');
   if (rp && rp.style.display !== 'none') renderRuleLevels();
 
@@ -88,9 +86,55 @@ function refreshAllUI() {
   renderShiftLegend();
   renderResultTable();
   renderEventList();
+  syncGenerateResult();   // A6: renderNextStep もこの中で呼ぶ
 
   const $numCand = document.getElementById('numCandidates');
   if ($numCand) $numCand.value = AppState.settings.numCandidates || 3;
+}
+
+// ===== ⑤ 生成の結果の文が、いまの表のものか（A6） =====
+// 「完了！違反N件」「✅確認済み」などの文と📊レポートは生成の完了でしか書かれないので、
+// 表を手で直した・↩・月の切り替え・取り込みのあとも古いまま残っていた。
+// 書いたときの表の鍵を data-gen-key に控え、いまの鍵と違えば隠し、同じ表に戻れば（↪）また出す。
+// 鍵に違反の一覧は入れない（⑥ルールチェックなどで数え直しても、表が同じなら消さない）。
+function genResultKey() {
+  const st = AppState.settings || {};
+  return JSON.stringify([st.targetMonth || '', _fpClean(AppState.shifts || {}),
+    parseInt(st.ignoreVioBeforeDay) || 0, _fpClean(st.ruleLevels || {})]);
+}
+function _genKeyStale(el, key) { return !!(el && el.dataset.genKey && el.dataset.genKey !== key); }
+function syncGenerateResult() {
+  if (typeof document === 'undefined') return;
+  const key = genResultKey();
+  const toggle = (el) => {
+    if (!el || !el.dataset.genKey) return;
+    if (_genKeyStale(el, key)) {
+      if (el.style.display !== 'none') { el.style.display = 'none'; el.dataset.genHid = '1'; }
+    } else if (el.dataset.genHid === '1') { el.style.display = ''; delete el.dataset.genHid; }
+  };
+  const $rep = document.getElementById('reportCard');
+  const $area = document.getElementById('progressArea');
+  const $note = document.getElementById('optimalityNotice');
+  if ($rep && !_genKeyStale($rep, key) && $rep.dataset.genHid === '1') { $rep.style.display = 'block'; delete $rep.dataset.genHid; }
+  else toggle($rep);
+  if ($area && (typeof calcBusy !== 'function' || !calcBusy())) toggle($area);
+  toggle($note);
+  // 表が変わっていても「⏳ 妥協なしで再計算」のボタンだけは残す（利用者の判断）
+  let $stub = document.getElementById('genStaleDeep');
+  const deep = $note && $note.querySelector('#btnDeepOptimize');
+  const needStub = !!(deep && _genKeyStale($note, key));
+  if (needStub && !$stub && $rep && $rep.parentNode) {
+    $stub = document.createElement('div');
+    $stub.id = 'genStaleDeep'; $stub.className = 'card';
+    $stub.innerHTML = '<div class="hint">表が生成したときから変わっているので、生成の結果の文を隠しています。</div>'
+      + '<button class="btn btn-primary" style="margin-top:8px">⏳ 妥協なしで再計算（早期停止を無効・最大約11分）</button>';
+    $stub.querySelector('button').addEventListener('click', () => {
+      const b = document.getElementById('btnDeepOptimize'); if (b) b.click();
+    });
+    $rep.parentNode.insertBefore($stub, $rep);
+  }
+  if ($stub) $stub.style.display = needStub ? '' : 'none';
+  if (typeof renderNextStep === 'function') renderNextStep();
 }
 
 // ===== タブ切り替え =====
@@ -108,6 +152,7 @@ function setupTabs() {
       if (target === 'staff')    renderStaffTable();
       if (target === 'calendar') { renderShiftChips(); renderCalendar(); }
       if (target === 'result')   { renderShiftLegend(); renderResultTable(); }
+      if (target === 'generate') syncGenerateResult();
     });
   });
 }
@@ -181,6 +226,7 @@ function setupSettingsPanel() {
       AppState.violations = []; AppState.generated = false;
       AppState.genBase = null; AppState.editLog = [];   // 生成直後の控えと記録も前の月のもの
       if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 前の月の表へ戻せないように
+      AppState._needsRegen = false;   // A6: 前の月の「作り直してください」を残さない
     }
     refreshAllUI();
     autoSave();
@@ -1645,7 +1691,11 @@ function renderShiftLegend() {
   el.innerHTML = html;
 }
 
+// 表を描き直すたびに、⑤の生成の結果の文がいまの表のものかを見直す（手直し・入れ替え・自動修正など。A6）
 function renderResultTable() {
+  try { _renderResultTableInner(); } finally { syncGenerateResult(); }
+}
+function _renderResultTableInner() {
   try { renderPartialIgnoreBanner(); } catch (_) {}
   const table = document.getElementById('resultTable');
   if (!table) return;
@@ -2157,6 +2207,9 @@ function recordDeltaHistory(list) {
   updateHistoryButtons();
 }
 function _afterHistoryApply(touchedStaff) {
+  try { _afterHistoryApplyInner(touchedStaff); } finally { syncGenerateResult(); }
+}
+function _afterHistoryApplyInner(touchedStaff) {
   AppState.violations  = checkViolations(AppState.shifts);
   renderResultTable();
   if (touchedStaff && typeof renderStaffTable === 'function') renderStaffTable();

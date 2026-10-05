@@ -150,6 +150,7 @@ function setupHeaderActions() {
     if (loadFromStorage()) {
       // 読み込む前の表へ「元に戻す」で戻れてしまうと、読み込んだデータが古い表で上書きされる
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
+      AppState._needsRegen = false;   // 読み込む前のデータの「作り直してください」を残さない（A6）
       refreshAllUI();
       toast('設定を読込みました', 'success');
     } else if (typeof _loadUnreadable !== 'undefined' && _loadUnreadable) {
@@ -221,6 +222,7 @@ function setupHeaderActions() {
       resetAll();
       addSampleStaff();
       if (typeof resetShiftHistory === 'function') resetShiftHistory();   // リセット前の表には戻さない
+      AppState._needsRegen = false;   // A6
       refreshAllUI();
       toast('リセットしました', 'info');
     }
@@ -946,6 +948,7 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
   if (old) old.remove();
   const box = document.createElement('div');
   box.id = 'optimalityNotice';
+  if (typeof genResultKey === 'function') box.dataset.genKey = genResultKey();   // A6
   box.style.cssText = 'padding:12px 14px;border-radius:10px;margin-bottom:12px;font-size:13px;line-height:1.7';
 
   if (wasFast) {
@@ -1134,6 +1137,10 @@ function setupGeneratePanel() {
       // 生成した直後の表を控える（途中から作り直したときも撮り直す）。
       // このあと手などで変えたマスを「生成から変えたマス」として数える。
       if (typeof genBaseTake === 'function') genBaseTake();
+      // A6: この文と結果は、いまの表のもの（表が変わったら syncGenerateResult が隠す）
+      const _gk = (typeof genResultKey === 'function') ? genResultKey() : '';
+      $area.dataset.genKey = _gk; delete $area.dataset.genHid;
+      delete $report.dataset.genHid;
       $report.style.display = 'block';
       try {
         renderReport({ success: res.success, score: res.score, violations: res.violations,
@@ -1434,6 +1441,9 @@ function showSurplusPopup() {
 
 function renderReport(result) {
   const $c = document.getElementById('reportContent');
+  // A6: レポートはいまの表で書いたもの
+  const _rc = document.getElementById('reportCard');
+  if (_rc && typeof genResultKey === 'function') _rc.dataset.genKey = genResultKey();
 
   // ── AI 診断セクション ──────────────────────────────────────
   const diagItems = (typeof runAIDiagnosis === 'function') ? runAIDiagnosis() : [];
