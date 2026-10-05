@@ -1113,6 +1113,7 @@ function setupGeneratePanel() {
           candidateSummary: `数理最適化で生成 — 違反${res.violations.length}件（${elapsed}秒）` });
       } catch (rErr) { console.error('[generate] レポート表示でエラー（表は表示します）:', rErr); }
       showOptimalityNotice(cutOff, res.violations.length, elapsed, !!opts.deepMode, res.usedGap === true, !!opts.fastMode, res.tierLog, info);
+      if (typeof showMustStatus === 'function') showMustStatus(res, opts);
       renderResultTable();
       setTimeout(() => {
         const rt = document.querySelector('.tab[data-tab="result"]'); if (rt) rt.click();
@@ -2010,4 +2011,76 @@ function escapeCSV(v) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
   return s;
+}
+
+/**
+ * 生成のあと、残った🚨を種類ごとに3つに分けて出す（v247）。生成の計算・選び方は変えない（worker が返す段ごとの記録 tierStat を読むだけ）。
+ *   ✅ その種類を解いた段が、最後まで解けた（strict で最適）。いまの決まり（大事な順）を守ったままでは、これ以上減らせない。
+ *      段の最適は、前の段（人員・公休・連勤など）の結果を守ったうえでの最適で、全体の最適ではない。
+ *   ⏳ 時間切れ・近くだけの探し直し・前の答えのまま・差を許す設定（1分生成・21人以上）で止まった。まだ減らせるかもしれない。
+ *   ❔ 計算の上では0件（またはその種類を計算に入れていない）なのに、画面の検査では残っている。計算が気づいていない🚨で、
+ *      手で直せる場合がある。数え方のずれを見つけるため、どの種類で起きたかを genBase.unseen に残す（保存・書き出しに入る）。
+ * 21人以上の部門・1分生成は「差2%で止める」設定なので、件数が0でない段は最適と言えず、⏳ になる。
+ */
+function classifyRemainingMust(violations, tierStat) {
+  const isMust = (t) => getRuleLevel(t) === 'must' || (typeof MUST_TYPES_OPT !== 'undefined' && MUST_TYPES_OPT.has(t));
+  const cnt = {};
+  (violations || []).forEach(v => {
+    const t = (v.type === 'consecutive' && v.compliance) ? 'comp-cons' : v.type;
+    if (t !== 'comp-cons' && !isMust(v.type)) return;
+    cnt[t] = (cnt[t] || 0) + 1;
+  });
+  const out = [];
+  Object.keys(cnt).forEach(t => {
+    const ts = (tierStat || []).filter(x => (x.types || []).indexOf(t) >= 0);
+    let kind;
+    if (!tierStat || !tierStat.length) kind = 'wait';
+    else if (!ts.length || ts.every(x => x.got === 0)) kind = 'unseen';
+    else if (ts.filter(x => x.got !== 0).every(x => x.proven)) kind = 'proven';
+    else kind = 'wait';
+    out.push({ type: t, n: cnt[t], kind, label: t === 'comp-cons' ? '6連勤以上（コンプラ違反）'
+      : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[t]) || t) });
+  });
+  return out;
+}
+function showMustStatus(res, opts) {
+  const $report = document.getElementById('reportCard');
+  if (!$report) return;
+  const old = document.getElementById('mustStatusBox'); if (old) old.remove();
+  const list = classifyRemainingMust(res.violations, res.tierStat);
+  if (!list.length) return;
+  const unseen = list.filter(x => x.kind === 'unseen');
+  // 数え方のずれを見つけるための記録（生成直後の控えに残す）
+  if (AppState.genBase) {
+    AppState.genBase.mustStatus = list.map(x => ({ type: x.type, n: x.n, kind: x.kind }));
+    if (unseen.length) AppState.genBase.unseen = unseen.map(x => ({ type: x.type, n: x.n }));
+    if (unseen.length) console.info('[計算が気づいていない🚨]', AppState.genBase.unseen);
+  }
+  const row = (x) => `<li>${escapeHtml(x.label)} <b>${x.n}件</b></li>`;
+  const sec = (kind, head, note, color) => {
+    const xs = list.filter(x => x.kind === kind);
+    if (!xs.length) return '';
+    return `<div style="margin-top:6px;padding:8px 10px;border-radius:8px;border:1px solid color-mix(in srgb, ${color} 40%, transparent);
+              background:color-mix(in srgb, ${color} 8%, var(--surface))">
+              <b>${head}</b><ul style="margin:4px 0 2px 1.2em;padding:0">${xs.map(row).join('')}</ul>
+              <div class="hint">${note}</div></div>`;
+  };
+  const wasFast = !!(opts && opts.fastMode), pickedFast = res.safetyPick === 'fast';
+  const waitNote = (wasFast || pickedFast)
+    ? '時間切れや「ほぼ最良で止める」設定のため、まだ減らせるかもしれません。<b>🎯 じっくり生成</b>で減ることがあります。'
+    : '時間切れのため、まだ減らせるかもしれません。<b>⏳ 妥協なしで再計算</b>で減ることがあります。';
+  const box = document.createElement('div');
+  box.id = 'mustStatusBox';
+  box.style.cssText = 'margin-bottom:12px;font-size:13px;line-height:1.7';
+  box.innerHTML = `<div style="font-weight:700">残った🚨の見分け（生成した直後の表について）</div>`
+    + sec('proven', '✅ これ以上減らせないと確かめました',
+        'いまの決まり（大事な順）を守ったままでは、これ以上減らせません。減らすには、設定や希望を見直します（手で直しても、ほかの🚨が増えます）。',
+        'var(--success, #2e7d32)')
+    + sec('wait', '⏳ まだ減らせるかもしれません', waitNote, 'var(--accent)')
+    + sec('unseen', '❔ 計算が気づいていない🚨です',
+        '生成の計算では0件と数えていますが、画面の検査では残っています。<b>手で直せる場合があります。</b>',
+        'var(--danger)');
+  const notice = document.getElementById('optimalityNotice');
+  if (notice && notice.parentNode === $report) notice.insertAdjacentElement('afterend', box);
+  else $report.insertBefore(box, $report.firstChild);
 }

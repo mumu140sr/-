@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=247', 'optimizer.js?v=247', 'milp-core.js?v=247');
+self.importScripts('data.js?v=248', 'optimizer.js?v=248', 'milp-core.js?v=248');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=247'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=248'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -89,6 +89,9 @@ async function runMilp(msg, emit) {
     // 段階最適化を使うか（既定ON。設定でOFFにすると従来どおり一括で解く）
     const tiered = (incoming.settings || {}).tieredOptimize !== false;
     const tierLog = [];      // 各段で達成した件数（画面に出す）
+    // 段ごとに、その段を最後まで解けたか（proven）と計算の上の件数（got）。生成のあとの画面で、残った🚨を
+    // 「これ以上減らせないと確かめた／まだ減らせるかもしれない／計算が気づいていない」に分けるのに使う（計算には使わない）
+    const tierStat = [];
     let adjustRejected = '';  // 微調整の答えを検査で捨てたとき、その理由（増えた🚨の種類）
     for (const g of groups) {
       post(20 + Math.floor((gi / groups.length) * 60),
@@ -383,6 +386,7 @@ async function runMilp(msg, emit) {
               (t.types || []).forEach(ty => protect.push(ty));
             }
             if (!okC || !provenOf(sC, t.types)) tierProven = false;
+            tierStat.push({ g: g.key, label: t.label, types: t.types, proven: !!(okC && provenOf(sC, t.types)), got: okC ? MILP.slackTotal(sC, m.parts, t.types) : null });
             if (msg.trace) emit({ type: 'trace', ti, label: t.label, cap,
               sec: Math.round((Date.now() - t0) / 1000), status: String(sC && sC.Status), okStrict: okC,
               prev: null, got: okC ? MILP.slackTotal(sC, m.parts, t.types) : null });
@@ -470,6 +474,7 @@ async function runMilp(msg, emit) {
           // ただし後ろの段は打ち切らない（別の段なら解けることがあるため）。
           if (!okStrict) {
             tierProven = false;
+            tierStat.push({ g: g.key, label: t.label, types: t.types, proven: false, got: sol ? MILP.slackTotal(sol, m.parts, t.types) : null });
             if (sol) {
               sol = tighten(sol, t.types);
               // 今の解での件数を上限として引き継ぎ、後の段で悪化させないようにする
@@ -495,6 +500,7 @@ async function runMilp(msg, emit) {
           sol = tighten(sol, t.types);
           // この段で達成した件数を上限として固定（以後の段で悪化させない）
           const got = MILP.slackTotal(sol, m.parts, t.types);
+          tierStat.push({ g: g.key, label: t.label, types: t.types, proven: !!(provenHere && taken), got });
           bIdx[ti] = budgets.length;
           budgets.push({ names: MILP.slackNames(m.parts, t.types), max: got });
           (t.types || []).forEach(ty => protect.push(ty));
@@ -635,7 +641,7 @@ async function runMilp(msg, emit) {
     // allOptimal: 全部の段を確かめられたか（案Bで戻した段があれば false）。solverProven: ソルバーの時間切れ・
     // 解ききれない段が無かったか（案Bで戻したことは含めない）。画面は2つを分けて文を出す。
     return { type: 'done', shifts, violations, allOptimal: allOptimal && screenRejected === 0, solverProven: allOptimal, screenRejected,
-             deep, fast, usedGap, tiered, tierLog, variant, variantLabel: VARLABEL, adjustRejected };
+             deep, fast, usedGap, tiered, tierLog, tierStat, variant, variantLabel: VARLABEL, adjustRejected };
   }
 }
 

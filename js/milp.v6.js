@@ -130,7 +130,7 @@ function milpTrial(payload, variant, timeOverride) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=247'); }
+    try { worker = new Worker('js/milp.worker.js?v=248'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     const untrack = _milpTrack(worker, () => { clearTimeout(timeout); reject(new Error(MILP_CANCEL_MSG)); });
     const timeout = setTimeout(() => { untrack(); try { worker.terminate(); } catch (_) {} reject(new Error('タイムアウト')); }, 600000);
@@ -226,7 +226,7 @@ function _milpOnce(onProgress, opts, variant) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=247'); }
+    try { worker = new Worker('js/milp.worker.js?v=248'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     // 1部門あたり最大10分。部門数ぶん待てるよう十分な余裕を持たせる（誤タイムアウト防止）
     const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（30分）')); }, 1800000);
@@ -258,7 +258,7 @@ function _milpOnce(onProgress, opts, variant) {
                   // 🎯 じっくり生成（newTiering）のときだけ付く: 時間切れか・案Bで戻したか・案Dでどちらを採ったか
                   solverProven: m.solverProven, screenRejected: m.screenRejected || 0, safetyPick: m.safetyPick || null,
                   deepSolverProven: m.deepSolverProven, deepScreenRejected: m.deepScreenRejected || 0,
-                  tiered: !!m.tiered, tierLog: m.tierLog || [] });
+                  tiered: !!m.tiered, tierLog: m.tierLog || [], tierStat: m.tierStat || null });
         return;
       }
       if (m.type === 'error') { cleanup(); worker.terminate(); reject(new Error(m.message || '数理最適化エラー')); return; }
