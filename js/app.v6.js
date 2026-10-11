@@ -859,9 +859,9 @@ function showFeasibilityModal() {
     const c = colors[d.level] || colors.info;
     const detail = escapeHtml(d.detail || '').replace(/\n/g, '<br>');
     return `<div style="background:${c.bg};border-left:4px solid ${c.border};padding:10px 12px;margin:8px 0;border-radius:6px">
-      <div style="font-weight:600;color:${c.title};margin-bottom:4px">${escapeHtml(d.title)}</div>
+      <div style="font-weight:600;color:${c.title};margin-bottom:4px">${uiIcon(/⛔/.test(d.title || '') ? 'crit' : ({ error: 'must', warning: 'soft', ok: 'ok' })[d.level] || 'info')} ${escapeHtml(stripMarks(d.title))}</div>
       <div style="color:${c.body};font-size:13px;line-height:1.6">${detail}</div>
-      ${d.suggestion ? `<div style="margin-top:6px;color:var(--link);font-size:13px">${uiIcon('info')} ${escapeHtml(d.suggestion)}</div>` : ''}
+      ${d.suggestion ? `<div style="margin-top:6px;color:var(--link);font-size:13px">${uiIcon('info')} ${escapeHtml(stripMarks(d.suggestion))}</div>` : ''}
     </div>`;
   }).join('') || '<p>データが不足しています。</p>';
 
@@ -1496,9 +1496,9 @@ function renderReport(result) {
     const detailLines = escapeHtml(d.detail).replace(/\n/g, '<br>');
     diagHtml += `
       <div class="diag-item" style="background:${c.bg};border-left:4px solid ${c.border}">
-        <div class="diag-title" style="color:${c.title}">${/^⛔/.test(d.title || '') ? uiIcon('crit') + ' ' : diagIcons[d.level] + ' '}${escapeHtml(dropLeadMark(d.title))}</div>
+        <div class="diag-title" style="color:${c.title}">${/⛔/.test(d.title || '') ? uiIcon('crit') + ' ' : diagIcons[d.level] + ' '}${escapeHtml(stripMarks(d.title))}</div>
         <div class="diag-detail" style="color:${c.body}">${detailLines}</div>
-        ${d.suggestion ? `<div class="diag-suggestion">${uiIcon('info')} ${escapeHtml(d.suggestion)}</div>` : ''}
+        ${d.suggestion ? `<div class="diag-suggestion">${uiIcon('info')} ${escapeHtml(stripMarks(d.suggestion))}</div>` : ''}
       </div>`;
   });
   diagHtml += '</div>';

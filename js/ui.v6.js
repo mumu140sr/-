@@ -66,8 +66,9 @@ function levelWords(s) {
     .replace(/(🚨|🔴)\s*/gu, '絶対 ').replace(/🟡\s*/gu, 'できれば ');
 }
 function scoreSummaryText(r) { return levelWords(scoreSummary(r)); }
-// 文の先頭の印（⛔🚨⚠️✅ℹ️🟡🔴💡）を外す。見出しの前には段階のアイコンを別に付ける
-function dropLeadMark(s) { return String(s == null ? '' : s).replace(/^\s*(⛔|🚨|⚠️?|✅|ℹ️?|🟡|🔴|💡)\s*/u, ''); }
+// optimizer.v6.js の見出しの絵文字（⛔🚨⚠️✅🔍🔴🟡 など。部門名のあとに入るものも）を外す。
+// 見出しの前には段階のアイコンを別に付ける。矢印と ☆（希望休の記号）は残す
+function stripMarks(s) { return String(s == null ? '' : s).replace(/(?![\u2190-\u21FF\u2605\u2606])\p{Extended_Pictographic}\uFE0F?\s*/gu, ''); }
 /** マスにある違反の段階（いちばん重いもの）: crit=6連勤以上 / must=絶対 / soft=できれば */
 function vioLevelOf(list) {
   if (!list || !list.length) return '';
@@ -2985,7 +2986,7 @@ function showRelaxModal() {
     return head + `<div class="relax-item" style="border:1px solid ${dud ? 'var(--border)' : good ? 'color-mix(in srgb, var(--success) 45%, transparent)' : 'var(--border)'};border-radius:10px;padding:14px 16px;margin:10px 0;background:var(--surface-2);${dud ? 'opacity:.62' : ''}">
       <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px">
         <span style="font-weight:700;color:var(--link)">案${i + 1}</span>
-        <span style="font-weight:700;flex:1;min-width:200px">${escapeHtml(pl.title)}</span>
+        <span style="font-weight:700;flex:1;min-width:200px">${escapeHtml(levelWords(pl.title))}</span>
         ${dud ? `<span style="font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:var(--text-soft);background:var(--surface)">効果なし</span>` : ''}
         ${good ? `<span style="font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:var(--ok);background:var(--ok-bg)">−${pl.measured.gain}件</span>` : ''}
         ${lighter ? `<span style="font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:var(--ok);background:var(--ok-bg)">軽くなる</span>` : ''}
@@ -3048,7 +3049,7 @@ function showRelaxModal() {
       autoSave();
       refreshAllUI();
       $done.style.display = 'block';
-      $done.innerHTML = `${uiIcon('ok')} <b>設定を変更しました：${escapeHtml(pl.title)}</b><br>` +
+      $done.innerHTML = `${uiIcon('ok')} <b>設定を変更しました：${escapeHtml(levelWords(pl.title))}</b><br>` +
         (changes.length
           ? changes.slice(0, 12).map(escapeHtml).join('<br>') + (changes.length > 12 ? `<br>…ほか ${changes.length - 12}件` : '')
           : '（変更対象はありませんでした）') +
@@ -5661,7 +5662,7 @@ function computeNextStep() {
   const best = plans.find(p => p.measured && p.measured.gain > 0 && !p.manual);
   if (best) {
     return S(`エラーが ${vios.length}件 残っています`,
-             `いちばん効くのはこれです：\n「${best.title}」\n→ いまの表で ${best.measured.gain}件 消えます。`,
+             `いちばん効くのはこれです：\n「${levelWords(best.title)}」\n→ いまの表で ${best.measured.gain}件 消えます。`,
              { btn: 'この設定にする', run: 'relax', plan: best,
                skip: '残りは手で直す', skipRun: 'result',
                why: '効き目は、実際に計算して確かめた数字です。' });
@@ -5976,7 +5977,7 @@ function showGenerateWizard() {
           ${floor > 0
             ? `${uiIcon('soft')} <b>どう並べても ${floor}件 のエラーは残ります</b>（証明済み）。それ以外は並べ方しだいで消せます。`
             : `${uiIcon('ok')} <b>「どう並べても残るエラー」はありません。</b>並び方のルール（連休の長さ・時間帯の切替など）によるエラーは出ることがあります。`}
-          ${best ? `<br>${uiIcon('info')} 前回の表では「${escapeHtml(best.title)}」で ${best.measured.gain}件 減りました。` : ''}
+          ${best ? `<br>${uiIcon('info')} 前回の表では「${escapeHtml(levelWords(best.title))}」で ${best.measured.gain}件 減りました。` : ''}
         </div>
         ${allChecked ? '' : '<p class="hint" style="margin-top:8px;color:var(--danger)">4つ全部にチェックを入れると、生成できるようになります。</p>'}`,
       sub: [{ label: '速い生成（1分）で様子を見る', run: () => { modal.remove(); const b = document.getElementById('btnGenerateFast'); if (b) b.click(); } }],

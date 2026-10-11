@@ -856,6 +856,7 @@ td.cell-fixed .shift-cell::before,
     position: fixed;
     top: var(--header-h); left: 0; bottom: 0;
     height: auto;
+    align-self: stretch;   /* flex-start のままだと、固定した板の高さが中身の分だけになる */
     z-index: 40;
     background: var(--surface);
     box-shadow: var(--shadow);
