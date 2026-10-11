@@ -359,12 +359,6 @@
       </div>
     </section>
 
-    <div class="card wz-card">
-      <div class="grow"><b>はじめての方は</b>
-        <div class="hint">ルール → 必要人数 → 希望の噛み合わせ → 余の使い道 → 生成 の順に、1つずつ確認しながら進みます。</div></div>
-      <button id="btnWizard" class="btn btn-outline"><svg class="ic" aria-hidden="true"><use href="#i-wizard"/></svg>順番に確認して生成する</button>
-    </div>
-
     <div class="card" id="progressArea" style="display:none">
       <div class="progress-info">
         <span id="progressText">準備中...</span>
@@ -373,12 +367,10 @@
         <div class="progress-bar" id="progressBar"></div>
       </div>
     </div>
-    <div class="card" id="reportCard" style="display:none">
-      <h3>AI診断レポート</h3>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <button id="btnAIExplain" class="btn btn-primary"><svg class="ic" aria-hidden="true"><use href="#i-ai"/></svg>AIに違反を解説してもらう</button>
-      </div>
-      <div id="reportContent"></div>
+    <div class="card wz-card">
+      <div class="grow"><b>はじめての方は</b>
+        <div class="hint">ルール → 必要人数 → 希望の噛み合わせ → 余の使い道 → 生成 の順に、1つずつ確認しながら進みます。</div></div>
+      <button id="btnWizard" class="btn btn-outline"><svg class="ic" aria-hidden="true"><use href="#i-wizard"/></svg>順番に確認して生成する</button>
     </div>
 
     <!-- 詳しい機能（ふだんは閉じる。中のボタンは今のまま） -->
@@ -406,6 +398,14 @@
         </div>
       </div>
     </details>
+    <div class="card" id="reportCard" style="display:none">
+      <h3>AI診断レポート</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button id="btnAIExplain" class="btn btn-primary"><svg class="ic" aria-hidden="true"><use href="#i-ai"/></svg>AIに違反を解説してもらう</button>
+      </div>
+      <div id="reportContent"></div>
+    </div>
+
     <!-- 前へ・次へ：左メニューのボタンを押すのと同じ（js/ui-shell.v6.js） -->
     <div class="step-nav"><button type="button" class="btn step-prev" data-go="calendar"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>希望休入力</button><button type="button" class="btn step-next" data-go="result">次へ：シフト表<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button></div>
   </section>
