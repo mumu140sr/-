@@ -35,10 +35,10 @@ function buildAIExplanation() {
 
   let summary;
   if (compliance > 0) {
-    summary = `⛔ コンプラ違反（6連勤以上）が${compliance}件あります。このままでは使えません。必ず直してください。`
+    summary = `コンプラ違反（6連勤以上）が${compliance}件あります。このままでは使えません。必ず直してください。`
             + (critical ? `ほかに致命的な違反が${critical}件、` : '') + (warning ? `警告が${warning}件あります。` : '');
   } else if (total === 0) {
-    summary = '🎉 違反は0件です。すべてのルールをクリアした完璧なシフトが生成されました！';
+    summary = '違反は0件です。すべてのルールをクリアした完璧なシフトが生成されました！';
   } else if (critical === 0 && warning === 0) {
     summary = `情報レベルの注意点が${info}件ありますが、致命的な問題はありません。実運用上は問題なく使えるシフトです。`;
   } else if (critical === 0) {
@@ -72,11 +72,11 @@ function buildAIExplanation() {
     body += `\n• 早遅希望の偏りで、特定の時間帯にスタッフが集中している`;
     body += `\n• 責任者・総務をできるスタッフが少ない（副店長・チーフ・該当役割の人数）`;
     body += `\n\n【解決のヒント】`;
-    body += `\n✅ 各スタッフの「公休数」を見直す（多すぎる人がいないか）`;
-    body += `\n✅ 役職マスタで該当シフトの「必要人数」を実情に合わせる`;
-    body += `\n✅ 同じ日に休みが集中していないか希望休カレンダーを確認`;
-    body += `\n✅ 該当日のシフト表を見て、勤務可能なスタッフを手動で割り当てる`;
-    sections.push({ title: '🚨 必要人数の不足', body, severity: 'critical' });
+    body += `\n・各スタッフの「公休数」を見直す（多すぎる人がいないか）`;
+    body += `\n・役職マスタで該当シフトの「必要人数」を実情に合わせる`;
+    body += `\n・同じ日に休みが集中していないか希望休カレンダーを確認`;
+    body += `\n・該当日のシフト表を見て、勤務可能なスタッフを手動で割り当てる`;
+    sections.push({ title: '必要人数の不足', body, severity: 'critical' });
   }
 
   // === 2. 連勤超過 ===
@@ -88,10 +88,10 @@ function buildAIExplanation() {
       let bodyC = `6連勤以上はコンプライアンス違反です（5連勤まで可）。${comps.length}件あります。`;
       bodyC += `\n• ${lines.join('\n• ')}`;
       bodyC += `\n\n【解決のヒント】`;
-      bodyC += `\n✅ 連勤の途中に休みを入れる（ほかの人と休みを入れ替える）`;
-      bodyC += `\n✅ スタッフ管理タブの「前月末連勤数」が正しいか確かめる（前月から続く連勤も数えます）`;
-      bodyC += `\n⛔ 連勤上限を6日以上に上げても違反は消えません`;
-      sections.push({ title: '⛔ コンプラ違反（6連勤以上）', body: bodyC, severity: 'critical' });
+      bodyC += `\n・連勤の途中に休みを入れる（ほかの人と休みを入れ替える）`;
+      bodyC += `\n・スタッフ管理タブの「前月末連勤数」が正しいか確かめる（前月から続く連勤も数えます）`;
+      bodyC += `\n・連勤上限を6日以上に上げても違反は消えません`;
+      sections.push({ title: '6連勤以上（コンプラ違反）', body: bodyC, severity: 'critical', level: 'crit' });
     }
   }
   if (byType['consecutive'] && byType['consecutive'].some(v => !isComp(v))) {
@@ -112,10 +112,10 @@ function buildAIExplanation() {
     body += `\n• 前月末「連勤数」「最終シフト」の設定が現実と合っていない`;
     body += `\n• 月をまたぐ連勤が考慮されていない`;
     body += `\n\n【解決のヒント】`;
-    body += `\n✅ 連勤超過のスタッフの公休を、連勤を分断する位置に手動で移動`;
-    body += `\n✅ スタッフ管理タブで「前月末連勤数」を正しく入力`;
-    body += `\n✅ 全体設定の「連勤上限」を実情に合わせる（4日→5日など。6連勤以上はコンプラ違反なので5日まで）`;
-    sections.push({ title: '🚨 連勤上限の超過', body, severity: 'critical' });
+    body += `\n・連勤超過のスタッフの公休を、連勤を分断する位置に手動で移動`;
+    body += `\n・スタッフ管理タブで「前月末連勤数」を正しく入力`;
+    body += `\n・全体設定の「連勤上限」を実情に合わせる（4日→5日など。6連勤以上はコンプラ違反なので5日まで）`;
+    sections.push({ title: '連勤上限の超過', body, severity: 'critical' });
   }
 
   // === 3. 遅→早禁止 / 遅→研 ===
@@ -133,10 +133,10 @@ function buildAIExplanation() {
     body += `\nこれは退勤から出勤までのインターバル不足になり、健康・労務面で問題があります。`;
     body += `\n• ${detail}`;
     body += `\n\n【解決のヒント】`;
-    body += `\n✅ 該当スタッフの翌日のシフトを別の遅番系に変更する`;
-    body += `\n✅ または遅番を別の日に動かす`;
-    body += `\n✅ 月初の場合は前月末のシフトを「遅」に正しく設定`;
-    sections.push({ title: '🚨 遅→早(研)のインターバル不足', body, severity: 'critical' });
+    body += `\n・該当スタッフの翌日のシフトを別の遅番系に変更する`;
+    body += `\n・または遅番を別の日に動かす`;
+    body += `\n・月初の場合は前月末のシフトを「遅」に正しく設定`;
+    sections.push({ title: '遅→早(研)のインターバル不足', body, severity: 'critical' });
   }
 
   // === 4. 役割タイプ違反 ===
@@ -156,9 +156,9 @@ function buildAIExplanation() {
     body += `\n• 必要人数を満たすためにやむを得ず代替シフトに入った`;
     body += `\n• 役割タイプの設定ミス`;
     body += `\n\n【解決のヒント】`;
-    body += `\n✅ スタッフ管理で役割タイプを確認`;
-    body += `\n✅ 該当スタッフを別のシフトと交換`;
-    sections.push({ title: '🚨 役割タイプの不一致', body, severity: 'critical' });
+    body += `\n・スタッフ管理で役割タイプを確認`;
+    body += `\n・該当スタッフを別のシフトと交換`;
+    sections.push({ title: '役割タイプの不一致', body, severity: 'critical' });
   }
 
   // === 5. 連勤中の時間帯切替 ===
@@ -176,9 +176,9 @@ function buildAIExplanation() {
     body += `\n体内リズムや業務の連続性の観点で望ましくありません。`;
     body += `\n• ${detail}`;
     body += `\n\n【解決のヒント】`;
-    body += `\n✅ 連勤中は同じ時間帯（早系または遅系）で揃える`;
-    body += `\n✅ 切替前後の日を別のスタッフと交換`;
-    sections.push({ title: '⚠️ 連勤内の時間帯切替', body, severity: 'warning' });
+    body += `\n・連勤中は同じ時間帯（早系または遅系）で揃える`;
+    body += `\n・切替前後の日を別のスタッフと交換`;
+    sections.push({ title: '連勤内の時間帯切替', body, severity: 'warning' });
   }
 
   // === 6. 単発休（遅→休→早） ===
@@ -196,9 +196,9 @@ function buildAIExplanation() {
     body += `\n特に「遅→休→早」は実質的に休んだ気がしない悪パターンです。`;
     body += `\n• ${detail}`;
     body += `\n\n【解決のヒント】`;
-    body += `\n✅ 休みを連休にまとめる（前後の勤務日と交換）`;
-    body += `\n✅ 休みの前後で時間帯を揃える`;
-    sections.push({ title: '⚠️ 単発休でリズム悪', body, severity: 'warning' });
+    body += `\n・休みを連休にまとめる（前後の勤務日と交換）`;
+    body += `\n・休みの前後で時間帯を揃える`;
+    sections.push({ title: '単発休でリズム悪', body, severity: 'warning' });
   }
 
   // === 7. 早遅希望違反 ===
@@ -215,9 +215,9 @@ function buildAIExplanation() {
     let body = `スタッフの早遅希望（「早可」「遅可」）に反する割当があります。`;
     body += `\n• ${detail}`;
     body += `\n\n【解決のヒント】`;
-    body += `\n✅ スタッフ管理で希望の見直し（本当に不可なのか）`;
-    body += `\n✅ 別のスタッフと該当日を交換`;
-    sections.push({ title: '⚠️ 早遅希望と不一致', body, severity: 'warning' });
+    body += `\n・スタッフ管理で希望の見直し（本当に不可なのか）`;
+    body += `\n・別のスタッフと該当日を交換`;
+    sections.push({ title: '早遅希望と不一致', body, severity: 'warning' });
   }
 
   // === 8. 公休数不足/超過 ===
@@ -242,10 +242,10 @@ function buildAIExplanation() {
       body += `【公休余剰】${over.length}名（人員余剰のため自然と休みが増えています）\n• ${detail}\n\n`;
     }
     body += `【解決のヒント】`;
-    body += `\n✅ 公休不足: そのスタッフの勤務日を別の日と交換して休みを作る`;
-    body += `\n✅ 公休余剰: 必要人数を増やすか、スタッフ人数を減らすかを検討`;
+    body += `\n・公休不足: そのスタッフの勤務日を別の日と交換して休みを作る`;
+    body += `\n・公休余剰: 必要人数を増やすか、スタッフ人数を減らすかを検討`;
     sections.push({
-      title: shortage.length > 0 ? '🚨 公休数の問題' : 'ℹ️ 公休数の余剰',
+      title: shortage.length > 0 ? '公休数の問題' : '公休数の余剰',
       body,
       severity: shortage.length > 0 ? 'critical' : 'info',
     });
@@ -254,24 +254,24 @@ function buildAIExplanation() {
   // === 全体的な改善提案 ===
   const suggestions = [];
   if (critical > 0) {
-    suggestions.push('🥇 まず「🚨」の付いた違反から1つずつ修正しましょう。シフト表でセルをドラッグ&ドロップまたはクリックで編集できます。');
+    suggestions.push('まず致命的な違反から1つずつ修正しましょう。シフト表でセルをドラッグ&ドロップまたはクリックで編集できます。');
   }
   if (byType['understaff']) {
-    suggestions.push('💡 必要人数不足が多い場合、役職マスタで「必要人数」を実情に合わせて減らすか、スタッフを増員してください。');
+    suggestions.push('必要人数不足が多い場合、役職マスタで「必要人数」を実情に合わせて減らすか、スタッフを増員してください。');
   }
   if (compliance) {
-    suggestions.push('⛔ 6連勤以上（コンプラ違反）は、連勤の途中に休みを入れて必ず直してください。連勤上限を上げても消えません。');
+    suggestions.push('6連勤以上（コンプラ違反）は、連勤の途中に休みを入れて必ず直してください。連勤上限を上げても消えません。');
   } else if (byType['consecutive']) {
-    suggestions.push('💡 連勤超過が多い場合、「公休数」をスタッフごとに増やすか、「連勤上限」を緩める検討を（5日まで。6連勤以上はコンプラ違反）。');
+    suggestions.push('連勤超過が多い場合、「公休数」をスタッフごとに増やすか、「連勤上限」を緩める検討を（5日まで。6連勤以上はコンプラ違反）。');
   }
   if (byType['off-count']) {
-    suggestions.push('💡 公休不足が出るのは、必要人数の合計に対してスタッフ数が足りていない兆候です。');
+    suggestions.push('公休不足が出るのは、必要人数の合計に対してスタッフ数が足りていない兆候です。');
   }
   if (total === 0) {
-    suggestions.push('✨ 完璧な状態です！必要であれば、シフト表で更に細かい調整（特定の人を特定の日に配置するなど）を行ってください。');
+    suggestions.push('完璧な状態です！必要であれば、シフト表で更に細かい調整（特定の人を特定の日に配置するなど）を行ってください。');
   }
   if (compliance === 0 && critical === 0 && warning > 0) {
-    suggestions.push('⚙️ 設定タブで「単発休みにペナルティ」をON/OFFしたり、各スタッフの「早遅バランス」を見直すと警告が減らせます。');
+    suggestions.push('設定タブで「単発休みにペナルティ」をON/OFFしたり、各スタッフの「早遅バランス」を見直すと警告が減らせます。');
   }
 
   return { summary, sections, suggestions, total, compliance, critical, warning, info };
@@ -293,30 +293,30 @@ function showAIExplanationModal() {
   modal.innerHTML = `
     <div class="modal-content" style="max-width:760px;max-height:85vh;overflow-y:auto">
       <div class="modal-header">
-        <h3 style="margin:0">🤖 AI診断：シフトの違反解説</h3>
+        <h3 style="margin:0">AI診断：シフトの違反解説</h3>
         <button class="modal-close" id="aiExplainClose">✕</button>
       </div>
       <div class="modal-body" style="padding:16px">
         <div class="ai-summary">
           <div class="ai-stats">
-            ${expl.compliance ? `<span class="ai-stat ai-stat-critical">⛔ コンプラ違反 ${expl.compliance}件</span>` : ''}
-            <span class="ai-stat ai-stat-critical">🚨 致命的 ${expl.critical}件</span>
-            <span class="ai-stat ai-stat-warning">⚠️ 警告 ${expl.warning}件</span>
-            <span class="ai-stat ai-stat-info">ℹ️ 情報 ${expl.info}件</span>
+            ${expl.compliance ? `<span class="ai-stat ai-stat-critical">${uiIcon('crit')} 6連勤以上 ${expl.compliance}件</span>` : ''}
+            <span class="ai-stat ai-stat-critical">${uiIcon('must')} 致命的 ${expl.critical}件</span>
+            <span class="ai-stat ai-stat-warning">${uiIcon('soft')} 警告 ${expl.warning}件</span>
+            <span class="ai-stat ai-stat-info">${uiIcon('info')} 情報 ${expl.info}件</span>
           </div>
           <p class="ai-summary-text">${escapeHTML(expl.summary)}</p>
         </div>
 
-        ${expl.sections.length === 0 ? '' : '<h4 style="margin-top:20px">📋 詳細分析</h4>'}
+        ${expl.sections.length === 0 ? '' : '<h4 style="margin-top:20px">詳細分析</h4>'}
         ${expl.sections.map(sec => `
           <div class="ai-section ai-section-${sec.severity}">
-            <div class="ai-section-title">${escapeHTML(sec.title)}</div>
+            <div class="ai-section-title">${uiIcon(sec.level || (sec.severity === 'critical' ? 'must' : sec.severity === 'warning' ? 'soft' : 'info'))} ${escapeHTML(sec.title)}</div>
             <div class="ai-section-body">${escapeHTML(sec.body).replace(/\n/g, '<br>')}</div>
           </div>
         `).join('')}
 
         ${expl.suggestions.length === 0 ? '' : `
-          <h4 style="margin-top:20px">💡 全体的なアドバイス</h4>
+          <h4 style="margin-top:20px">全体的なアドバイス</h4>
           <ul class="ai-suggestions">
             ${expl.suggestions.map(s => `<li>${escapeHTML(s)}</li>`).join('')}
           </ul>

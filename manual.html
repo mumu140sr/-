@@ -19,7 +19,7 @@
 <body>
 <div class="manual-bar">
   <a class="back" href="index.html">← アプリに戻る</a>
-  <button id="btnPrint" type="button">🖨 印刷 / PDF保存</button>
+  <button id="btnPrint" type="button">印刷 / PDF保存</button>
 </div>
 <style>
 :root{
@@ -253,7 +253,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
 
         <div class="note warn">
           <b>いちばん大事な注意</b>
-          <p>データはブラウザに保存されているだけです。<b>ブラウザの履歴・サイトデータを消すと全部消えます</b>。また <span class="btnref">🗑 リセット</span> ボタンは全データを消すボタンです。押す前に必ず確認してください。作ったシフト表は毎月 <b>Excelに出力して保存</b>しておけば、消えても内容は残ります。</p>
+          <p>データはブラウザに保存されているだけです。<b>ブラウザの履歴・サイトデータを消すと全部消えます</b>。また <span class="btnref">リセット</span> ボタンは全データを消すボタンです。押す前に必ず確認してください。作ったシフト表は毎月 <b>Excelに出力して保存</b>しておけば、消えても内容は残ります。</p>
         </div>
 
         <h3>画面の構成</h3>
@@ -262,8 +262,8 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
 
         <h3>共通の操作</h3>
         <ul>
-          <li>入力すると<b>自動で保存</b>されます。念のため区切りで <span class="btnref">💾 保存</span> を押すと確実です。</li>
-          <li>画面が暗いほうが見やすい人は右上の <span class="btnref">🌙</span> で明暗を切り替えられます。</li>
+          <li>入力すると<b>自動で保存</b>されます。念のため区切りで「データ」メニューの <span class="btnref">保存</span> を押すと確実です。</li>
+          <li>画面が暗いほうが見やすい人は右上の「データ」メニューの <span class="btnref">ダーク表示に切り替え</span> で明暗を切り替えられます。</li>
           <li>表の見出しの<b>境目をドラッグすると列の幅</b>を変えられます。文字が見切れるときに使ってください。</li>
         </ul>
       </section>
@@ -275,14 +275,14 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
 
         <div class="card">
           <ol class="check">
-            <li><span class="n">1</span><span class="t"><b>①基本設定</b>で「対象年月」を来月に変える<small>前の月の表・希望休・🔒固定などが残っていると、<b>「📅 ◯月に切り替えます」</b>の画面が出ます。<b>「📤 先に書き出してから片付ける」</b>を選ぶと、前の月のデータをファイルに残してから片付けます（保存を取り消した場合は片付けません）。ちょうど翌月に進めたときは<b>「前月末の連勤日数・最後のシフトを引き継ぐ」</b>にチェックを入れたままにしてください。月をまたぐ連勤や休みのつながりが正しく計算されます。「やめる」を選ぶと月も変わりません。</small></span></li>
+            <li><span class="n">1</span><span class="t"><b>①基本設定</b>で「対象年月」を来月に変える<small>前の月の表・希望休・固定などが残っていると、<b>「◯月に切り替えます」</b>の画面が出ます。<b>「先に書き出してから片付ける」</b>を選ぶと、前の月のデータをファイルに残してから片付けます（保存を取り消した場合は片付けません）。ちょうど翌月に進めたときは<b>「前月末の連勤日数・最後のシフトを引き継ぐ」</b>にチェックを入れたままにしてください。月をまたぐ連勤や休みのつながりが正しく計算されます。「やめる」を選ぶと月も変わりません。</small></span></li>
             <li><span class="n">2</span><span class="t"><b>③スタッフ管理</b>で人の増減・公休数・有給を確認する<small>入退社があった月だけ。無ければ飛ばして構いません。</small></span></li>
             <li><span class="n">3</span><span class="t"><b>④希望休入力</b>に、集めた希望休をすべて入力する<small>ここが唯一の手入力作業です。ここを丁寧にやれば後が楽になります。</small></span></li>
-            <li><span class="n">4</span><span class="t"><b>⑤自動生成</b>の <span class="btnref">🔍 実現性チェック</span> を先に押す<small>「そもそも人手が足りているか」を生成前に判定します。<b>🚨が出たら、生成しても必ずエラーが残ります。</b>先に公休数や必要人数を見直してください。</small></span></li>
-            <li><span class="n">5</span><span class="t"><span class="btnref">🚀 シフト自動生成を実行</span> を押して待つ<small>ふつうは数秒〜数十秒。計算中も他の画面は触れます。1部門あたり最大10分で打ち切ります。</small></span></li>
-            <li><span class="n">6</span><span class="t">エラーが残ったら <span class="btnref">🩹 エラー解消プラン</span> を押す<small>「どの設定をいくつ動かせばエラーが消えるか」を影響の小さい順に並べてくれます。上の案から1つずつ試し、そのつど生成し直してください。</small></span></li>
+            <li><span class="n">4</span><span class="t"><b>⑤自動生成</b>の <span class="btnref">実現性チェック</span> を先に押す<small>「そもそも人手が足りているか」を生成前に判定します。<b>「必ずエラーが出ます」と出たら、生成しても必ずエラーが残ります。</b>先に公休数や必要人数を見直してください。</small></span></li>
+            <li><span class="n">5</span><span class="t"><span class="btnref">シフト自動生成を実行</span> を押して待つ<small>ふつうは数秒〜数十秒。計算中も他の画面は触れます。1部門あたり最大10分で打ち切ります。</small></span></li>
+            <li><span class="n">6</span><span class="t">エラーが残ったら <span class="btnref">エラー解消プラン</span> を押す<small>「どの設定をいくつ動かせばエラーが消えるか」を影響の小さい順に並べてくれます。上の案から1つずつ試し、そのつど生成し直してください。</small></span></li>
             <li><span class="n">7</span><span class="t"><b>⑥シフト表</b>で結果を確認し、必要なら手で微調整する<small>細かい入れ替えは手作業のほうが早いこともあります。</small></span></li>
-            <li><span class="n">8</span><span class="t"><span class="btnref">📥 Excelエクスポート</span> で出力して保存・配布する<small>これで完了です。ファイルは必ず保管してください。</small></span></li>
+            <li><span class="n">8</span><span class="t"><span class="btnref">Excelエクスポート</span> で出力して保存・配布する<small>これで完了です。ファイルは必ず保管してください。</small></span></li>
           </ol>
         </div>
 
@@ -300,8 +300,8 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <div class="tw"><table>
           <thead><tr><th class="nw">項目</th><th>意味と決め方</th></tr></thead>
           <tbody>
-            <tr><td class="nw"><b>対象年月</b></td><td>作りたい月。<b>毎月ここだけ変えます。</b>前の月の表・希望休・🔒固定・特別日・行事・日ごとの必要人数・日ごとのスキル指定が残っていれば、片付けるか聞かれます（スタッフ・設定・ルールの強弱・必要人数のルール・スキルの種類と目標人数は残ります）。ちょうど翌月に進めたときだけ、前月末の連勤日数・最後のシフトも引き継げます。計算中は月を変えられません。</td></tr>
-            <tr><td class="nw"><b>連勤上限</b></td><td>何日続けて出勤してよいか。<b>4</b>にすると5連勤以上が禁止になります。<br><b>⛔ 6連勤以上は、この設定に関係なくコンプライアンス違反</b>として扱います（5連勤まで可）。上限を6以上にしても6連勤以上は違反と表示され、自動生成でも避けます。前月末からの連勤と半休の日も出勤に数えます。</td></tr>
+            <tr><td class="nw"><b>対象年月</b></td><td>作りたい月。<b>毎月ここだけ変えます。</b>前の月の表・希望休・固定・特別日・行事・日ごとの必要人数・日ごとのスキル指定が残っていれば、片付けるか聞かれます（スタッフ・設定・ルールの強弱・必要人数のルール・スキルの種類と目標人数は残ります）。ちょうど翌月に進めたときだけ、前月末の連勤日数・最後のシフトも引き継げます。計算中は月を変えられません。</td></tr>
+            <tr><td class="nw"><b>連勤上限</b></td><td>何日続けて出勤してよいか。<b>4</b>にすると5連勤以上が禁止になります。<br><b>6連勤以上は、この設定に関係なくコンプライアンス違反</b>として扱います（5連勤まで可）。上限を6以上にしても6連勤以上は違反と表示され、自動生成でも避けます。前月末からの連勤と半休の日も出勤に数えます。</td></tr>
             <tr><td class="nw"><b>遅→早の禁止</b></td><td>遅番の翌日に早番を入れないルール。ONを推奨します。</td></tr>
             <tr><td class="nw"><b>単発休みのペナルティ</b></td><td>出勤に挟まれた1日だけの休みを避けます。ONを推奨します。</td></tr>
             <tr><td class="nw"><b>連休の目安回数</b></td><td>全員に月何回2連休を入れたいか。<b>0＝指定なし</b>。個人設定があればそちらが優先されます。</td></tr>
@@ -310,12 +310,12 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         </table></div>
 
         <h3>ルールごとの強弱（重要）</h3>
-        <p>この画面の <span class="btnref">🎚️ ルールごとの強弱</span> を開くと、ルールを1つずつ調整できます。<b>エラーが多すぎて困るときの調整弁</b>です。</p>
+        <p>この画面の <span class="btnref">ルールごとの強弱</span> を開くと、ルールを1つずつ調整できます。<b>エラーが多すぎて困るときの調整弁</b>です。</p>
         <div class="tw"><table>
           <thead><tr><th class="nw">設定</th><th>意味</th><th>使いどころ</th></tr></thead>
           <tbody>
-            <tr><td class="nw"><span class="sev r">🔴 絶対</span></td><td>必ず守る</td><td>労務上ゆずれないルール</td></tr>
-            <tr><td class="nw"><span class="sev y">🟡 できれば</span></td><td>なるべく守る。守れなくても表は完成する</td><td>理想だが妥協できるルール</td></tr>
+            <tr><td class="nw"><span class="sev r">絶対</span></td><td>必ず守る</td><td>労務上ゆずれないルール</td></tr>
+            <tr><td class="nw"><span class="sev y">できれば</span></td><td>なるべく守る。守れなくても表は完成する</td><td>理想だが妥協できるルール</td></tr>
             <tr><td class="nw"><b>OFF</b></td><td>そのルールを一切見ない</td><td>自店では不要なルール</td></tr>
           </tbody>
         </table></div>
@@ -355,7 +355,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <p>アプリはこの人数を<b>ちょうどに合わせようとします</b>。人が余った場合は、多く入れるのではなく休み（<span class="k">余</span>＝余剰）に回します。</p>
 
         <h3>日別必要人数</h3>
-        <p><span class="btnref">📅 日別必要人数</span> を開くと、<b>特定の日だけ人数を変える</b>ことができます。土日や繁忙日に使ってください。空欄の日は上の通常人数が使われます。</p>
+        <p><span class="btnref">日別必要人数</span> を開くと、<b>特定の日だけ人数を変える</b>ことができます。土日や繁忙日に使ってください。空欄の日は上の通常人数が使われます。</p>
         <div class="note warn">
           <b>ここは効きすぎます</b>
           <p>土日だけ増やしたつもりでも、月10日ぶん×2人＝20人日の追加になります。<b>人員不足エラーの最大の原因</b>がここです。エラーが多いときは真っ先に見直してください。</p>
@@ -404,7 +404,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <p>割合はきれいな整数にならないため、<b>「許容◯日までのずれは許す」</b>（①のルール設定・初期値2日）でどこまで厳しく見るかを決めます。厳しくするほどエラーが増え、計算も長くなります。<b>迷ったら2日のままで問題ありません。</b></p>
 
         <h3>前月末の取り込み</h3>
-        <p>前月のシフト表が画面に出ている状態で <span class="btnref">🔁 前月末の連勤・シフトを取り込む</span> を押すと、全員ぶんの「前月末連勤日数」と「前月末シフト」が自動入力されます。手入力より確実なのでこちらを使ってください。</p>
+        <p>前月のシフト表が画面に出ている状態で <span class="btnref">前月末の連勤・シフトを取り込む</span> を押すと、全員ぶんの「前月末連勤日数」と「前月末シフト」が自動入力されます。手入力より確実なのでこちらを使ってください。</p>
         <div class="note warn">
           <b>ここを空欄にすると月初がおかしくなります</b>
           <p>前月末の情報が無いと、アプリは「前月末は休みだった」と判断します。実際には連勤中だった人が月初にさらに出勤してしまい、<b>連勤オーバーや単発出勤の原因</b>になります。</p>
@@ -443,27 +443,27 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <p class="sec-sub">ボタンは2つ。必ず先に「実現性チェック」を押してください</p>
 
         <h3>先に：実現性チェック</h3>
-        <p><span class="btnref">🔍 実現性チェック</span> は<b>生成する前に</b>、必要な人手と出せる人手を計算して足りているかを判定します。</p>
+        <p><span class="btnref">実現性チェック</span> は<b>生成する前に</b>、必要な人手と出せる人手を計算して足りているかを判定します。</p>
         <div class="tw"><table>
           <thead><tr><th class="nw">表示</th><th>意味</th><th>やること</th></tr></thead>
           <tbody>
-            <tr><td class="nw"><span class="sev r">🚨 赤</span></td><td><b>人手が構造的に足りない。</b>どう配置してもエラーは消えません</td><td>生成する前に、必要人数・公休数・有給日数のどれかを緩める</td></tr>
-            <tr><td class="nw"><span class="sev y">🟡 黄</span></td><td>ぎりぎり足りているが余裕がない</td><td>そのまま生成してよい。エラーが出たら設定を見直す</td></tr>
-            <tr><td class="nw"><b>✅ 緑</b></td><td>余裕あり</td><td>そのまま生成</td></tr>
+            <tr><td class="nw"><span class="sev r">赤</span></td><td><b>人手が構造的に足りない。</b>どう配置してもエラーは消えません</td><td>生成する前に、必要人数・公休数・有給日数のどれかを緩める</td></tr>
+            <tr><td class="nw"><span class="sev y">黄</span></td><td>ぎりぎり足りているが余裕がない</td><td>そのまま生成してよい。エラーが出たら設定を見直す</td></tr>
+            <tr><td class="nw"><b>緑</b></td><td>余裕あり</td><td>そのまま生成</td></tr>
           </tbody>
         </table></div>
 
         <h3>生成する</h3>
-        <p><span class="btnref">🚀 シフト自動生成を実行</span> を押します。多くの場合は数秒〜数十秒、条件が複雑だと数分かかります。<b>1部門あたり最大10分</b>で打ち切ります。計算中も他のタブは操作できます。</p>
+        <p><span class="btnref">シフト自動生成を実行</span> を押します。多くの場合は数秒〜数十秒、条件が複雑だと数分かかります。<b>1部門あたり最大10分</b>で打ち切ります。計算中も他のタブは操作できます。</p>
 
         <h3>エラー解消プラン（エラーが残ったとき）</h3>
-        <p><span class="btnref">🩹 エラー解消プラン</span> を押すと、<b>いまの設定をどう変えればエラーが消えるか</b>を具体的な数字で並べます。生成後のレポートからも開けます。</p>
+        <p><span class="btnref">エラー解消プラン</span> を押すと、<b>いまの設定をどう変えればエラーが消えるか</b>を具体的な数字で並べます。生成後のレポートからも開けます。</p>
         <ul>
           <li>まず<b>人日の収支</b>（必要◯人日 / 出せる◯人日 / 不足◯人日）が表示されます</li>
           <li><b>① 人手を増やす</b> … 有給・日別必要人数・公休目標・定数。人員不足と公休不足の根本原因はここです</li>
           <li><b>② ルールを緩める</b> … リズム系や早遅バランス。人手は増減しません</li>
           <li>各案には <b>影響 小 / 中 / 大</b> が付いており、<b>上にあるものほど現場への影響が小さい</b>順です</li>
-          <li><span class="btnref">この設定にする</span> を押すと設定を自動で変更します。何をどう変えたかは画面に一覧表示され、<span class="btnref">↩ 変更を元に戻す</span> で取り消せます</li>
+          <li><span class="btnref">この設定にする</span> を押すと設定を自動で変更します。何をどう変えたかは画面に一覧表示され、<span class="btnref">変更を元に戻す</span> で取り消せます</li>
         </ul>
         <div class="note ok">
           <b>使い方のコツ</b>
@@ -474,13 +474,13 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <div class="tw"><table>
           <thead><tr><th class="nw">表示</th><th>意味</th><th>やること</th></tr></thead>
           <tbody>
-            <tr><td class="nw"><b>✅ 計算完了</b></td><td><b>これ以上良い組み合わせは存在しないと確認済み。</b>残ったエラーは今の設定では避けられません</td><td>設定を見直すか、手で微調整する</td></tr>
-            <tr><td class="nw"><b>⏱ 時間切れ</b></td><td>10分では解ききれなかった。<b>もっと減らせる可能性があります</b></td><td>表示される <span class="btnref">⏳ 妥協なしで再計算</span> を押すか、条件を緩める</td></tr>
+            <tr><td class="nw"><b>計算完了</b></td><td><b>これ以上良い組み合わせは存在しないと確認済み。</b>残ったエラーは今の設定では避けられません</td><td>設定を見直すか、手で微調整する</td></tr>
+            <tr><td class="nw"><b>時間切れ</b></td><td>10分では解ききれなかった。<b>もっと減らせる可能性があります</b></td><td>表示される <span class="btnref">妥協なしで再計算</span> を押すか、条件を緩める</td></tr>
           </tbody>
         </table></div>
         <div class="note ok">
           <b>「エラーが残った＝失敗」ではありません</b>
-          <p>✅が出ているなら、それが今の人員でできる最良の答えです。エラーを減らしたいときは、シフトの並べ方ではなく<b>設定側</b>（必要人数・公休数・希望休）を見直してください。</p>
+          <p>「計算完了」と出ているなら、それが今の人員でできる最良の答えです。エラーを減らしたいときは、シフトの並べ方ではなく<b>設定側</b>（必要人数・公休数・希望休）を見直してください。</p>
         </div>
       </section>
 
@@ -492,20 +492,20 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <h3>手で直す</h3>
         <ul>
           <li><b>ドラッグ＆ドロップ</b>で2人のシフトを入れ替え</li>
-          <li><b>クリック</b>で直接編集。編集したマスは <b>🔒 固定</b>され、以後の再計算で動きません</li>
+          <li><b>クリック</b>で直接編集。編集したマスは <b>固定</b>され、以後の再計算で動きません</li>
           <li><b>Ctrl+Z</b> で元に戻す、<b>Ctrl+Y</b> でやり直し（余の解消で有給・出勤にした変更も、希望「有」や有給日数・必要人数ごと戻ります。計算中は使えません）</li>
-          <li><span class="btnref">🔓 固定をすべて解除</span> で🔒を全部外せます</li>
+          <li><span class="btnref">固定をすべて解除</span> で固定を全部外せます</li>
         </ul>
 
         <h3>直すのを手伝ってもらう</h3>
         <div class="tw"><table>
           <thead><tr><th class="nw">ボタン</th><th>すること</th></tr></thead>
           <tbody>
-            <tr><td class="nw"><span class="btnref">🔍 ルールチェック</span></td><td>今の表をもう一度チェックし直します（手で直した後に使う）</td></tr>
-            <tr><td class="nw"><span class="btnref">🧭 修正ガイド</span></td><td>エラーごとに「こうすれば直る」を提示し、ボタン1つで適用できます。<b>まずこれを試してください</b></td></tr>
-            <tr><td class="nw"><span class="btnref">🧩 かんたん調整</span></td><td>🔒で固定したマスは保ったまま、残りを短時間で再調整します。悪化はしません</td></tr>
-            <tr><td class="nw"><span class="btnref">🛠 エラーを自動修正</span></td><td>アプリが自動でエラーを減らそうとします</td></tr>
-            <tr><td class="nw"><span class="btnref">🤖 AIに解説してもらう</span></td><td>⑤の画面で、なぜエラーが出たのかを日本語で説明します</td></tr>
+            <tr><td class="nw"><span class="btnref">ルールチェック</span></td><td>今の表をもう一度チェックし直します（手で直した後に使う）</td></tr>
+            <tr><td class="nw"><span class="btnref">修正ガイド</span></td><td>エラーごとに「こうすれば直る」を提示し、ボタン1つで適用できます。<b>まずこれを試してください</b></td></tr>
+            <tr><td class="nw"><span class="btnref">かんたん調整</span></td><td>固定したマスは保ったまま、残りを短時間で再調整します。悪化はしません</td></tr>
+            <tr><td class="nw"><span class="btnref">エラーを自動修正</span></td><td>アプリが自動でエラーを減らそうとします</td></tr>
+            <tr><td class="nw"><span class="btnref">AIに解説してもらう</span></td><td>⑤の画面で、なぜエラーが出たのかを日本語で説明します</td></tr>
           </tbody>
         </table></div>
 
@@ -515,7 +515,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         </div>
 
         <h3>出力する</h3>
-        <p><span class="btnref">📥 Excelエクスポート</span> または <span class="btnref">📥 CSVエクスポート</span> で書き出せます。<b>完成したら必ずExcelで保存</b>してください。下の「📊 集計」で、一人ひとりの出勤日数・公休数・労働時間も確認できます。</p>
+        <p><span class="btnref">Excelエクスポート</span> または <span class="btnref">CSVエクスポート</span> で書き出せます。<b>完成したら必ずExcelで保存</b>してください。下の「集計」で、一人ひとりの出勤日数・公休数・労働時間も確認できます。</p>
       </section>
 
       <!-- marks -->
@@ -549,7 +549,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <div class="sec-head"><span class="step">▪</span><h2>エラー対処表</h2></div>
         <p class="sec-sub">出たエラーの名前で探してください</p>
         <div class="note">
-          <b>まず ⑤自動生成 の <span class="btnref">🩹 エラー解消プラン</span> を試してください</b>
+          <b>まず ⑤自動生成 の <span class="btnref">エラー解消プラン</span> を試してください</b>
           <p>「どの設定をいくつ動かせば消えるか」を自動で計算し、ボタン1つで変更できます。この表は、そのうえで自分で判断したいときの早見表です。</p>
         </div>
 
@@ -559,7 +559,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
           <tbody>
             <tr><td class="nw"><span class="sev r">人員不足</span></td><td>その日そのシフトの必要人数に届かない</td><td>②の必要人数を下げる／日別必要人数を見直す／希望休を減らす</td></tr>
             <tr><td class="nw"><span class="sev r">公休数不足</span></td><td>目標の公休日数を消化できていない</td><td>必要人数を下げる／有給日数を減らす／公休目標を下げる</td></tr>
-            <tr><td class="nw"><span class="sev r">⛔ コンプラ違反</span></td><td>6連勤以上になっている（連勤上限の設定に関係なく違反。前月末からの連勤と半休も数える）</td><td>連勤の途中に休みを入れる（ほかの人と休みを入れ替える・作り直す）。連勤の上限を上げても消えません</td></tr>
+            <tr><td class="nw"><span class="sev r">6連勤以上（コンプラ違反）</span></td><td>6連勤以上になっている（連勤上限の設定に関係なく違反。前月末からの連勤と半休も数える）</td><td>連勤の途中に休みを入れる（ほかの人と休みを入れ替える・作り直す）。連勤の上限を上げても消えません</td></tr>
             <tr><td class="nw"><span class="sev r">連勤超過</span></td><td>連勤上限を超えている</td><td>①または個人の連勤上限を確認／前月末連勤日数が正しいか確認</td></tr>
             <tr><td class="nw"><span class="sev r">担当外シフト</span></td><td>担当シフトに無いシフトが入っている</td><td>③でその人の担当シフトにチェックを追加</td></tr>
             <tr><td class="nw"><span class="sev r">副店長不在の日</span></td><td>副店長が誰も出勤していない日がある</td><td>副店長の公休日をずらす</td></tr>
@@ -616,13 +616,13 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
             <div class="a"><p>必要人数を超えないよう組まれるはずなので、まず<b>日別必要人数</b>でその日だけ増やしていないか確認してください。それでも多い場合は、④で出勤シフトを固定している人がいないか見てください。固定された人は人数調整の対象外になります。</p></div>
           </details>
           <details><summary>ボタンを押すと「いまは◯◯を計算中です」と出る</summary>
-            <div class="a"><p>計算は一度に1つだけです。生成・自動修正・余の使い道・余の解消の計算中は、ほかの計算、月の変更、取り込み・読込・リセット、表の手直し、元に戻す／やり直すができません。<b>生成と自動修正</b>は <span class="btnref">⏹ 中止</span> で止められます（止めたら表は元のままです）。余の解消で「実行しますか？」が出ているときは、それに答えるか、パネルを ✕ で閉じてください（閉じると「やめる」になり、その変更だけが元に戻ります）。</p></div>
+            <div class="a"><p>計算は一度に1つだけです。生成・自動修正・余の使い道・余の解消の計算中は、ほかの計算、月の変更、取り込み・読込・リセット、表の手直し、元に戻す／やり直すができません。<b>生成と自動修正</b>は <span class="btnref">中止</span> で止められます（止めたら表は元のままです）。余の解消で「実行しますか？」が出ているときは、それに答えるか、パネルを ✕ で閉じてください（閉じると「やめる」になり、その変更だけが元に戻ります）。</p></div>
           </details>
           <details><summary>余の解消のおすすめが途中で変わった</summary>
-            <div class="a"><p>パネルを開いたまま表を直すと、おすすめを数え直します。変わったときは「🔄 おすすめが変わりました」と出て、2秒ほどボタンが押せなくなります。新しい一覧を確かめてから押してください。マウスがパネルの上にある間は入れ替わりません。</p></div>
+            <div class="a"><p>パネルを開いたまま表を直すと、おすすめを数え直します。変わったときは「おすすめが変わりました」と出て、2秒ほどボタンが押せなくなります。新しい一覧を確かめてから押してください。マウスがパネルの上にある間は入れ替わりません。</p></div>
           </details>
           <details><summary>月初がおかしい（いきなり単発出勤・連勤オーバーになる）</summary>
-            <div class="a"><p>③の<b>前月末連勤日数</b>の入力漏れがほぼ確実な原因です。前月のシフト表を表示した状態で <span class="btnref">🔁 前月末の連勤・シフトを取り込む</span> を押して、自動入力し直してください。</p></div>
+            <div class="a"><p>③の<b>前月末連勤日数</b>の入力漏れがほぼ確実な原因です。前月のシフト表を表示した状態で <span class="btnref">前月末の連勤・シフトを取り込む</span> を押して、自動入力し直してください。</p></div>
           </details>
           <details><summary>実現性チェックは大丈夫だったのにエラーが出ました</summary>
             <div class="a"><p>実現性チェックが見ているのは「人手の総量が足りているか」だけです。総量が足りていても、<b>特定の日・特定の役職に偏り</b>があるとエラーになります。エラーの内容から個別に対処してください。</p></div>
@@ -631,7 +631,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
             <div class="a"><p>ルールを「絶対」にするほど時間がかかります。時間を短くしたいときは、①のルール設定で<b>優先度の低いルールを「できれば」やOFF</b>にしてください。なお、良い答え自体は序盤で見つかっていることが多く、残り時間は「これが最良だ」と確かめる作業に使われています。</p></div>
           </details>
           <details><summary>手で直したところが、再計算で消えてしまいます</summary>
-            <div class="a"><p>クリックで編集したマスは🔒固定されるので消えません。<b>ドラッグで入れ替えただけのマスは固定されません</b>。残したい場合は、そのマスをクリックして選び直してください。</p></div>
+            <div class="a"><p>クリックで編集したマスは固定されるので消えません。<b>ドラッグで入れ替えただけのマスは固定されません</b>。残したい場合は、そのマスをクリックして選び直してください。</p></div>
           </details>
           <details><summary>別のパソコンで続きをやりたい</summary>
             <div class="a"><p>データはパソコンごとに保存されるため、そのままでは引き継げません。現状は<b>Excelに出力して渡す</b>のが確実です。作業自体は、新しいパソコンでURLを開いて設定を入力し直す形になります。</p></div>
@@ -640,7 +640,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
             <div class="a"><p>表の見出しの<b>境目をドラッグ</b>すると列の幅を変えられます。また表全体は左右にスクロールできます。ブラウザの拡大率（Ctrl と − ）を下げるのも有効です。</p></div>
           </details>
           <details><summary>全部やり直したい</summary>
-            <div class="a"><p>右上の <span class="btnref">🗑 リセット</span> で初期状態に戻せます。<b>全データが消えます</b>ので、必要なものはExcelに出力してから実行してください。</p></div>
+            <div class="a"><p>右上の「データ」メニューの <span class="btnref">リセット</span> で初期状態に戻せます。<b>全データが消えます</b>ので、必要なものはExcelに出力してから実行してください。</p></div>
           </details>
         </div>
       </section>
@@ -663,7 +663,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <div class="note stop">
           <b>やってはいけないこと</b>
           <ul style="margin-bottom:0">
-            <li><b>🗑 リセット</b>を確認なしで押す（全データが消えます）</li>
+            <li><b>リセット</b>を確認なしで押す（全データが消えます）</li>
             <li>ブラウザの<b>閲覧履歴・サイトデータの削除</b>を実行する（同じく消えます）</li>
             <li>作ったシフトを<b>Excelに出力せずに</b>次の月へ進む</li>
             <li>②の<b>カテゴリ A / B を間違えて</b>設定する（早番・遅番のルールが全部狂います）</li>

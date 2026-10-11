@@ -154,6 +154,18 @@ a { color: var(--link); }
 #btnGenerate { --ic-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Ccircle cx='12' cy='12' r='4.5'/%3E%3Ccircle cx='12' cy='12' r='.8'/%3E%3C/svg%3E"); }
 #btnRangeLock { --ic-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='11' width='14' height='10' rx='2'/%3E%3Cpath d='M8 11V7.5a4 4 0 0 1 8 0V11'/%3E%3C/svg%3E"); }
 .btn-theme { --ic-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 3.5a8.5 8.5 0 0 1 0 17z' fill='black'/%3E%3C/svg%3E"); }
+/* アイコンの色（段階・状態）。文の中では文字と同じ高さに置く */
+.ic-crit { color: var(--lv-crit); }
+.ic-must { color: var(--lv-must); }
+.ic-soft { color: var(--lv-soft); }
+.ic-ok   { color: var(--ok); }
+.ic-info { color: var(--link); }
+/* 一覧の先頭の「おすすめ」の札（👑 の代わり） */
+.tag-reco {
+  display: inline-block; padding: 0 6px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; line-height: 18px;
+  background: var(--accent); color: var(--accent-text); vertical-align: 1px;
+}
+:root[data-theme="dark"] .tag-reco { background: var(--link); color: var(--bg); }
 /* 3段階の言葉（アイコン＋言葉） */
 .lv-word { display: inline-flex; align-items: center; gap: 3px; }
 .lv-word.lv-crit { color: var(--lv-crit); }
@@ -584,6 +596,7 @@ tbody tr:hover { background: var(--surface-2); }
 
 .btn-icon { background: none; border: none; cursor: pointer; font-size: 18px; min-width: var(--h-min); min-height: var(--h-min); padding: 4px; color: var(--lv-crit); border-radius: var(--r-md); }
 .btn-icon:hover { background: var(--lv-crit-bg); }
+.btn-icon .ic { width: 18px; height: 18px; vertical-align: middle; }
 
 /* ===== カレンダー・結果テーブル ===== */
 .calendar-table, .result-table { font-size: var(--fs-xs); min-width: 1000px; }

@@ -23,6 +23,7 @@ id	btnCancelRepair	HTML	1	app.v6.js
 id	btnCarryOver	HTML	1	ui.v6.js
 id	btnClearDailyReq	JS	0	ui.v6.js
 id	btnClearFixed	HTML	1	app.v6.js
+id	btnDataMenu	HTML	1	ui-shell.v6.js
 id	btnDeepOptimize	JS	0	app.v6.js,ui.v6.js
 id	btnExportCSV	HTML	1	app.v6.js
 id	btnExportData	HTML	1	app.v6.js
@@ -53,6 +54,7 @@ id	calendarTable	HTML	1	ui.v6.js
 id	dailyReqContent	HTML	1	ui.v6.js
 id	dailyReqPanel	HTML	1	ui.v6.js
 id	dailyReqToggle	HTML	1	ui.v6.js
+id	dataMenu	HTML	1	ui-shell.v6.js
 id	deliveryDays	HTML	1	ui.v6.js
 id	editListBtn	JS	0	ui.v6.js
 id	editMarkCb	JS	0	ui.v6.js
@@ -194,7 +196,7 @@ id	wzReset	JS	0	ui.v6.js($)
 id	wzUndo	JS	0	ui.v6.js($)
 class	active	HTML	2	app.v6.js,ui.v6.js
 class	allowed-label	JS	0	ui.v6.js
-class	btn-primary	HTML	8	ui.v6.js
+class	btn-primary	HTML	12	ui.v6.js
 class	calc-lock-area	JS	0	milp.v6.js,ui.v6.js
 class	chip-btn	HTML	4	ui.v6.js
 class	col-resizer	JS	0	ui.v6.js
@@ -223,8 +225,9 @@ class	shift-option	JS	0	ui.v6.js
 class	shift-preview	JS	0	ui.v6.js
 class	show	JS	0	app.v6.js,ui.v6.js
 class	staff-table	HTML	1	ui.v6.js
+class	step-nav	HTML	6	ui-shell.v6.js
 class	summary-req-input	JS	0	ui.v6.js
-class	tab	HTML	7	app.v6.js,ui.v6.js
+class	tab	HTML	7	app.v6.js,ui-shell.v6.js,ui.v6.js
 class	tab-panel	HTML	6	ui.v6.js
 class	vio-flash	JS	0	ui.v6.js
 class	violation-item	JS	0	ui.v6.js
@@ -245,6 +248,7 @@ attr	data-fckey	JS	0	app.v6.js
 attr	data-fcwho	JS	0	app.v6.js
 attr	data-field	JS	0	ui.v6.js
 attr	data-fixplan	JS	0	app.v6.js
+attr	data-go	HTML	10	ui-shell.v6.js
 attr	data-i	JS	0	ui.v6.js
 attr	data-mark	HTML	4	ui.v6.js
 attr	data-pairgo	JS	0	ui.v6.js
@@ -268,7 +272,7 @@ attr	data-sp	JS	0	ui.v6.js
 attr	data-spk	JS	0	ui.v6.js
 attr	data-sprow	JS	0	ui.v6.js
 attr	data-staffhead	JS	0	ui.v6.js
-attr	data-tab	HTML	6	app.v6.js,ui.v6.js
+attr	data-tab	HTML	6	app.v6.js,ui-shell.v6.js,ui.v6.js
 attr	data-tu	JS	0	ui.v6.js
 attr	data-tutor	JS	0	ui.v6.js
 attr	data-wf	JS	0	app.v6.js

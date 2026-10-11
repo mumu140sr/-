@@ -8,7 +8,7 @@
 function warnComplianceLimit(v, who) {
   const lim = (typeof COMPLIANCE_CONS_DAYS !== 'undefined') ? COMPLIANCE_CONS_DAYS : 6;
   if (!(parseInt(v) >= lim)) return;
-  toast(`⛔ ${who}の連勤上限が${v}日になっています。${lim}連勤以上はコンプライアンス違反です（5連勤まで）。`
+  toast(`${who}の連勤上限が${v}日になっています。${lim}連勤以上はコンプライアンス違反です（5連勤まで）。`
       + `上限を${lim}日以上にしても、${lim}連勤以上は違反として表示・回避します。`, 'error', 9000);
 }
 
@@ -55,6 +55,19 @@ function shiftToneClass(key) {
   const n = shiftTone(key);
   return n ? `c-${n}${String(key).indexOf('責') >= 0 ? ' c-resp' : ''}` : '';
 }
+// ===== 線画のアイコンと、絵文字を使わない言葉（v251） =====
+// アイコンは index.html の #iconSprite。3段階は crit=6連勤以上（四角）・must=絶対（丸）・soft=できれば（三角）。
+// HTML を組み立てる文字列の中だけで使う（トースト・確認の文・title は文字だけなので言葉にする）。
+function uiIcon(name) { return `<svg class="ic ic-${name}" aria-hidden="true"><use href="#i-${name}"/></svg>`; }
+// 変えてはいけないファイル（optimizer.v6.js）の scoreSummary の文の印（⛔🚨🟡）を、画面では言葉にする
+function levelWords(s) {
+  return String(s == null ? '' : s)
+    .replace(/⛔\s*コンプラ違反\s*/g, '6連勤以上 ').replace(/⛔\s*/g, '6連勤以上 ')
+    .replace(/(🚨|🔴)\s*/gu, '絶対 ').replace(/🟡\s*/gu, 'できれば ');
+}
+function scoreSummaryText(r) { return levelWords(scoreSummary(r)); }
+// 文の先頭の印（⛔🚨⚠️✅ℹ️🟡🔴💡）を外す。見出しの前には段階のアイコンを別に付ける
+function dropLeadMark(s) { return String(s == null ? '' : s).replace(/^\s*(⛔|🚨|⚠️?|✅|ℹ️?|🟡|🔴|💡)\s*/u, ''); }
 /** マスにある違反の段階（いちばん重いもの）: crit=6連勤以上 / must=絶対 / soft=できれば */
 function vioLevelOf(list) {
   if (!list || !list.length) return '';
@@ -149,7 +162,7 @@ function syncGenerateResult() {
     $stub = document.createElement('div');
     $stub.id = 'genStaleDeep'; $stub.className = 'card';
     $stub.innerHTML = '<div class="hint">表が生成したときから変わっているので、生成の結果の文を隠しています。</div>'
-      + '<button class="btn btn-primary" style="margin-top:8px">⏳ 妥協なしで再計算（早期停止を無効・最大約11分）</button>';
+      + '<button class="btn btn-primary" style="margin-top:8px">' + uiIcon('recalc') + '妥協なしで再計算（早期停止を無効・最大約11分）</button>';
     $stub.querySelector('button').addEventListener('click', () => {
       const b = document.getElementById('btnDeepOptimize'); if (b) b.click();
     });
@@ -266,7 +279,7 @@ function setupSettingsPanel() {
     if (calcBusy()) { closeMonthModal(); revertMonth(); calcBusyToast(); return; }
     if (monthModal && monthTarget === newMonth) return;   // 同じ値で開いている（ボタンを押す途中など）
     const cnt = (o) => Object.values(o || {}).reduce((a, r) => a + Object.keys(r || {}).length, 0);
-    const has = { 表: cnt(AppState.shifts), 希望休: cnt(AppState.requests), '🔒固定': cnt(AppState.fixedShifts),
+    const has = { 表: cnt(AppState.shifts), 希望休: cnt(AppState.requests), 固定: cnt(AppState.fixedShifts),
                   特別日: Object.keys(AppState.specialDays || {}).length, 行事: (AppState.events || []).length,
                   日ごとの必要人数: cnt(AppState.dailyRequirements) + cnt(AppState.dailyRequirementsCast),
                   日ごとのスキル指定: cnt(AppState.dailySkills) };
@@ -284,7 +297,7 @@ function setupSettingsPanel() {
     monthTarget = newMonth;
     monthModal.innerHTML = `
       <div class="modal-content" style="max-width:560px">
-        <div class="modal-header"><h3 style="margin:0">📅 ${escapeHtml(newMonth)} に切り替えます</h3></div>
+        <div class="modal-header"><h3 style="margin:0">${escapeHtml(newMonth)} に切り替えます</h3></div>
         <div class="modal-body" style="line-height:1.8">
           <p>${escapeHtml(prevMonth || '前の月')} の次のデータが残っています。そのまま残すと、
              <b>同じ日付のまま ${escapeHtml(newMonth)} の生成に使われてしまいます</b>。</p>
@@ -295,7 +308,7 @@ function setupSettingsPanel() {
         </div>
         <div class="modal-footer" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
           <button class="btn" id="mcCancel">やめる（月も変えない）</button>
-          <button class="btn" id="mcExport">📤 先に書き出してから片付ける</button>
+          <button class="btn" id="mcExport">${uiIcon('export')}先に書き出してから片付ける</button>
           <button class="btn btn-primary" id="mcClean">片付けて切り替える</button>
         </div>
       </div>`;
@@ -430,7 +443,7 @@ function renderEventList() {
         <label>行事名</label>
         <input type="text" value="${escapeHtml(ev.name || '')}" placeholder="例: 健康診断"
                data-ev-idx="${idx}" data-ev-field="name" style="width:180px"/>
-        <button class="btn-icon" data-ev-del="${idx}" title="削除">🗑</button>
+        <button class="btn-icon" data-ev-del="${idx}" title="削除" aria-label="削除">${uiIcon('trash')}</button>
       </div>
       <div class="allowed-shifts-wrap">対象: ${staffChips}</div>
     `;
@@ -534,7 +547,7 @@ function renderRuleLevels() {
     const cur = cfg[r.t] || r.def;
     if (r.locked) {
       html += `<div class="form-row"><label>${r.l}</label>
-        <span class="hint">🔴 絶対（固定・変更不可）</span></div>`;
+        <span class="hint"><span class="lv-word lv-must">${uiIcon('must')}絶対</span>（固定・変更不可）</span></div>`;
     } else {
       const opt = (v, lbl) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${lbl}</option>`;
       // 数値設定を持つルール（例: 連休の上限日数）はスピナーも一緒に出す
@@ -549,7 +562,7 @@ function renderRuleLevels() {
       }
       html += `<div class="form-row"><label>${r.l}</label>
         <select data-rule="${r.t}" data-def="${r.def}" style="min-width:130px">
-          ${opt('must', '🔴 絶対')}${opt('should', '🟡 できれば')}${opt('off', '⚪ OFF（使わない）')}
+          ${opt('must', '絶対')}${opt('should', 'できれば')}${opt('off', 'OFF（使わない）')}
         </select>${numHtml}</div>`;
     }
   });
@@ -558,7 +571,7 @@ function renderRuleLevels() {
   // 両方を絶対にしない使い方にしたので、そうなっているときは知らせる。
   html += '<div id="bsConflictNote" class="hint" style="display:none;margin-top:8px;padding:8px 10px;border-radius:8px;' +
     'background:color-mix(in srgb, var(--warning) 16%, var(--surface));border:1px solid color-mix(in srgb, var(--warning) 40%, transparent)">' +
-    '⚠️ 「早遅バランス」と「早遅の切り替え」が両方とも「絶対」です。この2つはぶつかることがあります。' +
+    uiIcon('soft') + ' 「早遅バランス」と「早遅の切り替え」が両方とも「絶対」です。この2つはぶつかることがあります。' +
     'どちらか一方を「できれば」にしてください。</div>';
   container.innerHTML = html;
   const bsBoth = () => getRuleLevel('balance-diff') === 'must' && getRuleLevel('band-switch') === 'must';
@@ -695,7 +708,7 @@ function renderRoleTable() {
         </label>
       </td>
       <td>
-        <button class="btn-icon" data-del-idx="${idx}" title="削除">🗑</button>
+        <button class="btn-icon" data-del-idx="${idx}" title="削除" aria-label="削除">${uiIcon('trash')}</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -848,7 +861,7 @@ function renderDailyReqPanel() {
   let html = '<div style="overflow-x:auto">';
   // クリアボタン
   html += `<div style="margin-bottom:8px">
-    <button id="btnClearDailyReq" class="btn" style="font-size:13px">🗑 上書き設定を全てクリア</button>
+    <button id="btnClearDailyReq" class="btn" style="font-size:13px">${uiIcon('trash')}上書き設定を全てクリア</button>
     <span class="hint" style="margin-left:8px">上書きしたセルだけ削除し、デフォルト値に戻します</span>
   </div>`;
   html += '<table class="dailyreq-table" style="border-collapse:collapse;font-size:12px">';
@@ -904,7 +917,7 @@ function renderDailyReqPanel() {
       const baseVal  = field === 'req' ? baseNeed
                      : ((sk.min != null && sk.min >= 0) ? sk.min : baseNeed);
       html += `<tr><td style="padding:4px 6px;border:1px solid var(--border);white-space:nowrap;position:sticky;left:0;background:var(--surface-2);z-index:1">`
-            + `🎯 ${escapeHtml(sk.name)}（${bandLabel}・${fLabel}・通常: ${baseVal}）</td>`;
+            + `スキル：${escapeHtml(sk.name)}（${bandLabel}・${fLabel}・通常: ${baseVal}）</td>`;
       for (let d = 1; d <= days; d++) {
         const w  = getWeekday(AppState.settings.targetMonth, d);
         const ov = ((AppState.dailySkills || {})[sk.name] || {})[d] || {};
@@ -924,7 +937,7 @@ function renderDailyReqPanel() {
 
   html += '</tbody></table></div>';
   if ((AppState.skills || []).length) {
-    html += `<p class="hint" style="margin-top:6px">🎯 の行はスキル要件です。忙しい日だけ「目標人数」を増やす、閑散日は下げる、といった調整ができます（最低ラインは目標を超えません）。</p>`;
+    html += `<p class="hint" style="margin-top:6px">「スキル：」の行はスキル要件です。忙しい日だけ「目標人数」を増やす、閑散日は下げる、といった調整ができます（最低ラインは目標を超えません）。</p>`;
   }
   container.innerHTML = html;
 
@@ -1100,10 +1113,10 @@ function renderSkillsPanel() {
       <span class="hint">目標人数:</span>
       <input type="number" min="0" max="20" value="${req}" data-skill-idx="${i}" data-skill-field="req"
              style="width:56px"/>
-      <span class="hint" title="この人数を下回ると🔴絶対NG。目標に届かなくても最低ライン以上なら🟡注意どまり。">最低ライン:</span>
+      <span class="hint" title="この人数を下回ると「絶対」の違反。目標に届かなくても最低ライン以上なら「できれば」の違反どまり。">最低ライン:</span>
       <input type="number" min="0" max="20" value="${min}" data-skill-idx="${i}" data-skill-field="min"
              style="width:56px"/>
-      <button class="btn-icon" data-skill-del="${i}" title="削除">🗑</button>
+      <button class="btn-icon" data-skill-del="${i}" title="削除" aria-label="削除">${uiIcon('trash')}</button>
     </div>`;
   }).join('');
 
@@ -1334,7 +1347,7 @@ function renderStaffTable() {
                data-field="note" data-id="${s.id}" style="width:100%;min-width:80px"/>
       </td>
       <td>
-        <button class="btn-icon" data-del="${s.id}" title="削除">🗑</button>
+        <button class="btn-icon" data-del="${s.id}" title="削除" aria-label="削除">${uiIcon('trash')}</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -1451,7 +1464,7 @@ function renderStaffTable() {
         const re = (typeof recheckAfterStaffChange === 'function') ? recheckAfterStaffChange(bSc) : null;
         if (re) {
           const up = re.a.comp > re.b.comp || re.a.must > re.b.must;
-          toast(`スタッフを削除しました。いまの表のエラーを数え直しました（削除する前 ${scoreSummary(re.b)} → 削除したあと ${scoreSummary(re.a)}）。表は作り直していません`,
+          toast(`スタッフを削除しました。いまの表のエラーを数え直しました（削除する前 ${scoreSummaryText(re.b)} → 削除したあと ${scoreSummaryText(re.a)}）。表は作り直していません`,
                 up ? 'warning' : 'info', 8000);
         }
       }
@@ -1691,10 +1704,10 @@ function renderRequestAlerts() {
   });
   if (!res.items.length) { box.innerHTML = ''; return; }
   box.innerHTML = `<div style="border:1px solid color-mix(in srgb, var(--danger) 45%, transparent);background:color-mix(in srgb, var(--danger) 10%, var(--surface));border-radius:10px;padding:10px 14px">
-      <div style="font-weight:700;margin-bottom:6px">🚨 希望だけで、必ずエラーになるものが ${res.items.length}件 あります</div>
-      <div class="hint" style="margin-bottom:6px">生成しても消えません。下の案のどれかに変えるか、そのまま生成してください（半休・有給・🔒固定は動かしていません）。</div>
+      <div style="font-weight:700;margin-bottom:6px">${uiIcon('must')} 希望だけで、必ずエラーになるものが ${res.items.length}件 あります</div>
+      <div class="hint" style="margin-bottom:6px">生成しても消えません。下の案のどれかに変えるか、そのまま生成してください（半休・有給・固定は動かしていません）。</div>
       ${res.items.map((it, i) => `<div style="padding:6px 0;${i ? 'border-top:1px solid var(--border)' : ''}">
-          <div>🚨 ${escapeHtml(it.reason.text)}</div>
+          <div>${uiIcon('must')} ${escapeHtml(it.reason.text)}</div>
           <div data-reqopts="${i}"><div class="hint" style="margin:4px 0 0 16px">直し方を調べています…</div></div>
         </div>`).join('')}
     </div>`;
@@ -1837,7 +1850,7 @@ function _renderResultTableInner() {
         const isFixed = !!((AppState.fixedShifts[s.id] || {})[d]);
         const fixCls  = isFixed ? ' cell-fixed' : '';
         const titleAttr = isFixed
-          ? `title="🔒 固定済み${vMsg ? ' / ' + vMsg : ''}"`
+          ? `title="固定済み${vMsg ? ' / ' + vMsg : ''}"`
           : (vio ? `title="${vMsg}"` : '');
         if (isWork(shift)) { workCount++; totalHours += getShiftHours(shift); }
         else if (isPublicOff(shift)) publicOffCount++;
@@ -2111,7 +2124,7 @@ function setupManualEdit() {
     const staffName = (AppState.staff.find(s => s.id === sid) || {}).name || '';
     modal.classList.remove('show');
     editingCell = null;
-    const fixedMark = newShift ? ' 🔒' : '';
+    const fixedMark = newShift ? '（固定）' : '';
     refreshAfterManualEdit(`${staffName} ${d}日 →「${newShift || '空'}」に変更${fixedMark}`, beforeEdit);
   });
 
@@ -2361,7 +2374,7 @@ function undoShiftEdit() {
   } else if (st.gen) {                          // 生成する前の表へ戻す
     _redoStack.push(_swapGenState(st));
     updateHistoryButtons();
-    _genSwapNote('生成する前の表に戻しました（↪ やり直すで、生成した表に戻れます）');
+    _genSwapNote('生成する前の表に戻しました（「やり直す」で、生成した表に戻れます）');
     return;
   } else {
     _redoStack.push(_snapshotShiftState());
@@ -2435,17 +2448,17 @@ function refreshAfterManualEdit(doneMsg, before) {
   // 手直し前の同じ人の6連勤以上と日が重なり、その長さ以下なら（縮めた・変わらない）出さない。
   compWorsened(prevV, AppState.violations).forEach(v => {
     const nm = (AppState.staff.find(s => s.id === v.staffId) || {}).name || '';
-    warns.push(`⛔ コンプラ違反：${nm}さん ${v.from >= 1 ? v.from + '日' : '前月'}〜${v.to}日が${v.len}連勤になりました`);
+    warns.push(`6連勤以上：${nm}さん ${v.from >= 1 ? v.from + '日' : '前月'}〜${v.to}日が${v.len}連勤になりました`);
   });
   // そのほか悪くなったもの（件数と連勤の超過日数を分けて出す）
   const up = scoreWorsened(nowSc, prevSc).filter(x => x.key !== 'comp');
   if (up.length) {
-    const lab = (k) => k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? '🟡'
+    const lab = (k) => k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? 'できれば'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
-    warns.push('⚠ 悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${(x.key === 'over' || x.key === 'offShort') ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('・'));
+    warns.push('悪くなりました：' + up.map(x => `${lab(x.key)} ${x.from}→${x.to}${(x.key === 'over' || x.key === 'offShort') ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('・'));
   }
   if (warns.length) {
-    toast((doneMsg ? doneMsg + '。' : '') + warns.join(' ／ '), warns.some(w => w.startsWith('⛔')) ? 'error' : 'warning', 8000);
+    toast((doneMsg ? doneMsg + '。' : '') + warns.join(' ／ '), warns.some(w => w.startsWith('6連勤以上：')) ? 'error' : 'warning', 8000);
   } else if (doneMsg) {
     toast(doneMsg, 'info', 1500);
   }
@@ -2632,17 +2645,17 @@ function candCellsText(cells, max) {
 }
 /** 案の1行（表の行）。btnHtml: 反映などのボタン */
 function candRowHtml(label, st, sec, btnHtml) {
-  const arrow = (a, b, bad, unit) => `${a}→${b}${unit || ''}` + (b > a && bad ? ' ⚠️' : '');
+  const arrow = (a, b, bad, unit) => `${a}→${b}${unit || ''}` + (b > a && bad ? ' ' + uiIcon('soft') : '');
   return `<tr>
     <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>${escapeHtml(label)}</b>${sec != null ? `<div class="hint">${sec}秒</div>` : ''}</td>
-    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${st.a.comp > st.b.comp || st.compUp ? '<b style="color:var(--danger)">' : ''}⛔ ${st.b.comp}→${st.a.comp}${st.compUp ? '（伸びる・つながるため選べません）' : ''}${st.a.comp > st.b.comp || st.compUp ? '</b>' : ''}</td>
-    <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>🚨 ${st.b.must - st.b.comp}→${st.a.must - st.a.comp}件</b><div class="hint">${candMustText(st)}</div></td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${st.a.comp > st.b.comp || st.compUp ? '<b style="color:var(--danger)">' : ''}${uiIcon('crit')} ${st.b.comp}→${st.a.comp}${st.compUp ? '（伸びる・つながるため選べません）' : ''}${st.a.comp > st.b.comp || st.compUp ? '</b>' : ''}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border)"><b>${uiIcon('must')} ${st.b.must - st.b.comp}→${st.a.must - st.a.comp}件</b><div class="hint">${candMustText(st)}</div></td>
     <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.over, st.a.over, true, '日')}</td>
     <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.offShort || 0, st.a.offShort || 0, true, '日')}</td>${CAND_BS() ? `
     <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">${arrow(st.b.bsOver || 0, st.a.bsOver || 0, true, '回')}</td>` : ''}
     <td style="padding:6px 8px;border-top:1px solid var(--border);text-align:center"><b>${st.cells.length}</b>マス</td>
     <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">行き来 ${arrow(st.ikiB, st.ikiA, true)}</td>
-    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">ほかの🟡 ${arrow(st.othB, st.othA, false)}</td>
+    <td style="padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap">ほかの${uiIcon('soft')} ${arrow(st.othB, st.othA, false)}</td>
     <td style="padding:6px 8px;border-top:1px solid var(--border)">${btnHtml || ''}</td>
   </tr>
   <tr><td colspan="${CAND_COLS()}" class="hint" style="padding:0 8px 6px">${st.cells.length ? '変わるマス: ' + candCellsText(st.cells) : '変わるマスはありません'}</td></tr>`;
@@ -2652,9 +2665,9 @@ function candRowHtml(label, st, sec, btnHtml) {
 const CAND_BS = () => getRuleLevel('band-switch') === 'must';
 const CAND_COLS = () => CAND_BS() ? 10 : 9;
 const _cth = (t, left) => `<th style="${left ? 'text-align:left;' : ''}padding:4px 8px">${t}</th>`;
-const candHead = () => '<tr>' + _cth('案', 1) + _cth('⛔ 6連勤以上', 1) + _cth('🚨', 1)
+const candHead = () => '<tr>' + _cth('案', 1) + _cth(uiIcon('crit') + '6連勤以上', 1) + _cth(uiIcon('must') + '絶対', 1)
   + _cth('連勤の超過', 1) + _cth('公休の不足', 1) + (CAND_BS() ? _cth('切り替えの超過', 1) : '')
-  + _cth('変わるマス') + _cth('早番と遅番の行き来', 1) + _cth('ほかの🟡', 1) + '<th></th></tr>';
+  + _cth('変わるマス') + _cth('早番と遅番の行き来', 1) + _cth('ほかの' + uiIcon('soft') + 'できれば', 1) + '<th></th></tr>';
 
 /** 生成した直後の表を控える（生成・途中から作り直しのあと） */
 function genBaseTake() {
@@ -2716,8 +2729,8 @@ function renderEditSummary() {
   const now = _editVsum(AppState.violations || []), was = g.vsum || {};
   const arrow = (a, b) => `${a ?? '-'}→${b}`;
   box.innerHTML = `<div class="hint" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <span>✏️ 生成から変えたマス：<b>${diff.length}件</b>${diff.length ? '（' + Object.keys(by).map(k => `${escapeHtml(k)} ${by[k]}`).join('・') + '）' : ''}</span>
-      <span>🚨 ${arrow(was.must, now.must)} ／ 🟡 ${arrow(was.soft, now.soft)}（うち早番と遅番の行き来 ${arrow(was.iki, now.iki)}）／ 余 ${arrow(was.sur, now.sur)}</span>
+      <span>生成から変えたマス：<b>${diff.length}件</b>${diff.length ? '（' + Object.keys(by).map(k => `${escapeHtml(k)} ${by[k]}`).join('・') + '）' : ''}</span>
+      <span>${uiIcon('must')}絶対 ${arrow(was.must, now.must)} ／ ${uiIcon('soft')}できれば ${arrow(was.soft, now.soft)}（うち早番と遅番の行き来 ${arrow(was.iki, now.iki)}）／ 余 ${arrow(was.sur, now.sur)}</span>
       ${diff.length ? '<button class="btn" id="editListBtn" style="padding:2px 10px">一覧</button>' : ''}
       ${diff.length ? `<label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="editMarkCb" ${_editMarks ? 'checked' : ''}>表に印</label>` : ''}
     </div>`;
@@ -2741,7 +2754,7 @@ function showEditList() {
   modal.className = 'modal-overlay';
   modal.style.zIndex = 10050;
   modal.innerHTML = `<div class="modal-content" style="max-width:640px">
-      <div class="modal-header"><h3 style="margin:0">✏️ 生成から変えたマス（${diff.length}件）</h3><button class="modal-close" id="elClose">✕</button></div>
+      <div class="modal-header"><h3 style="margin:0">生成から変えたマス（${diff.length}件）</h3><button class="modal-close" id="elClose">✕</button></div>
       <div class="modal-body" style="max-height:60vh;overflow:auto">
         <table class="calendar-table" style="width:100%"><thead><tr><th>日</th><th>人</th><th>生成したとき</th><th>今</th><th>何で変えたか</th></tr></thead>
         <tbody>${diff.map(x => `<tr><td>${x.day}日</td><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.from || '（空）')}</td><td>${escapeHtml(x.to || '（空）')}</td><td>${escapeHtml(x.src)}</td></tr>`).join('')}</tbody></table>
@@ -2891,7 +2904,7 @@ function applyRelaxPlan(plan) {
     if (!AppState.settings.ruleLevels) AppState.settings.ruleLevels = {};
     const before = getRuleLevel(p.type);
     AppState.settings.ruleLevels[p.type] = p.to;
-    const LV = { must: '🔴絶対', should: '🟡できれば', off: 'OFF' };
+    const LV = { must: '絶対', should: 'できれば', off: 'OFF' };
     const nm = (typeof getViolationLabel === 'function') ? getViolationLabel(p.type) : p.type;
     changes.push(`ルール「${nm}」: ${LV[before] || before} → ${LV[p.to] || p.to}`);
   } else if (plan.id === 'balance-tol') {
@@ -2905,7 +2918,7 @@ function applyRelaxPlan(plan) {
   } else if (plan.id === 'maxcons') {
     // 6連勤以上はコンプライアンス違反。上限を6日以上にする設定はしない（念のための守り）
     if (!(p.to < COMPLIANCE_CONS_DAYS)) {
-      toast(`⛔ 連勤の上限を${p.to}日にはできません（${COMPLIANCE_CONS_DAYS}連勤以上はコンプラ違反）`, 'error', 7000);
+      toast(`連勤の上限を${p.to}日にはできません（${COMPLIANCE_CONS_DAYS}連勤以上はコンプラ違反）`, 'error', 7000);
       return changes;   // 何も変えない（呼び出し側は空の一覧を「変更なし」として扱う）
     }
     const before = parseInt(AppState.settings.maxConsecutive) || 0;
@@ -2987,10 +3000,10 @@ function showRelaxModal() {
             : '※ この案は自動では変更しません（希望休は必ず尊重するため）'}</div>`
         : `<button class="btn ${dud ? '' : 'btn-primary'}" data-relax="${i}" style="margin-top:10px">${dud ? 'それでもこの設定にする' : 'この設定にする'}</button>`}
     </div>`;
-  }).join('') : `<div class="hint" style="padding:12px 0">いま提案できる緩和はありません。まず <b>🚀 シフト自動生成</b> を実行するか、<b>🔍 実現性チェック</b> で人手の過不足を確認してください。</div>`;
+  }).join('') : `<div class="hint" style="padding:12px 0">いま提案できる緩和はありません。まず <b>シフト自動生成</b> を実行するか、<b>実現性チェック</b> で人手の過不足を確認してください。</div>`;
 
   modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:780px;width:100%;max-height:85vh;overflow:auto;padding:20px">
-    <h3 style="margin:0 0 4px">🩹 エラー解消プラン</h3>
+    <h3 style="margin:0 0 4px">エラー解消プラン</h3>
     <p class="hint" style="margin:0 0 8px">
       いまのエラーを消すために「どの設定をいくつ動かせばよいか」を並べています。
       <b>上にあるものほど現場への影響が小さい案</b>です。上から順に1つずつ試し、そのつど生成し直すのがおすすめです。
@@ -3004,7 +3017,7 @@ function showRelaxModal() {
          border:1px solid color-mix(in srgb, var(--success) 35%, transparent);font-size:13px;line-height:1.7"></div>
     ${body}
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button id="relaxUndo" class="btn" style="display:none">↩ 変更を元に戻す</button>
+      <button id="relaxUndo" class="btn" style="display:none">${uiIcon('undo')}変更を元に戻す</button>
       <button id="relaxClose" class="btn btn-primary">閉じる</button>
     </div>
   </div>`;
@@ -3035,11 +3048,11 @@ function showRelaxModal() {
       autoSave();
       refreshAllUI();
       $done.style.display = 'block';
-      $done.innerHTML = `✅ <b>設定を変更しました：${escapeHtml(pl.title)}</b><br>` +
+      $done.innerHTML = `${uiIcon('ok')} <b>設定を変更しました：${escapeHtml(pl.title)}</b><br>` +
         (changes.length
           ? changes.slice(0, 12).map(escapeHtml).join('<br>') + (changes.length > 12 ? `<br>…ほか ${changes.length - 12}件` : '')
           : '（変更対象はありませんでした）') +
-        `<br><br>このあと <b>🚀 シフト自動生成</b> を実行してください。`;
+        `<br><br>このあと <b>シフト自動生成</b> を実行してください。`;
       $undo.style.display = 'inline-flex';
       modal.querySelectorAll('[data-relax]').forEach(b => { b.disabled = true; b.textContent = '（他の案を試すには一度閉じてください）'; });
       toast('設定を変更しました。生成し直してください', 'success', 4000);
@@ -3054,7 +3067,7 @@ function showRelaxModal() {
     if (AppState.shifts && Object.keys(AppState.shifts).length) AppState.violations = checkViolations(AppState.shifts);
     autoSave();
     refreshAllUI();
-    $done.innerHTML = '↩ <b>変更を元に戻しました。</b>';
+    $done.innerHTML = uiIcon('undo') + ' <b>変更を元に戻しました。</b>';
     $undo.style.display = 'none';
     toast('元に戻しました', 'info');
   });
@@ -3200,7 +3213,7 @@ async function _trySurplusChange(apply, opts) {
   if (sd.compUp) {
     restore();
     return { ok: false, blocked: true, before, after, sd,
-             message: `⛔ 6連勤以上（コンプラ違反）になるため取り消しました（${words}）` };
+             message: `6連勤以上（コンプラ違反）になるため取り消しました（${words}）` };
   }
   // どれかが増える（🚨の種類・連勤の超過日数・🟡）ときは、取り消さずに本人へ確認する。
   // 合計件数では判断しない（合計が減っても🚨が増えることがある）。
@@ -3299,8 +3312,8 @@ function showSurplusResolveModal() {
     }
     if (canSwap && recoCache !== null && stateFp() !== recoFp) {
       recoCache = null; recoHoldUntil = Date.now() + RECO_HOLD_MS; render();
-      say(`🔄 表が変わったので、おすすめ${pairNew ? 'と🎓の入れられる日' : ''}が変わりました。新しい一覧を確かめてから押してください。`, false);
-    } else if (pairNew) say('🔄 表が変わったので、🎓の入れられる日を探し直しました。', false);
+      say(`${uiIcon('info')} 表が変わったので、おすすめ${pairNew ? 'とそばで教える日' : ''}が変わりました。新しい一覧を確かめてから押してください。`, false);
+    } else if (pairNew) say(uiIcon('info') + ' 表が変わったので、そばで教える日を探し直しました。', false);
     // 押せない理由が無くなったら押せるようにする（2秒たった・確認に答えた・計算が終わった）
     const blocked = recoBlocked();
     modal.querySelectorAll('[data-reco]').forEach(b => { b.disabled = blocked; });
@@ -3326,7 +3339,7 @@ function showSurplusResolveModal() {
     const $m = modal.querySelector('#resolveMsg');
     const words = _diffWords(sd);
     if (!$m) return resolve(confirm(`${words}。実行しますか？`));
-    const lab = (k) => k === 'over' ? '連勤の超過（日）' : k === 'bsOver' ? '切り替えの超過（回）' : k === 'soft' ? '🟡 注意'
+    const lab = (k) => k === 'over' ? '連勤の超過（日）' : k === 'bsOver' ? '切り替えの超過（回）' : k === 'soft' ? 'できれば'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
     const crit = up.filter(x => x.key !== 'soft'), soft = up.filter(x => x.key === 'soft');
     const danger = crit.length > 0;
@@ -3341,14 +3354,14 @@ function showSurplusResolveModal() {
                                              : 'color-mix(in srgb, var(--warning) 45%, transparent)');
     $m.innerHTML = `
       ${danger
-        ? `<div style="font-size:14px"><b>🚨 増える🚨があります</b></div>
+        ? `<div style="font-size:14px"><b>${uiIcon('must')} 増える「絶対」の違反があります</b></div>
            <div style="margin:4px 0 8px">${chips(crit, 'var(--danger)')}</div>`
-        : `<div style="font-size:14px"><b>⚠️ 🟡（注意）だけが増えます</b></div>
-           <div class="hint" style="margin:2px 0 6px">🚨（公休・連勤・人員など）は増えません。</div>`}
+        : `<div style="font-size:14px"><b>${uiIcon('soft')} 「できれば」の違反だけが増えます</b></div>
+           <div class="hint" style="margin:2px 0 6px">「絶対」の違反（公休・連勤・人員など）は増えません。</div>`}
       ${soft.length && danger ? `<div style="margin:2px 0 8px">${chips(soft, 'var(--warning)')}</div>` : ''}
       <div style="margin-top:6px">${escapeHtml(words)}</div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-        <button id="worsenYes" class="btn ${danger ? '' : 'btn-primary'}">${danger ? '🚨が増えても実行する' : '実行する'}</button>
+        <button id="worsenYes" class="btn ${danger ? '' : 'btn-primary'}">${danger ? '「絶対」の違反が増えても実行する' : '実行する'}</button>
         <button id="worsenNo" class="btn ${danger ? 'btn-primary' : ''}">やめる</button>
       </div>`;
     $m.querySelector('#worsenYes').addEventListener('click', () => resolve(true));
@@ -3360,8 +3373,8 @@ function showSurplusResolveModal() {
   const adjustTick = (sec) => {
     const $s = modal.querySelector('#adjSec');
     if (sec > 0 && $s) { $s.textContent = String(sec); return; }
-    say(`⏳ 周りのつじつまを合わせています…（<span id="adjSec">${sec}</span>秒・最大25秒ほど）
-      <button class="btn" data-adjstop="1" style="margin-left:8px;padding:1px 10px;background:var(--surface);color:var(--lv-crit);border-color:var(--lv-crit)">⏹ 中止</button>`, true, true);
+    say(`周りのつじつまを合わせています…（<span id="adjSec">${sec}</span>秒・最大25秒ほど）
+      <button class="btn" data-adjstop="1" style="margin-left:8px;padding:1px 10px;background:var(--surface);color:var(--lv-crit);border-color:var(--lv-crit)">${uiIcon('stop')}中止</button>`, true, true);
   };
   modal.addEventListener('click', (e) => {
     if (e.target && e.target.closest && e.target.closest('[data-adjstop]') && typeof cancelMILP === 'function') cancelMILP();
@@ -3518,7 +3531,7 @@ function showSurplusResolveModal() {
     const best = r[0];
     const tag = (x) => `<b style="color:var(${_diffSign(x.sd) > 0 ? '--danger' : '--success'})">${_diffWords(x.sd)}</b>`;
     const line = (x, i) => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0${i ? ';border-top:1px solid var(--border)' : ''}">
-        <span style="flex:1;min-width:230px">${i === 0 ? '👑 ' : ''}<b>${escapeHtml(x.name)}さん ${x.day}日</b> を
+        <span style="flex:1;min-width:230px">${i === 0 ? '<span class="tag-reco">おすすめ</span> ' : ''}<b>${escapeHtml(x.name)}さん ${x.day}日</b> を
           ${x.kind === 'paid' ? '<b>有給</b>にする'
             : x.kind === 'train' ? `<b>${escapeHtml(x.key)}</b> で ${escapeHtml(x.tutor)}さんのそばに入れる（人数は増えません）`
             : `<b>${escapeHtml(x.key)}</b> で出勤にする（その日の必要人数+1）`}
@@ -3529,7 +3542,7 @@ function showSurplusResolveModal() {
       </div>`;
     const rest = r.slice(1, 4);
     return `<div style="border:2px solid var(--accent);border-radius:10px;padding:12px 14px;margin:10px 0;background:color-mix(in srgb, var(--accent) 7%, var(--surface))">
-      <div style="font-weight:700;margin-bottom:4px">👑 おすすめ（迷ったらこれを押すだけで終わります）</div>
+      <div style="font-weight:700;margin-bottom:4px">おすすめ（迷ったらこれを押すだけで終わります）</div>
       <p class="hint" style="margin:0 0 6px">余のマスごとに、有給にした場合と出勤にした場合を全部試し、エラーの増減を数えて良い順に並べました。</p>
       ${line(best, 0)}
       ${rest.length ? `<details style="margin-top:6px"><summary class="hint" style="cursor:pointer">ほかの案も見る（${rest.length}件）</summary>${rest.map((x, i) => line(x, i + 1)).join('')}</details>` : ''}
@@ -3549,7 +3562,7 @@ function showSurplusResolveModal() {
           <b>入れる日を決めてから表全体を組み直す</b>と、余の位置ごと動かせます。
           定数を1人増やして早番・遅番に入れる案を中心に、研修の案もあわせて比べます。
         </div>
-        <button id="planSearch" class="btn btn-primary">🔁 組み直して比べる（約90秒）</button>
+        <button id="planSearch" class="btn btn-primary">${uiIcon('plan')}組み直して比べる（約90秒）</button>
         <span class="hint" style="margin-left:8px">3通りを同時に計算します</span>
         <div id="planProg" style="margin-top:8px"></div>
       </div>`;
@@ -3562,21 +3575,21 @@ function showSurplusResolveModal() {
       return `<b style="color:var(${sg !== null && sg <= 0 ? '--success' : '--danger'})">${_diffWords(d)}</b>`;
     };
     return `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">
-      <div style="font-weight:700;margin-bottom:4px">🔁 組み直して比べた結果</div>
+      <div style="font-weight:700;margin-bottom:4px">組み直して比べた結果</div>
       <p class="hint" style="margin:0 0 6px">入れる日を決めてから表全体を作り直し、実際の結果で比べました。
         何も足さずに組み直すと <b>${b.n}件・余${b.sur}コマ</b> です。</p>
       ${rows.map((x, i) => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0${i ? ';border-top:1px solid var(--border)' : ''}">
-        <span style="flex:1;min-width:230px">${i === 0 ? '👑 ' : ''}<b>${escapeHtml(x.name)}さん ${x.day}日</b> を
+        <span style="flex:1;min-width:230px">${i === 0 ? '<span class="tag-reco">おすすめ</span> ' : ''}<b>${escapeHtml(x.name)}さん ${x.day}日</b> を
           <b>${escapeHtml(x.key)}</b> で ${escapeHtml(x.tutor)}さんのそばに
           <span class="hint">（${x.kind === 'work' ? 'その日の必要人数+1' : '人数は増やさない'}）</span>　→ ${tag(x)}
           <span class="hint">・余 ${x.sur}コマ</span></span>
         ${(x.compUp || (x.sc && b.sc && x.sc.comp > b.sc.comp))
-          ? '<span class="hint">⛔ 6連勤以上になるため選べません</span>'
+          ? '<span class="hint">' + uiIcon('crit') + ' 6連勤以上になるため選べません</span>'
           : `<button class="btn ${i === 0 ? 'btn-primary' : ''}" data-plan="${i}">この通りに作り直す</button>`}
       </div>`).join('')}
       <div style="margin-top:8px">
-        ${planRows.left ? `<button id="planMore" class="btn btn-primary">➕ さらに候補を探す（残り${planRows.left}件・約90秒）</button>` : '<span class="hint">ほかに候補はありません。</span>'}
-        <button id="planSearch" class="btn" style="margin-left:6px">🔁 最初から探し直す</button>
+        ${planRows.left ? `<button id="planMore" class="btn btn-primary">${uiIcon('plus')}さらに候補を探す（残り${planRows.left}件・約90秒）</button>` : '<span class="hint">ほかに候補はありません。</span>'}
+        <button id="planSearch" class="btn" style="margin-left:6px">最初から探し直す</button>
         <div id="planProg" style="margin-top:8px"></div></div>
     </div>`;
   };
@@ -3598,7 +3611,7 @@ function showSurplusResolveModal() {
     const breakdown = total
       ? Object.keys(byStaff).map(id => `<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 8px;border-radius:999px;background:var(--surface-3);font-size:12px">
           ${escapeHtml(byStaff[id].name)} ${byStaff[id].days.length}コマ（${byStaff[id].days.join('・')}日）</span>`).join('')
-      : '<span class="hint">余はありません 🎉 コマ数はぴったりです。</span>';
+      : '<span class="hint">余はありません。コマ数はぴったりです。</span>';
 
     // 初期値は「余が出ている本人・その日」にする。全員の先頭を出していたため、
     // 余と無関係な人が選ばれ、「この人が入れるシフトがありません」という
@@ -3641,7 +3654,7 @@ function showSurplusResolveModal() {
 
     modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;width:100%;max-height:82vh;display:flex;flex-direction:column;box-shadow:var(--shadow);border:1px solid var(--border)">
       <div id="surplusDrag" style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:move;user-select:none;background:var(--surface-2);border-radius:12px 12px 0 0">
-        <h3 style="margin:0;flex:1;font-size:16px">⚖️ 余の解消</h3>
+        <h3 style="margin:0;flex:1;font-size:16px">余の解消</h3>
         <span class="hint" style="font-size:11px">ここをつかんで動かせます</span>
         <button id="surplusMin" class="btn" style="padding:2px 10px" title="小さくして表を見る">▁</button>
         <button id="surplusX" class="btn" style="padding:2px 10px" title="閉じる">✕</button>
@@ -3665,7 +3678,7 @@ function showSurplusResolveModal() {
       <details style="margin:10px 0"><summary style="cursor:pointer;font-weight:700">自分で指定する（上級者向け）</summary>
 
       <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0">
-        <div style="font-weight:700;margin-bottom:8px">🏖 有給を入れる</div>
+        <div style="font-weight:700;margin-bottom:8px">有給を入れる</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select id="paidStaff" style="min-width:150px">${staffOptions(selPaid.id)}</select>
           <select id="paidDay" style="min-width:130px">${dayOptions(selPaid.id, selPaid.day)}</select>
@@ -3676,7 +3689,7 @@ function showSurplusResolveModal() {
       </div>
 
       <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0">
-        <div style="font-weight:700;margin-bottom:8px">👥 出勤を増やす（その日の必要人数を+1）</div>
+        <div style="font-weight:700;margin-bottom:8px">出勤を増やす（その日の必要人数を+1）</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select id="workStaff" style="min-width:150px">${staffOptions(selWork.id)}</select>
           <select id="workDay" style="min-width:130px">${dayOptions(selWork.id, selWork.day)}</select>
@@ -3691,7 +3704,7 @@ function showSurplusResolveModal() {
       </details>
 
       <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0">
-        <div style="font-weight:700;margin-bottom:4px">🎓 そばで教える日を探す（教育・トレーニング用）</div>
+        <div style="font-weight:700;margin-bottom:4px">そばで教える日を探す（教育・トレーニング用）</div>
         <p class="hint" style="margin:0 0 8px">
           余った人手を教育に使うとき用です。<b>指導役と同じ時間帯</b>に教わる人を入れられる日を探します。<br>
           指導役がすでにその時間帯に出勤している日なら、<b>予定を動かさずに教わる人を足すだけ</b>で済みます。
@@ -3747,9 +3760,9 @@ function showSurplusResolveModal() {
     if (!r || !r.sd) return '';
     const sg = _diffSign(r.sd);
     const comp = r.sd.compUp;
-    const icon = comp ? '⛔' : sg <= 0 ? '✅' : scoreWorsened(r.sd.a, r.sd.b).some(x => x.key !== 'soft') ? '🚨' : '⚠️';
-    const col = comp ? 'var(--lv-crit)' : icon === '🚨' ? 'var(--danger)' : icon === '⚠️' ? 'var(--lv-soft)' : 'var(--success)';
-    return `<span style="color:${col};font-weight:700">${icon} ${escapeHtml(_diffWords(r.sd))}</span>`
+    const icon = comp ? 'crit' : sg <= 0 ? 'ok' : scoreWorsened(r.sd.a, r.sd.b).some(x => x.key !== 'soft') ? 'must' : 'soft';
+    const col = comp ? 'var(--lv-crit)' : icon === 'must' ? 'var(--danger)' : icon === 'soft' ? 'var(--lv-soft)' : 'var(--success)';
+    return `<span style="color:${col};font-weight:700">${uiIcon(icon)} ${escapeHtml(_diffWords(r.sd))}</span>`
          + (comp ? '<span class="hint">（この指定は実行できません）</span>' : '');
   };
 
@@ -3899,7 +3912,7 @@ function showSurplusResolveModal() {
     }
     const top = pairRows.slice(0, 8);
     $r.innerHTML = `<div class="hint" style="margin-bottom:6px">
-        ${escapeHtml(L.name || '')}を<b>${bandLabel(selPair.band)}</b>に入れられる日（エラーが増えにくい順。希望休・🔒固定の日は出しません）</div>`
+        ${escapeHtml(L.name || '')}を<b>${bandLabel(selPair.band)}</b>に入れられる日（エラーが増えにくい順。希望休・固定の日は出しません）</div>`
       + top.map(r => {
           const tag = previewLine(r);
           const note = isTrainKey(r.lk) ? '<span class="hint">（研修なので人員にはカウントされず、定数も増えません）</span>' : '';
@@ -3927,7 +3940,7 @@ function showSurplusResolveModal() {
       // 👑も同じときに数え直す（見張りがあとから別の知らせで上書きしないように）
       const recoToo = recoCache !== null && stateFp() !== recoFp;
       if (recoToo) { recoCache = null; recoHoldUntil = Date.now() + RECO_HOLD_MS; render(); }
-      say(`🔄 表が変わっていたので、入れられる日${recoToo ? 'とおすすめ' : ''}を探し直しました。もう一度お選びください。`, false);
+      say(`${uiIcon('info')} 表が変わっていたので、入れられる日${recoToo ? 'とおすすめ' : ''}を探し直しました。もう一度お選びください。`, false);
       return;
     }
     const row = (pairRows || []).find(x => x.d === d);
@@ -3935,7 +3948,7 @@ function showSurplusResolveModal() {
     const L = AppState.staff.find(x => x.id === selPair.b);
     if (!row || !T || !L) return;
     busy(true);
-    say('⏳ 周りのつじつまを合わせています…', true, true);
+    say('周りのつじつまを合わせています…', true, true);
     const bump = (st, key) => {
       if (!isTrainKey(key)) {   // 研修は人員にカウントされないので定数はそのまま
         const cast = getStaffDepartment(st) === 'cast';
@@ -3959,8 +3972,8 @@ function showSurplusResolveModal() {
       }
     }, { adjust: true, k: 32, confirm: askWorsen, chooseAdjust: askAdjust, onAdjustTick: adjustTick });
     busy(false);
-    say(r.ok ? `${r.hadCritical ? '🚨' : r.worsened ? '⚠️' : '✅'} ${d}日 ${escapeHtml(T.name)}（${escapeHtml(row.tk)}）のそばに ${escapeHtml(L.name)}（${escapeHtml(row.lk)}）を入れました（${r.message}）。${diffText(r)}`
-             : `↩ ${d}日の指定を取り消しました。${r.message}`, r.ok && !r.worsened);
+    say(r.ok ? `${uiIcon(r.hadCritical ? 'must' : r.worsened ? 'soft' : 'ok')} ${d}日 ${escapeHtml(T.name)}（${escapeHtml(row.tk)}）のそばに ${escapeHtml(L.name)}（${escapeHtml(row.lk)}）を入れました（${r.message}）。${diffText(r)}`
+             : `${uiIcon('undo')} ${d}日の指定を取り消しました。${r.message}`, r.ok && !r.worsened);
     pairRows = null; recoDirty = true;
     renderResultTable(); render();
   };
@@ -3970,7 +3983,7 @@ function showSurplusResolveModal() {
     const sd = r && r.sd; if (!sd) return '';
     const up = scoreWorsened(sd.a, sd.b);
     if (!up.length) return '';
-    const lab = (k) => k === 'comp' ? '⛔コンプラ違反' : k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? '🟡'
+    const lab = (k) => k === 'comp' ? '6連勤以上' : k === 'over' ? '連勤の超過' : k === 'bsOver' ? '切り替えの超過' : k === 'soft' ? 'できれば'
       : ((typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[k]) || k);
     return `<br><span class="hint">増えたもの：${up.map(x => escapeHtml(lab(x.key)) + ` ${x.from}→${x.to}${(x.key === 'over' || x.key === 'offShort') ? '日' : x.key === 'bsOver' ? '回' : '件'}`).join('、')}</span>`;
   };
@@ -4128,7 +4141,7 @@ function showSurplusResolveModal() {
           compUp: compWorsened(planRows.base.v, x.r.violations).length > 0, sur: countSurIn(x.r.shifts) })));
       planRows.rows.sort((a, b2) => scoreCompare(a.sc, b2.sc) || (a.sur - b2.sur));
       planRows.left = planQueue.length;
-      say(planRows.rows.length ? '✅ 比べ終わりました。下の一覧からお選びください。' : '組み直せる候補がありませんでした。', true);
+      say(planRows.rows.length ? uiIcon('ok') + ' 比べ終わりました。下の一覧からお選びください。' : '組み直せる候補がありませんでした。', true);
     } catch (e) {
       say('計算に失敗しました: ' + escapeHtml(e.message), false);
     } finally {
@@ -4165,8 +4178,8 @@ function showSurplusResolveModal() {
       AppState.shifts[x.id][x.day] = x.key;
     }, { adjust: false, confirm: askWorsen });
     busy(false);
-    say(r.ok ? `${r.worsened ? '⚠️' : '✅'} ${escapeHtml(st.name)} ${x.day}日 を「${escapeHtml(x.key)}」で ${escapeHtml(x.tutor)}さんのそばに入れました（${r.message}）。${diffText(r)}`
-             : `↩ ${escapeHtml(st.name)} ${x.day}日 の指定を取り消しました。${r.message}`, r.ok && !r.worsened);
+    say(r.ok ? `${uiIcon(r.worsened ? 'soft' : 'ok')} ${escapeHtml(st.name)} ${x.day}日 を「${escapeHtml(x.key)}」で ${escapeHtml(x.tutor)}さんのそばに入れました（${r.message}）。${diffText(r)}`
+             : `${uiIcon('undo')} ${escapeHtml(st.name)} ${x.day}日 の指定を取り消しました。${r.message}`, r.ok && !r.worsened);
     recoDirty = true; renderResultTable(); render();
   };
 
@@ -4182,7 +4195,7 @@ function showSurplusResolveModal() {
       if (!calcBegin('余の使い道の作り直し')) return;
       const histBase = captureChangeBase();   // 作り直しで変えた所を、元に戻すの履歴に積むため
       busy(true);
-      say(`⏳ ${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.key)} に固定して作り直しています…`, true, true);
+      say(`${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.key)} に固定して作り直しています…`, true, true);
       const bV0 = checkViolations(AppState.shifts);
       const bSc = scoreViolations(bV0);
       AppState.fixedShifts[x.id] = AppState.fixedShifts[x.id] || {};
@@ -4204,11 +4217,11 @@ function showSurplusResolveModal() {
         // 作り直した結果が6連勤以上を増やすなら、元に戻す（⛔ で止める。戻すのは下の catch）。
         // ほかの所と同じ判定（新しくできた・伸びた・つながった、または本数が増えた）
         if (_diffOfLists(bV0, AppState.violations).compUp)
-          throw new Error('⛔ 作り直すと6連勤以上（コンプラ違反）になるため、元に戻しました');
+          throw new Error('作り直すと6連勤以上（コンプラ違反）になるため、元に戻しました');
         const sgn = _diffSign(_scoreDiff(bSc, aSc));
         // 元に戻すで、作り直し（表・🔒固定・必要人数+1）を一緒に戻せるようにする
         { const ch = changesOfChangeAndCalc(histBase, histMid); recordDeltaHistory(ch); noteEditList('余の解消', ch); }
-        say(`${sgn <= 0 ? '✅' : '⚠️'} ${escapeHtml(_diffWords(_scoreDiff(bSc, aSc)))}。${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.tutor)}さんのそばに入れて作り直しました（余 ${listSurplusCells().length}コマ）。`, true);
+        say(`${uiIcon(sgn <= 0 ? 'ok' : 'soft')} ${escapeHtml(_diffWords(_scoreDiff(bSc, aSc)))}。${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.tutor)}さんのそばに入れて作り直しました（余 ${listSurplusCells().length}コマ）。`, true);
       } catch (e) {
         // ⛔・中止・失敗のときは、作り直しで変えた所（固定・必要人数+1・計算で動いた表のマス）だけを戻す。
         // 丸ごと戻していたため、計算中に利用者が入れた日ごとの必要人数なども消えていた
@@ -4239,7 +4252,7 @@ function showSurplusResolveModal() {
         const pairToo = !!(pairRows && pairArgs && stateFp() !== pairFp);
         if (pairToo) { pairRows = findPairDays(pairArgs[0], pairArgs[1], pairArgs[2]); pairFp = stateFp(); }
         recoCache = null; recoHoldUntil = Date.now() + 2000; render();
-        say(`🔄 表が変わっていたので、おすすめ${pairToo ? 'と🎓の入れられる日' : ''}を数え直しました。新しい一覧を確かめてから、もう一度お選びください。`, false);
+        say(`${uiIcon('info')} 表が変わっていたので、おすすめ${pairToo ? 'とそばで教える日' : ''}を数え直しました。新しい一覧を確かめてから、もう一度お選びください。`, false);
 
         return;
       }
@@ -4301,9 +4314,9 @@ function showSurplusResolveModal() {
     if ($('pairBand')) $('pairBand').addEventListener('change', e => { selPair.band = e.target.value; pairRows = null; renderPairRows(); });
     if ($('pairFind')) $('pairFind').addEventListener('click', () => {
       const t = selPair.tutors.filter(x => x !== selPair.b);
-      if (!t.length) { say('⚠️ 指導役の候補を1人以上えらんでください。', false); return; }
+      if (!t.length) { say(uiIcon('soft') + ' 指導役の候補を1人以上えらんでください。', false); return; }
       const $r = modal.querySelector('#pairResult');
-      if ($r) $r.innerHTML = '<span class="hint">⏳ 入れられる日を調べています…</span>';
+      if ($r) $r.innerHTML = '<span class="hint">入れられる日を調べています…</span>';
       setTimeout(() => { pairRows = findPairDays(t, selPair.b, selPair.band); pairFp = stateFp(); pairArgs = [t, selPair.b, selPair.band]; renderPairRows(); }, 30);
     });
     renderPairRows();
@@ -4312,7 +4325,7 @@ function showSurplusResolveModal() {
       const id = selPaid.id, d = parseInt(selPaid.day);
       const s = AppState.staff.find(x => x.id === id); if (!s || !d) return;
       const cur = cellOf(id, d);
-      if (cur === '有') { say(`⚠️ ${escapeHtml(s.name)} ${d}日 はすでに有給です。`, false); return; }
+      if (cur === '有') { say(`${uiIcon('soft')} ${escapeHtml(s.name)} ${d}日 はすでに有給です。`, false); return; }
       busy(true);
       const r = await trySurplusChange(() => {
         AppState.requests[id] = AppState.requests[id] || {};
@@ -4322,8 +4335,8 @@ function showSurplusResolveModal() {
         s.paidLeave = (parseInt(s.paidLeave) || 0) + 1;   // 有給の消化日数を1日増やす
       }, { adjust: false, confirm: askWorsen });
       busy(false);
-      say(r.ok ? `${r.hadCritical ? '🚨' : r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を有給にしました（${r.message}）。有給日数は ${s.paidLeave}日 になりました。${diffText(r)}`
-               : `↩ ${escapeHtml(s.name)} ${d}日 の有給を取り消しました。${r.message}`, r.ok && !r.worsened);
+      say(r.ok ? `${uiIcon(r.hadCritical ? 'must' : r.worsened ? 'soft' : 'ok')} ${escapeHtml(s.name)} ${d}日 を有給にしました（${r.message}）。有給日数は ${s.paidLeave}日 になりました。${diffText(r)}`
+               : `${uiIcon('undo')} ${escapeHtml(s.name)} ${d}日 の有給を取り消しました。${r.message}`, r.ok && !r.worsened);
       recoDirty = true; renderResultTable(); render();
     });
 
@@ -4332,7 +4345,7 @@ function showSurplusResolveModal() {
       const id = selWork.id, d = parseInt(selWork.day), key = selWork.key;
       const s = AppState.staff.find(x => x.id === id); if (!s || !d || !key) return;
       busy(true);
-      say('⏳ 周りのつじつまを合わせています…', true, true);
+      say('周りのつじつまを合わせています…', true, true);
       const cast = getStaffDepartment(s) === 'cast';
       const r = await trySurplusChange(() => {
         const store = cast ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
@@ -4346,8 +4359,8 @@ function showSurplusResolveModal() {
         AppState.shifts[id][d] = key;
       }, { adjust: true, k: 24, confirm: askWorsen, chooseAdjust: askAdjust, onAdjustTick: adjustTick });
       busy(false);
-      say(r.ok ? `${r.hadCritical ? '🚨' : r.worsened ? '⚠️' : '✅'} ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。${diffText(r)}`
-               : `↩ ${escapeHtml(s.name)} ${d}日 の「${escapeHtml(key)}」を取り消しました。${r.message}`, r.ok && !r.worsened);
+      say(r.ok ? `${uiIcon(r.hadCritical ? 'must' : r.worsened ? 'soft' : 'ok')} ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。${diffText(r)}`
+               : `${uiIcon('undo')} ${escapeHtml(s.name)} ${d}日 の「${escapeHtml(key)}」を取り消しました。${r.message}`, r.ok && !r.worsened);
       recoDirty = true; renderResultTable(); render();
     });
   };
@@ -4359,7 +4372,7 @@ function showSurplusResolveModal() {
 }
 
 /* ===========================================
-   まとめて固定（ドラッグで範囲選択して 🔒固定 / 🔓解除）
+   まとめて固定（ドラッグで範囲選択して 固定 / 解除）
    Excel のように表の上をなぞって四角い範囲を選び、
    その中のマスをまとめて固定・解除する。
    =========================================== */
@@ -4430,8 +4443,8 @@ const RangeLock = {
     const keep = this.on;
     renderResultTable();
     if (keep) this.enable(true);                // 再描画で消えたモードを戻す
-    toast(this.action === 'lock' ? `🔒 ${n}マスを固定しました（Ctrl+Zで戻せます）`
-                                 : `🔓 ${n}マスの固定を解除しました（Ctrl+Zで戻せます）`, 'success', 3000);
+    toast(this.action === 'lock' ? `${n}マスを固定しました（Ctrl+Zで戻せます）`
+                                 : `${n}マスの固定を解除しました（Ctrl+Zで戻せます）`, 'success', 3000);
   },
 
   bar() {
@@ -4441,8 +4454,8 @@ const RangeLock = {
     bar.id = 'rangeLockBar';
     bar.innerHTML = `
       <b style="font-size:13px">まとめて固定</b>
-      <button class="btn rl-mode ${this.action === 'lock' ? 'active' : ''}" data-rl="lock">🔒 固定する</button>
-      <button class="btn rl-mode ${this.action === 'unlock' ? 'active' : ''}" data-rl="unlock">🔓 解除する</button>
+      <button class="btn rl-mode ${this.action === 'lock' ? 'active' : ''}" data-rl="lock">${uiIcon('lock')}固定する</button>
+      <button class="btn rl-mode ${this.action === 'unlock' ? 'active' : ''}" data-rl="unlock">${uiIcon('unlock')}解除する</button>
       <span class="hint" id="rangeLockCount">表の上をドラッグして範囲を選んでください</span>
       <button class="btn btn-primary" data-rl="close">終了</button>`;
     document.body.appendChild(bar);
@@ -4503,7 +4516,7 @@ document.addEventListener('mouseup', () => {
    途中から作り直す（◯日以降だけ再生成）
    月の途中で予定が変わったとき、すでに配ったぶん（前半）は
    1マスも動かさず、指定日以降だけを作り直す。
-   仕組みは「前日までを🔒で固定してから生成し直す」だけ。
+   仕組みは「前日までを固定してから生成し直す」だけ。
    =========================================== */
 
 function showPartialRegenModal() {
@@ -4535,7 +4548,7 @@ function showPartialRegenModal() {
     modal.innerHTML = `
       <div class="modal-content" style="max-width:560px">
         <div class="modal-header">
-          <h3 style="margin:0">📅 途中から作り直す</h3>
+          <h3 style="margin:0">途中から作り直す</h3>
           <button class="modal-close" id="prClose">✕</button>
         </div>
         <div class="modal-body" style="padding:18px 20px">
@@ -4553,8 +4566,8 @@ function showPartialRegenModal() {
           </div>
 
           <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;line-height:1.8">
-            🔒 <b>1日 〜 ${cut - 1}日</b>（${wd(cut - 1)}まで）の <b>${countCells(cut)}マス</b> をそのまま固定します<br>
-            🔄 <b>${cut}日 〜 ${days}日</b> を作り直します
+            ${uiIcon('lock')} <b>1日 〜 ${cut - 1}日</b>（${wd(cut - 1)}まで）の <b>${countCells(cut)}マス</b> をそのまま固定します<br>
+            ${uiIcon('partial')} <b>${cut}日 〜 ${days}日</b> を作り直します
           </div>
 
           <p class="hint" style="margin:0 0 14px">
@@ -4563,8 +4576,8 @@ function showPartialRegenModal() {
           </p>
 
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button id="prGoDeep" class="btn btn-primary">🎯 じっくり作り直す（最大10分）</button>
-            <button id="prGoFast" class="btn">⚡ 速く作り直す（最大60秒）</button>
+            <button id="prGoDeep" class="btn btn-primary">${uiIcon('gen-deep')}じっくり作り直す（最大10分）</button>
+            <button id="prGoFast" class="btn">${uiIcon('gen-fast')}速く作り直す（最大60秒）</button>
             <button id="prCancel" class="btn">やめる</button>
           </div>
         </div>
@@ -4597,11 +4610,11 @@ function showPartialRegenModal() {
         AppState.settings.ignoreVioBeforeDay = bkCut;
         AppState.violations = checkViolations(AppState.shifts);
         saveToStorage(); refreshAllUI();
-        toast('作り直しをやめたので、前半の🔒固定と「◯日以前は数えない」を元に戻しました', 'info', 6000);
+        toast('作り直しをやめたので、前半の固定と「◯日以前は数えない」を元に戻しました', 'info', 6000);
       } });
       const n = applyPartialLock(cut);
       close();
-      toast(`🔒 1〜${cut - 1}日の ${n}マス を固定しました。${cut}日以降を作り直します…`, 'info', 4000);
+      toast(`1〜${cut - 1}日の ${n}マス を固定しました。${cut}日以降を作り直します…`, 'info', 4000);
       // 自動生成タブへ移動してから実行（進捗バーが見えるように）
       const gt = document.querySelector('.tab[data-tab="generate"]');
       if (gt) gt.click();
@@ -4664,7 +4677,7 @@ function renderPartialIgnoreBanner() {
   host.style.display = 'block';
   host.style.cssText = 'display:block;margin:0 0 10px;padding:8px 12px;border-radius:8px;font-size:13px;line-height:1.7;'
     + 'background:color-mix(in srgb, var(--accent) 12%, var(--surface));border:1px solid color-mix(in srgb, var(--accent) 35%, transparent)';
-  host.innerHTML = `📅 <b>1日〜${cut - 1}日は確定済み</b>として、エラー集計から<b>${hidden}件</b>を除外しています`
+  host.innerHTML = `${uiIcon('calendar')} <b>1日〜${cut - 1}日は確定済み</b>として、エラー集計から<b>${hidden}件</b>を除外しています`
     + `（もう直せないため）。<a href="#" id="pibClear" style="margin-left:6px">月全体を集計に戻す</a>`;
   const a = host.querySelector('#pibClear');
   if (a) a.addEventListener('click', e => { e.preventDefault(); if (calcBusy()) { calcBusyToast(); return; } clearPartialIgnore(); });
@@ -4948,7 +4961,7 @@ const SP_KINDS = [
   { kind: 'yo', head: '(c) 自分の余の日に足す（公休は減りません）',
     note: '教わる人がその日「余」の日です。余は公休に数えないので、入れても公休は減りません。' },
   { kind: 'off', head: '(b) 休みの日に足す（公休が減ります）',
-    note: '⚠️ 教わる人の休みの日に出勤を入れます。選んだ日数だけ、教わる人の公休が減ります。' },
+    note: '教わる人の休みの日に出勤を入れます。選んだ日数だけ、教わる人の公休が減ります。' },
 ];
 
 // 「入れてみた前後」を比べる共通の物差し（optimizer.js の scoreViolations と同じ）。
@@ -4983,31 +4996,31 @@ function _diffCmp(x, y) {
 function _diffWords(d) {
   if (!d) return '';
   const b = d.b, a = d.a, ch = [];
-  if (a.comp !== b.comp) ch.push(`⛔コンプラ違反 ${b.comp}→${a.comp}件`);
+  if (a.comp !== b.comp) ch.push(`6連勤以上 ${b.comp}→${a.comp}件`);
   // 🚨は⛔（6連勤以上）を除いた件数で出す（⛔は別に出す）
-  if (a.must - a.comp !== b.must - b.comp) ch.push(`🚨 ${b.must - b.comp}→${a.must - a.comp}件`);
+  if (a.must - a.comp !== b.must - b.comp) ch.push(`絶対 ${b.must - b.comp}→${a.must - a.comp}件`);
   if (a.over !== b.over) ch.push(`連勤の超過 ${b.over}→${a.over}日`);
   if ((a.offShort || 0) !== (b.offShort || 0)) ch.push(`公休の不足 ${b.offShort || 0}→${a.offShort || 0}日`);
   if ((a.bsOver || 0) !== (b.bsOver || 0)) ch.push(`切り替えの超過 ${b.bsOver || 0}→${a.bsOver || 0}回`);
-  if (a.soft !== b.soft) ch.push(`🟡 ${b.soft}→${a.soft}件`);
+  if (a.soft !== b.soft) ch.push(`できれば ${b.soft}→${a.soft}件`);
   const sg = _diffSign(d);
-  const head = d.compUp ? '⛔ コンプラ違反（6連勤以上）になります・伸びます'
+  const head = d.compUp ? 'コンプラ違反（6連勤以上）になります・伸びます'
              : sg < 0 ? '良くなります' : sg === 0 ? '変わりません'
              : sg === 1 ? '悪くなります' : '減るものと増えるものがあります';
   // 🚨の種類が入れ替わっただけ（件数は同じ）のときも分かるように、増えた種類を出す
   const up = scoreWorsened(a, b).filter(x => x.key !== 'comp' && x.key !== 'over' && x.key !== 'bsOver' && x.key !== 'offShort' && x.key !== 'soft')
     .map(x => `${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[x.key]) || x.key} +${x.to - x.from}`);
-  if (sg === 2 && up.length) ch.push('増える🚨: ' + up.join('・'));
+  if (sg === 2 && up.length) ch.push('増える「絶対」の違反: ' + up.join('・'));
   return ch.length ? `${head}（${ch.join('・')}）` : head;
 }
 
 function _spMark(r) {
-  if (r.sd && r.sd.compUp) return '⛔';   // 6連勤以上になる・伸びる（コンプラ違反）
+  if (r.sd && r.sd.compUp) return uiIcon('crit');   // 6連勤以上になる・伸びる（コンプラ違反）
   const sg = _diffSign(r.sd);
-  if (sg === 0) return '⭐';
-  if (sg > 0)   return '⚠️';
-  if (sg < 0)   return '🎉';
-  return (r.warn && r.warn.length) ? '⚠️' : '⭐';
+  if (sg === 0) return uiIcon('check');
+  if (sg > 0)   return uiIcon('soft');
+  if (sg < 0)   return uiIcon('ok');
+  return (r.warn && r.warn.length) ? uiIcon('soft') : uiIcon('check');
 }
 function _spDeltaTag(r) {
   if (!r.sd) return '';
@@ -5124,7 +5137,7 @@ function showSurplusPlanModal() {
       || _diffCmp(a.sd, b.sd) || (a.d - b.d));
     rowsFp = fpNow(); rowsLearner = true;
     render();
-    if (why) toast('🔄 表が変わったので、入れられる日を数え直しました。選び直してください', 'warning', 6000);
+    if (why) toast('表が変わったので、入れられる日を数え直しました。選び直してください', 'warning', 6000);
   };
   const fpTimer2 = setInterval(() => {
     if (!modal.isConnected) { clearInterval(fpTimer2); return; }
@@ -5172,7 +5185,7 @@ function showSurplusPlanModal() {
         <label style="display:flex;gap:10px;align-items:flex-start;cursor:${r.blocked ? 'not-allowed' : 'pointer'}">
           <input type="checkbox" data-sp="${i}" ${r.checked && !r.blocked ? 'checked' : ''} ${r.blocked ? 'disabled' : ''} style="margin-top:3px"/>
           <span style="flex:1">
-            <b>${r.blocked ? '🚫' : _spMark(r)} ${r.d}日(${wdOf(r.d)})</b>
+            <b>${r.blocked ? uiIcon('close') : _spMark(r)} ${r.d}日(${wdOf(r.d)})</b>
             <span class="hint" style="margin-left:6px">${curTxt}</span>
             ${r.blocked ? '' : kindTag(r)}
             ${r.blocked ? '' : `<div style="margin-top:2px">${r.keys && r.keys.length > 1
@@ -5182,12 +5195,12 @@ function showSurplusPlanModal() {
               ${r.already ? '<span class="hint" style="margin-left:6px">（設定済み）</span>' : ''}</div>`}
             <div class="hint" style="margin-top:2px">
               ${r.blocked ? `<span style="color:var(--danger)">${escapeHtml(r.blocked)}</span><br>` : ''}
-              ${r.roleNote ? `🔁 ${escapeHtml(r.roleNote)}<br>` : ''}
+              ${r.roleNote ? `${escapeHtml(r.roleNote)}<br>` : ''}
               ${tu.length
                 ? '指導役（いまの表で同じ時間帯）: ' + tu.map(t => `${escapeHtml(t.s.name)}（${escapeHtml(t.v)}）`).join('・')
-                : '<span style="color:var(--danger)">⚠️ この時間帯に指導役がいません（いまの表）</span>'}
-              ${pinT ? `<br>🔒 ${escapeHtml(pinT.s.name)}さんを「${escapeHtml(pinT.v)}」で固定します` : ''}
-              ${(r.warn || []).map(w => `<br><span style="color:var(--danger)">⚠️ ${escapeHtml(w)}</span>`).join('')}
+                : '<span style="color:var(--danger)">' + uiIcon('soft') + ' この時間帯に指導役がいません（いまの表）</span>'}
+              ${pinT ? `<br>${uiIcon('lock')} ${escapeHtml(pinT.s.name)}さんを「${escapeHtml(pinT.v)}」で固定します` : ''}
+              ${(r.warn || []).map(w => `<br><span style="color:var(--danger)">${uiIcon('soft')} ${escapeHtml(w)}</span>`).join('')}
             </div>
           </span>
         </label>
@@ -5201,33 +5214,33 @@ function showSurplusPlanModal() {
     const c = learnerCap(); const t = c ? Math.max(0, c.surplus) : 0;
     let h = `余り ${t}人日 ／ 選んだ日 <b>${n}日</b>（出勤日 ${na}・自分の余 ${nc}・休みの日 ${nb}）`
           + ` → 生成し直したあとの余の見込み <b>${Math.max(0, t - n)}人日</b>`;
-    if (nb) h += `<br><span style="color:var(--danger)">⚠️ 休みの日を ${nb}日 選んでいます。教わる人の公休が ${nb}日 減ります。</span>`;
-    if (n > t) h += `<br><span style="color:var(--danger)"><b>⚠️ 余りより ${n - t}日 多く選んでいます。</b>人が足りない日が出るか、ほかの人の公休が減ります。</span>`;
+    if (nb) h += `<br><span style="color:var(--danger)">${uiIcon('soft')} 休みの日を ${nb}日 選んでいます。教わる人の公休が ${nb}日 減ります。</span>`;
+    if (n > t) h += `<br><span style="color:var(--danger)"><b>${uiIcon('soft')} 余りより ${n - t}日 多く選んでいます。</b>人が足りない日が出るか、ほかの人の公休が減ります。</span>`;
     return h;
   };
   const trialHtml = () => {
-    if (trialRunning) return `<div class="hint">⏳ 試しに作っています（1分生成と同じ計算。本物の表は変えません）…
-      <button id="spTrialStop" class="btn" style="margin-left:8px">⏹ 中止</button></div>`;
+    if (trialRunning) return `<div class="hint">試しに作っています（1分生成と同じ計算。本物の表は変えません）…
+      <button id="spTrialStop" class="btn" style="margin-left:8px">${uiIcon('stop')}中止</button></div>`;
     if (!trial) return '';
     const stale = trial.fp !== fpNow() || trial.key !== pickKey();
     const d = trial.diff, sg = _diffSign(d);
     const mustUp = scoreWorsened(d.a, d.b).filter(x => x.key !== 'soft');
     const td = (a, b) => `<td style="padding:3px 8px">${a}</td><td style="padding:3px 8px">${b}</td>`;
     return `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px">
-      <div style="font-weight:700;margin-bottom:4px">🧪 試しに作った結果（${trial.n}日を選んだ場合・本物の表は変えていません）</div>
-      ${stale ? '<div style="color:var(--danger)">⚠️ 選び方か表が変わったので、この結果は古くなっています。もう一度押してください。</div>' : ''}
+      <div style="font-weight:700;margin-bottom:4px">試しに作った結果（${trial.n}日を選んだ場合・本物の表は変えていません）</div>
+      ${stale ? '<div style="color:var(--danger)">' + uiIcon('soft') + ' 選び方か表が変わったので、この結果は古くなっています。もう一度押してください。</div>' : ''}
       <table style="border-collapse:collapse;font-size:13px">
         <tr><th></th><th style="padding:3px 8px">いまの表</th><th style="padding:3px 8px">試しに作った表</th></tr>
         <tr><td style="padding:3px 8px">表の「余」のマス（この部門）</td>${td(trial.yo0 + '人日', '<b>' + trial.yo1 + '人日</b>')}</tr>
         <tr><td style="padding:3px 8px">${escapeHtml(trial.name)}さんの公休</td>${td(trial.off0 + '日', '<b>' + trial.off1 + '日</b>')}</tr>
         <tr><td style="padding:3px 8px">選んだ日に入った</td>${td('―', trial.placed + '/' + trial.n + '日')}</tr>
         <tr><td style="padding:3px 8px">選んだ日に指導役がいた</td>${td(trial.tut0 + '/' + trial.n + '日', trial.tut1 + '/' + trial.n + '日')}</tr>
-        <tr><td style="padding:3px 8px">⛔ 6連勤以上</td>${td(d.b.comp + '件', d.a.comp + '件')}</tr>
-        <tr><td style="padding:3px 8px">🚨（⛔を除く）</td>${td((d.b.must - d.b.comp) + '件', (d.a.must - d.a.comp) + '件')}</tr>
-        <tr><td style="padding:3px 8px">🟡</td>${td(d.b.soft + '件', d.a.soft + '件')}</tr>
+        <tr><td style="padding:3px 8px">${uiIcon('crit')} 6連勤以上</td>${td(d.b.comp + '件', d.a.comp + '件')}</tr>
+        <tr><td style="padding:3px 8px">${uiIcon('must')} 絶対（6連勤以上を除く）</td>${td((d.b.must - d.b.comp) + '件', (d.a.must - d.a.comp) + '件')}</tr>
+        <tr><td style="padding:3px 8px">${uiIcon('soft')} できれば</td>${td(d.b.soft + '件', d.a.soft + '件')}</tr>
       </table>
       <div style="margin-top:4px;color:${mustUp.length || d.compUp ? 'var(--danger)' : 'inherit'}">${_diffWords(d)}</div>
-      ${mustUp.length || d.compUp ? '<div style="color:var(--danger)"><b>🚨 が増えます。</b>選ぶ日を減らすか、別の日にしてください。</div>' : ''}
+      ${mustUp.length || d.compUp ? '<div style="color:var(--danger)"><b>' + uiIcon('must') + ' 「絶対」の違反が増えます。</b>選ぶ日を減らすか、別の日にしてください。</div>' : ''}
       <div class="hint">生成は1回ごとに少し変わります。実際に生成し直した結果とは少し違うことがあります。</div>
     </div>`;
   };
@@ -5246,12 +5259,12 @@ function showSurplusPlanModal() {
     const tst = genTableState();
     const tableNote = !sel.learner ? ''
       : tst === 'none' ? `<div id="spNoTable" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--danger) 12%, var(--surface))">
-          ⚠️ この月の表をまだ作っていないので、教わる人がどの日に出勤するか（(a) 出勤日）が分かりません。<b>まず一度生成してから使ってください。</b></div>`
+          ${uiIcon('soft')} この月の表をまだ作っていないので、教わる人がどの日に出勤するか（(a) 出勤日）が分かりません。<b>まず一度生成してから使ってください。</b></div>`
       : tst === 'stale' ? `<div id="spStale" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--warning) 16%, var(--surface))">
-          ⚠️ 表を作ったあとに、希望や設定（必要人数・担当など）を変えています。いまの表で出勤日・休みの日を分けていますが、
+          ${uiIcon('soft')} 表を作ったあとに、希望や設定（必要人数・担当など）を変えています。いまの表で出勤日・休みの日を分けていますが、
           古い表なので、<b>生成し直してから使うと確かです。</b></div>` : '';
     const picker = `<div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px">
-      <div style="font-weight:700;margin-bottom:6px">🎓 教える相手を決めて入れる（トレーニング）</div>
+      <div style="font-weight:700;margin-bottom:6px">教える相手を決めて入れる（トレーニング）</div>
       <div class="hint" style="margin-bottom:8px">
         余った人日を使って、<b>教わる人を指導役のいる日に入れます</b>。いまの表で、教わる人が
         <b>(a) もう出勤している日</b>・<b>(c) 自分の余の日</b>・<b>(b) 休みの日</b> に分けて出します。
@@ -5273,7 +5286,7 @@ function showSurplusPlanModal() {
       </div>
       <label style="display:block;font-size:13px;margin-top:6px">
         <input type="checkbox" id="spPinTutor" ${sel.pinTutor ? 'checked' : ''}/>
-        その日の指導役も🔒で固定する（生成し直すと指導役が動いて、いなくなることがあるため）</label>
+        その日の指導役も固定する（生成し直すと指導役が動いて、いなくなることがあるため）</label>
       ${tableNote}
     </div>`;
     let list;
@@ -5324,7 +5337,7 @@ function showSurplusPlanModal() {
                    <b>「教わる人」を選んで出し直すと、もっと多くの候補が出ます。</b></div>`))
       : '';
     modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:720px;width:100%;max-height:88vh;overflow:auto;padding:20px">
-      <h3 style="margin:0 0 4px">⚖️ 余の使い道を決める</h3>
+      <h3 style="margin:0 0 4px">余の使い道を決める</h3>
       <p class="hint" style="margin:0 0 10px">
         出せる人日が必要人日より多いと、その差は「余（あまり）」として休みになります。
         <b>どこかの必要人数を増やして出勤に回すと、余がなくなります。</b>
@@ -5340,7 +5353,7 @@ function showSurplusPlanModal() {
       <div id="spTrial" style="margin-top:8px">${isTrain ? trialHtml() : ''}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center">
         <button id="spCalc" class="btn ${rows === null ? 'btn-primary' : ''}" ${trialRunning ? 'disabled' : ''}>${rows === null ? '候補を出す' : '出し直す'}</button>
-        ${isTrain ? `<button id="spTrialGo" class="btn" ${trialRunning || !picked ? 'disabled' : ''}>🧪 試しに作って確かめる（1分ほど）</button>` : ''}
+        ${isTrain ? `<button id="spTrialGo" class="btn" ${trialRunning || !picked ? 'disabled' : ''}>${uiIcon('test')}試しに作って確かめる（1分ほど）</button>` : ''}
         ${rows && rows.length ? `<button id="spApply" class="btn btn-primary" ${trialRunning ? 'disabled' : ''}>選んだ ${picked}件 を必要人数に反映する</button>` : ''}
         <span style="flex:1"></span>
         <span class="hint" id="spCount2">余り ${total}人日 / 選択 ${picked}件</span>
@@ -5372,7 +5385,7 @@ function showSurplusPlanModal() {
         if (cc && cc.runs.length) {
           const name = rows[0].learnerName;
           $w.style.display = 'block';
-          $w.innerHTML = '<b>⛔ このまま進めると連勤超過になります</b><br>'
+          $w.innerHTML = '<b>' + uiIcon('must') + ' このまま進めると連勤超過になります</b><br>'
             + cc.runs.map(r => `${escapeHtml(name)}さん：${r.from}日〜${r.to}日 が続けて出勤`
                 + (r.withPrev ? `（前月末の${r.prev}連勤と合わせて${r.total}連勤）` : `（${r.total}連勤）`)
                 + ` → 上限${cc.max}日を ${r.over}日 超過。この中から ${r.over}日 ぶんチェックを外してください`).join('<br>');
@@ -5439,13 +5452,13 @@ function showSurplusPlanModal() {
       }
       rowsLearner = false;
       if (!calcBegin('余の使い道の試し計算')) return;
-      $c.disabled = true; $c.textContent = '⏳ 計算中…';
+      $c.disabled = true; $c.textContent = '計算中…';
       try {
         // 「余を残すな」と指示して解かせる。押し出しの強さは、実測では 8000 だと半分しか出ず、
         // 20000 で余ゼロまで届いた。設定は書き換えず、この計算にだけ渡す。
         // 試し計算なので、結果は本物の表に反映しない（noApply）。候補を拾うのにだけ使う。
         const res = await optimizeScheduleMILP(
-          (pct, msg) => { $c.textContent = '⏳ ' + String(msg || '').slice(0, 22); },
+          (pct, msg) => { $c.textContent = String(msg || '').slice(0, 22); },
           { fastMode: true, pickBy: 'surplus', noApply: true,
             settingsPatch: { useUpSurplus: true, penalties: { offSurplusUnused: 20000 } } });
         rows = _collectSurplusRows(res._shifts);
@@ -5514,8 +5527,8 @@ function showSurplusPlanModal() {
       autoSave(); refreshAllUI();
       const who = rowsLearner && pick[0] && pick[0].learnerName;
       const nb = pick.filter(r => r.kind === 'off').length;
-      toast(`${pick.length}件を反映しました${who ? '（' + who + 'さんをその日そのシフトに🔒固定しました' + (sel.pinTutor ? '。指導役も🔒しました' : '') + '）' : ''}。`
-        + (nb ? `休みの日 ${nb}日 ぶん公休が減ります。` : '') + '続けて生成し直してください（↩ で元に戻せます）', 'success', 8000);
+      toast(`${pick.length}件を反映しました${who ? '（' + who + 'さんをその日そのシフトに固定しました' + (sel.pinTutor ? '。指導役も固定しました' : '') + '）' : ''}。`
+        + (nb ? `休みの日 ${nb}日 ぶん公休が減ります。` : '') + '続けて生成し直してください（「元に戻す」で戻せます）', 'success', 8000);
       modal.remove();
     });
   };
@@ -5585,11 +5598,11 @@ function computeNextStep() {
   const S = (t, d, opt) => Object.assign({ title: t, detail: d }, opt || {});
   if (!AppState.staff.length) {
     return S('スタッフを登録してください',
-             'まず「👥 スタッフ管理」で、シフトに入る方を登録します。', { goTab: 'staff', btn: 'スタッフ管理をひらく' });
+             'まず「スタッフ管理」で、シフトに入る方を登録します。', { goTab: 'staff', btn: 'スタッフ管理をひらく' });
   }
   if (!AppState.settings.targetMonth) {
     return S('対象の月を決めてください',
-             '「⚙️ 基本設定」で、何月のシフトを作るかを選びます。', { goTab: 'settings', btn: '基本設定をひらく' });
+             '「基本設定」で、何月のシフトを作るかを選びます。', { goTab: 'settings', btn: '基本設定をひらく' });
   }
   const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound() : null;
   const hard = (lb && lb.reasons) || [];
@@ -5613,22 +5626,22 @@ function computeNextStep() {
     lines.push(hard.length ? `・先に直すところが ${hard.length}件 あります` : '・先に直すところはありません');
     lines.push(sur0 > 0 ? `・余（あまり）が ${sur0}人日 あります` : '・余（あまり）はありません');
     return S('シフトを作ります', 'いまの状態はこちらです。\n' + lines.join('\n'),
-             { why: '下の「🧭 順番に確認して生成する」を押すと、確認しながら順番に進められます。' });
+             { why: '下の「順番に確認して生成する」を押すと、確認しながら順番に進められます。' });
   }
 
   // ③ 設定を変えた直後は、まず作り直してもらう
   if (AppState._needsRegen) {
     return S('設定を変えました。作り直してください',
              '変えた設定は、シフトを作り直して初めて反映されます。いまの表はまだ前の設定のままです。',
-             { btn: '🎯 じっくり生成で作り直す', run: 'generate',
-               skip: '⚡ 速い生成で様子を見る', skipRun: 'generateFast',
+             { btn: 'じっくり生成で作り直す', run: 'generate',
+               skip: '速い生成で様子を見る', skipRun: 'generateFast',
                why: '作り直すと、いま見えているエラーの数も変わります。' });
   }
 
   // ③ 作ったあと
   const vios = AppState.violations || [];
   if (!vios.length) {
-    return S('🎉 完成です', 'エラーはありません。「📊 シフト表」から Excel や CSV に書き出せます。',
+    return S('完成です', 'エラーはありません。「シフト表」から Excel や CSV に書き出せます。',
              { ok: true, goTab: 'result', btn: 'シフト表をひらく' });
   }
   // 6連勤以上（コンプラ違反）が残っているときは、ほかより先にそれを直してもらう。
@@ -5637,7 +5650,7 @@ function computeNextStep() {
   if (comps.length) {
     const nm = (id) => (AppState.staff.find(s => s.id === id) || {}).name || '';
     const lines = comps.slice(0, 5).map(v => `・${nm(v.staffId)}さん ${v.from >= 1 ? v.from + '日' : '前月'}〜${v.to}日（${v.len}連勤）`);
-    return S(`⛔ コンプラ違反（6連勤以上）が ${comps.length}件 あります。先に直してください`,
+    return S(`コンプラ違反（6連勤以上）が ${comps.length}件 あります。先に直してください`,
              lines.join('\n') + (comps.length > 5 ? `\n・ほか ${comps.length - 5}件` : '')
              + '\n\n連勤の途中に休みを入れてください（ほかの人と休みを入れ替える、または作り直す）。'
              + '連勤の上限を上げても消えません。',
@@ -5659,12 +5672,12 @@ function computeNextStep() {
     return S(`エラー ${vios.length}件 のうち、設定を見直さないと減らないものがあります`,
              r.text + (r.fix ? '\n\n→ ' + r.fix : ''),
              { danger: true, more: hard.length - 1,
-               btn: '🧭 設定を見直す（ウィザード）', run: 'wizard',
+               btn: '設定を見直す（ウィザード）', run: 'wizard',
                skip: 'このまま使う（シフト表をひらく）', skipRun: 'result',
                why: '配置をどう変えても消えないので、希望休か必要人数のどちらかを動かす必要があります。' });
   }
   return S(`エラー ${vios.length}件 はここまでです`,
-           '設定を緩めても、これ以上は減りません。残りは「📊 シフト表」で手直しするか、'
+           '設定を緩めても、これ以上は減りません。残りは「シフト表」で手直しするか、'
            + 'このまま運用してください。どうしても減らしたい場合は、希望休や必要人数の見直しが必要です。',
            { goTab: 'result', btn: 'シフト表をひらく',
              why: 'これ以上は、いまの条件では数学的に減らせないところまで来ています。' });
@@ -5763,7 +5776,7 @@ function showGenerateWizard() {
       html: `<p>必要人数を「条件」で決めておくと、<b>月が変わっても日付が自動で決まります</b>。
              毎月カレンダーに入れ直す必要がなくなり、入れ違いも起きません。</p>
         <div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px">
-          <div style="font-weight:700;margin-bottom:6px">🌟 特別日（今月の日付）</div>
+          <div style="font-weight:700;margin-bottom:6px">特別日（今月の日付）</div>
           <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;font-size:13px">
             <span>入れ替え日</span><input type="text" id="wzRepl" value="${spDays('replacement')}" placeholder="例: 4,18,25" style="width:100%"/>
             <span>新装日</span><input type="text" id="wzRenw" value="${spDays('renewal')}" placeholder="例: 5,19,26" style="width:100%"/>
@@ -5771,7 +5784,7 @@ function showGenerateWizard() {
           </div>
           <div class="hint" style="margin-top:6px">カンマ区切りで日付を入れてください。入れるとすぐ下のルールに反映されます。</div>
         </div>
-        <div style="font-weight:700;margin-bottom:6px">📐 必要人数のルール</div>
+        <div style="font-weight:700;margin-bottom:6px">必要人数のルール</div>
         <div id="wzRules" style="max-height:38vh;overflow:auto"></div>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
           <button id="wzAddRule" class="btn">＋ ルールを追加</button>
@@ -5821,7 +5834,7 @@ function showGenerateWizard() {
     const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound() : null;
     const notes = (lb && lb.notes || []).map(n =>
       `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--accent) 10%, var(--surface))">
-         💡 ${escapeHtml(n.text)}<div class="hint">${escapeHtml(n.fix || '')}</div></div>`).join('');
+         ${uiIcon('info')} ${escapeHtml(n.text)}<div class="hint">${escapeHtml(n.fix || '')}</div></div>`).join('');
     return {
       html: `<p>既定の人数と違う日だけを並べています。<b>「ルール」は自動、「手入力」は直接入れた分</b>です。
              <b>この場で直せます。</b>「手入力を消す」を押すと、ルールどおりの人数に戻ります。</p>
@@ -5867,7 +5880,7 @@ function showGenerateWizard() {
     const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound() : null;
     const hard = (lb && lb.reasons) || [];
     if (!hard.length) {
-      return { html: `<p>✅ <b>噛み合わせの問題はありません。</b></p>
+      return { html: `<p>${uiIcon('ok')} <b>噛み合わせの問題はありません。</b></p>
         <p class="hint">希望休・スキル・役割・連勤のどれにも、「どう並べても必ずエラーになる」組み合わせは見つかりませんでした。</p>` };
     }
     const html = hard.map((r, i) => `
@@ -5876,7 +5889,7 @@ function showGenerateWizard() {
         ${r.act ? `<button class="btn btn-primary" data-wzfix="${i}" style="margin-top:8px">${escapeHtml(r.act.label)}</button>`
                 : `<div class="hint" style="margin-top:4px">${escapeHtml(r.fix || '手で直してください')}</div>`}
       </div>`).join('');
-    return { html: `<p>🚨 <b>直すところが ${hard.length}件 あります。</b>
+    return { html: `<p>${uiIcon('must')} <b>直すところが ${hard.length}件 あります。</b>
         ${lb.minErrors > 0 ? `このままだと、どう並べても ${lb.minErrors}件 のエラーが残ります。` : ''}</p>
       <p class="hint">ボタンがあるものは、押すだけで直ります。無いものは書いてある場所を直してください。</p>
       <div style="max-height:44vh;overflow:auto">${html}</div>`,
@@ -5886,7 +5899,7 @@ function showGenerateWizard() {
   const body4 = () => {
     let sur = 0;
     getDepartmentGroups(AppState.staff).forEach(g => { const c = calcCapacity(g, days()); if (c.surplus > 0) sur += c.surplus; });
-    if (sur <= 0) return { html: `<p>✅ 余り（使われずに休みになる人日）はありません。</p>` };
+    if (sur <= 0) return { html: `<p>${uiIcon('ok')} 余り（使われずに休みになる人日）はありません。</p>` };
     const tutors = (AppState.staff || []).filter(s => s.positionType === 'viceManager' || s.positionType === 'chief');
     return { html: `<p><b>余りが ${sur}人日 あります。</b>このままだと、その分は休みになります。</p>
       <p class="hint">トレーニングに使う場合は、<b>教わる人</b>を決めて、指導役がいる日に追加で出勤させます。
@@ -5945,7 +5958,7 @@ function showGenerateWizard() {
         <span style="flex:1">
           <b>${escapeHtml(x.label)}</b>
           <div class="hint" style="margin-top:2px;color:${x.ok ? 'var(--text-soft)' : 'var(--danger)'}">
-            ${x.ok ? (x.info ? 'ℹ️' : '✅') : '⚠️'} ${escapeHtml(x.now)}
+            ${uiIcon(x.ok ? (x.info ? 'info' : 'ok') : 'soft')} ${escapeHtml(x.now)}
           </div>
         </span>
         ${(x.go || x.step) ? `<button class="btn" data-ckgo="${x.id}" style="padding:2px 10px;font-size:12px;align-self:center">見に行く</button>` : ''}
@@ -5961,12 +5974,12 @@ function showGenerateWizard() {
         <div style="border:1px solid var(--border);border-radius:8px">${rows}</div>
         <div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--surface-2);line-height:1.9">
           ${floor > 0
-            ? `⚠️ <b>どう並べても ${floor}件 のエラーは残ります</b>（証明済み）。それ以外は並べ方しだいで消せます。`
-            : `✅ <b>「どう並べても残るエラー」はありません。</b>並び方のルール（連休の長さ・時間帯の切替など）によるエラーは出ることがあります。`}
-          ${best ? `<br>💡 前回の表では「${escapeHtml(best.title)}」で ${best.measured.gain}件 減りました。` : ''}
+            ? `${uiIcon('soft')} <b>どう並べても ${floor}件 のエラーは残ります</b>（証明済み）。それ以外は並べ方しだいで消せます。`
+            : `${uiIcon('ok')} <b>「どう並べても残るエラー」はありません。</b>並び方のルール（連休の長さ・時間帯の切替など）によるエラーは出ることがあります。`}
+          ${best ? `<br>${uiIcon('info')} 前回の表では「${escapeHtml(best.title)}」で ${best.measured.gain}件 減りました。` : ''}
         </div>
         ${allChecked ? '' : '<p class="hint" style="margin-top:8px;color:var(--danger)">4つ全部にチェックを入れると、生成できるようになります。</p>'}`,
-      sub: [{ label: '⚡ 速い生成（1分）で様子を見る', run: () => { modal.remove(); const b = document.getElementById('btnGenerateFast'); if (b) b.click(); } }],
+      sub: [{ label: '速い生成（1分）で様子を見る', run: () => { modal.remove(); const b = document.getElementById('btnGenerateFast'); if (b) b.click(); } }],
       after: () => {
         modal.querySelectorAll('[data-ck]').forEach(cb => cb.addEventListener('change', () => {
           checkState[cb.dataset.ck] = cb.checked; reRender();
@@ -5999,7 +6012,7 @@ function showGenerateWizard() {
         ${cur ? 'background:var(--accent);color:var(--accent-text);font-weight:700' : 'background:var(--surface-2);color:var(--text-soft)'}">${n}. ${s}</span>`;
     }).join('<span style="color:var(--text-soft)">›</span>');
     modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:720px;width:100%;max-height:88vh;overflow:auto;padding:20px">
-      <h3 style="margin:0 0 8px">🧭 順番に確認して生成する</h3>
+      <h3 style="margin:0 0 8px">順番に確認して生成する</h3>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:14px">${nav}</div>
       <div style="font-size:14px;line-height:1.8">${b.html}</div>
       ${changedStep ? `<div style="margin-top:10px;padding:8px 12px;border-radius:8px;font-size:13px;
@@ -6014,7 +6027,7 @@ function showGenerateWizard() {
         <span style="flex:1"></span>
         ${changedAll ? '<button id="wzReset" class="btn">最初の状態に戻す</button>' : ''}
         <button id="wzClose" class="btn">閉じる</button>
-        <button id="wzNext" class="btn btn-primary btn-large">${step < 5 ? '次へ →' : '🎯 じっくり生成をはじめる'}</button>
+        <button id="wzNext" class="btn btn-primary btn-large">${step < 5 ? '次へ →' : 'じっくり生成をはじめる'}</button>
       </div>
     </div>`;
     const $ = (id) => modal.querySelector('#' + id);
