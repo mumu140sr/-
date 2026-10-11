@@ -41,6 +41,28 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// ===== 画面のシフトの色（v250） =====
+// 画面のマスは、シフト種別の区分で塗る（早番系=青・遅番系=橙・研修=紫・ほか=灰）。
+// シフト種別の color は「Excel 出力の色」として残し、画面では使わない（ダークで読めない色を避けるため）。
+// 責任者のシフト（記号に「責」を含む種類）は太字＋下線。色は css/style.css の変数（明暗の両方）。
+function shiftTone(key) {
+  const t = (typeof getShiftType === 'function') ? getShiftType(key) : null;
+  if (!t) return '';
+  return t.isTraining ? 'purple' : t.category === 'A' ? 'blue' : t.category === 'B' ? 'orange' : 'gray';
+}
+function shiftToneVar(key) { const n = shiftTone(key); return n ? `var(--sh-${n})` : 'var(--surface-3)'; }
+function shiftToneClass(key) {
+  const n = shiftTone(key);
+  return n ? `c-${n}${String(key).indexOf('責') >= 0 ? ' c-resp' : ''}` : '';
+}
+/** マスにある違反の段階（いちばん重いもの）: crit=6連勤以上 / must=絶対 / soft=できれば */
+function vioLevelOf(list) {
+  if (!list || !list.length) return '';
+  if (list.some(v => v.type === 'consecutive' && v.compliance)) return 'crit';
+  const must = (typeof isMustViolation === 'function') ? isMustViolation : (t => getRuleLevel(t) === 'must');
+  return list.some(v => must(v.type)) ? 'must' : 'soft';
+}
+
 // ===== 全UI再構築（ロード後・リセット後など） =====
 function refreshAllUI() {
   const $month     = document.getElementById('targetMonth');
@@ -390,11 +412,11 @@ function renderEventList() {
   AppState.events.forEach((ev, idx) => {
     const div = document.createElement('div');
     div.className = 'event-item';
-    div.style.cssText = 'border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:8px';
+    div.style.cssText = 'border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px';
 
     const staffChips = AppState.staff.map(s => {
       const checked = (ev.staffIds || []).includes(s.id);
-      return `<label class="allowed-label" style="background:${checked ? '#bee3f8' : '#edf2f7'}">
+      return `<label class="allowed-label" style="background:${checked ? 'var(--accent-soft)' : 'var(--surface-3)'}">
         <input type="checkbox" data-ev-idx="${idx}" data-ev-staff="${s.id}"
                ${checked ? 'checked' : ''} style="margin:0 2px 0 0"/>${escapeHtml(s.name)}
       </label>`;
@@ -441,7 +463,7 @@ function renderEventList() {
         ev.staffIds = ev.staffIds.filter(x => x !== sid);
       }
       const label = e.target.closest('.allowed-label');
-      if (label) label.style.background = e.target.checked ? '#bee3f8' : '#edf2f7';
+      if (label) label.style.background = e.target.checked ? 'var(--accent-soft)' : 'var(--surface-3)';
       autoSave();
     });
   });
@@ -831,20 +853,21 @@ function renderDailyReqPanel() {
   </div>`;
   html += '<table class="dailyreq-table" style="border-collapse:collapse;font-size:12px">';
   // ヘッダー1段目: 日付（曜日で色分け）
-  html += '<thead><tr><th style="padding:4px 6px;border:1px solid #ccc;background:#f0f0f0;position:sticky;left:0;z-index:1">シフト / 部門</th>';
+  html += '<thead><tr><th style="padding:4px 6px;border:1px solid var(--border);background:var(--surface-3);position:sticky;left:0;z-index:1">シフト / 部門</th>';
   for (let d = 1; d <= days; d++) {
     const w = getWeekday(AppState.settings.targetMonth, d);
-    const bg = w === 0 ? '#ffe0e0' : (w === 6 ? '#e0ecff' : '#f0f0f0');
-    html += `<th style="padding:2px 4px;border:1px solid #ccc;background:${bg};text-align:center">${d}</th>`;
+    const bg = 'var(--surface-3)';
+    const fg = w === 0 ? 'var(--sun)' : (w === 6 ? 'var(--sat)' : 'var(--text-soft)');
+    html += `<th style="padding:2px 4px;border:1px solid var(--border);background:${bg};color:${fg};text-align:center">${d}</th>`;
   }
   html += '</tr>';
   // ヘッダー2段目: 曜日
-  html += '<tr><th style="padding:2px 6px;border:1px solid #ccc;background:#f7f7f7;position:sticky;left:0;z-index:1"></th>';
+  html += '<tr><th style="padding:2px 6px;border:1px solid var(--border);background:var(--surface-2);position:sticky;left:0;z-index:1"></th>';
   for (let d = 1; d <= days; d++) {
     const w = getWeekday(AppState.settings.targetMonth, d);
-    const color = w === 0 ? '#c0392b' : (w === 6 ? '#2c5fb3' : '#555');
-    const bg = w === 0 ? '#fff0f0' : (w === 6 ? '#f0f5ff' : '#f7f7f7');
-    html += `<th style="padding:2px 4px;border:1px solid #ccc;background:${bg};text-align:center;color:${color};font-weight:700">${getWeekdayLabel(w)}</th>`;
+    const color = w === 0 ? 'var(--sun)' : (w === 6 ? 'var(--sat)' : 'var(--text-soft)');
+    const bg = 'var(--surface-2)';
+    html += `<th style="padding:2px 4px;border:1px solid var(--border);background:${bg};text-align:center;color:${color};font-weight:700">${getWeekdayLabel(w)}</th>`;
   }
   html += '</tr></thead><tbody>';
 
@@ -855,18 +878,18 @@ function renderDailyReqPanel() {
     countableTypes.forEach(type => {
       const defaultVal = baseReqs[type.key] || 0;
       if (!defaultVal && dept === 'cast') return;
-      html += `<tr><td style="padding:4px 6px;border:1px solid #ccc;white-space:nowrap;position:sticky;left:0;background:#fff;z-index:1">${escapeHtml(type.key)}（${deptLabel}・通常: ${defaultVal}）</td>`;
+      html += `<tr><td style="padding:4px 6px;border:1px solid var(--border);white-space:nowrap;position:sticky;left:0;background:var(--surface);z-index:1">${escapeHtml(type.key)}（${deptLabel}・通常: ${defaultVal}）</td>`;
       for (let d = 1; d <= days; d++) {
         const w = getWeekday(AppState.settings.targetMonth, d);
         const override = (dailyMap[type.key] || {})[d];
         const isOv = override != null;
         // 全セルに数字を表示（通常=グレー / 上書き=黒太字＋黄背景）
-        const cellBg = isOv ? '#fff7d6' : (w === 0 ? '#fff5f5' : (w === 6 ? '#f5f9ff' : '#fff'));
-        html += `<td style="padding:1px;border:1px solid #ccc;background:${cellBg}">
+        const cellBg = isOv ? 'var(--accent-soft)' : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
+        html += `<td style="padding:1px;border:1px solid var(--border);background:${cellBg}">
           <input type="number" min="0" max="99"
             value="${isOv ? override : defaultVal}"
             data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}" data-default="${defaultVal}"
-            class="daily-req-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${isOv ? '700' : '400'};color:${isOv ? '#000' : '#999'}"/>
+            class="daily-req-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${isOv ? '700' : '400'};color:${isOv ? 'var(--text)' : 'var(--text-muted)'}"/>
         </td>`;
       }
       html += '</tr>';
@@ -880,19 +903,19 @@ function renderDailyReqPanel() {
       const baseNeed = (sk.req != null ? sk.req : sk.lateReq) || 0;
       const baseVal  = field === 'req' ? baseNeed
                      : ((sk.min != null && sk.min >= 0) ? sk.min : baseNeed);
-      html += `<tr><td style="padding:4px 6px;border:1px solid #ccc;white-space:nowrap;position:sticky;left:0;background:#eef6ff;z-index:1">`
+      html += `<tr><td style="padding:4px 6px;border:1px solid var(--border);white-space:nowrap;position:sticky;left:0;background:var(--surface-2);z-index:1">`
             + `🎯 ${escapeHtml(sk.name)}（${bandLabel}・${fLabel}・通常: ${baseVal}）</td>`;
       for (let d = 1; d <= days; d++) {
         const w  = getWeekday(AppState.settings.targetMonth, d);
         const ov = ((AppState.dailySkills || {})[sk.name] || {})[d] || {};
         const override = ov[field];
         const isOv = override != null;
-        const cellBg = isOv ? '#fff7d6' : (w === 0 ? '#fff5f5' : (w === 6 ? '#f5f9ff' : '#fff'));
-        html += `<td style="padding:1px;border:1px solid #ccc;background:${cellBg}">
+        const cellBg = isOv ? 'var(--accent-soft)' : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
+        html += `<td style="padding:1px;border:1px solid var(--border);background:${cellBg}">
           <input type="number" min="0" max="99"
             value="${isOv ? override : baseVal}"
             data-skill="${escapeHtml(sk.name)}" data-sfield="${field}" data-day="${d}" data-default="${baseVal}"
-            class="daily-skill-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${isOv ? '700' : '400'};color:${isOv ? '#000' : '#999'}"/>
+            class="daily-skill-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${isOv ? '700' : '400'};color:${isOv ? 'var(--text)' : 'var(--text-muted)'}"/>
         </td>`;
       }
       html += '</tr>';
@@ -927,10 +950,10 @@ function renderDailyReqPanel() {
       }
       const w = getWeekday(AppState.settings.targetMonth, day);
       e.target.style.fontWeight = hasOverride ? '700' : '400';
-      e.target.style.color      = hasOverride ? '#000' : '#999';
+      e.target.style.color      = hasOverride ? 'var(--text)' : 'var(--text-muted)';
       const cell = e.target.closest('td');
-      if (cell) cell.style.background = hasOverride ? '#fff7d6'
-        : (w === 0 ? '#fff5f5' : (w === 6 ? '#f5f9ff' : '#fff'));
+      if (cell) cell.style.background = hasOverride ? 'var(--accent-soft)'
+        : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
       autoSave();
     });
   });
@@ -974,10 +997,10 @@ function renderDailyReqPanel() {
       // 見た目を即反映（上書きあり=黒太字＋黄背景 / なし=薄字）
       const w = getWeekday(AppState.settings.targetMonth, day);
       e.target.style.fontWeight = hasOverride ? '700' : '400';
-      e.target.style.color      = hasOverride ? '#000' : '#999';
+      e.target.style.color      = hasOverride ? 'var(--text)' : 'var(--text-muted)';
       const cell = e.target.closest('td');
-      if (cell) cell.style.background = hasOverride ? '#fff7d6'
-        : (w === 0 ? '#fff5f5' : (w === 6 ? '#f5f9ff' : '#fff'));
+      if (cell) cell.style.background = hasOverride ? 'var(--accent-soft)'
+        : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
       autoSave();
     });
   });
@@ -1189,7 +1212,7 @@ function renderStaffTable() {
     // allowedShifts チェックボックス群
     const checkboxes = AppState.shiftTypes.map(t => {
       const checked = (s.allowedShifts || []).includes(t.key);
-      const bg = checked ? safeColor(t.color, '#edf2f7') : '#edf2f7';
+      const bg = checked ? shiftToneVar(t.key) : 'var(--surface-3)';
       return `<label class="allowed-label" style="background:${bg}"
                      data-id="${s.id}" data-key="${escapeHtml(t.key)}">
         <input type="checkbox" data-allowed="${escapeHtml(t.key)}" data-id="${s.id}"
@@ -1369,10 +1392,10 @@ function renderStaffTable() {
       if (e.target.checked) {
         if (!staff.allowedShifts.includes(shiftKey)) staff.allowedShifts.push(shiftKey);
         const t = AppState.shiftTypes.find(t => t.key === shiftKey);
-        if (label) label.style.background = t ? safeColor(t.color, '#edf2f7') : '#edf2f7';
+        if (label) label.style.background = t ? shiftToneVar(t.key) : 'var(--surface-3)';
       } else {
         staff.allowedShifts = staff.allowedShifts.filter(k => k !== shiftKey);
-        if (label) label.style.background = '#edf2f7';
+        if (label) label.style.background = 'var(--surface-3)';
       }
       autoSave();
       // いまの表のエラーの一覧を数え直す（担当外シフトなどの判定が変わるため）
@@ -1449,11 +1472,11 @@ function renderShiftChips() {
     btn.className = 'chip-btn';
     btn.dataset.mark = t.key;
     btn.textContent  = t.key;
-    btn.style.background = safeColor(t.color, '#e2e8f0');
+    btn.style.background = shiftToneVar(t.key);
     // 現在選択中なら outline でアクティブを表現（inline bg が CSS .active を上書きするため）
     if (t.key === selectedMark) {
       btn.classList.add('active');
-      btn.style.outline = '3px solid #4a5568';
+      btn.style.outline = '3px solid var(--focus)';
     }
     btn.addEventListener('click', () => selectChip(btn, t.key));
     container.appendChild(btn);
@@ -1470,7 +1493,7 @@ function selectChip(btn, mark) {
   if (!btn) return;
   btn.classList.add('active');
   // 出勤シフトチップはアウトラインで選択状態を示す
-  if (isWork(mark)) btn.style.outline = '3px solid #4a5568';
+  if (isWork(mark)) btn.style.outline = '3px solid var(--focus)';
 }
 
 function setupCalendarPanel() {
@@ -1521,10 +1544,9 @@ function renderCalendar() {
         const cls   = w === 0 ? 'weekend-sun' : w === 6 ? 'weekend-sat' : '';
         // ④で入力した内容のみを表示する（⑥シフト表の手動固定とは連動させない）
         const cur   = (AppState.requests[s.id] || {})[d] || '';
-        const shCls = getShiftClass(cur);
-        const shSty = getShiftStyle(cur);
+        const shCls = getShiftClass(cur) + (isWork(cur) ? ' ' + shiftToneClass(cur) + ' c-lock' : '');
         html += `<td class="${cls}" data-sid="${s.id}" data-day="${d}">
-          <span class="shift-cell ${shCls}" style="${shSty}">${escapeHtml(cur)}</span>
+          <span class="shift-cell ${shCls}">${escapeHtml(cur)}</span>
         </td>`;
       }
       tr.innerHTML = html;
@@ -1549,8 +1571,8 @@ function renderCalendar() {
       }
       const span = td.querySelector('.shift-cell');
       span.textContent   = selectedMark;
-      span.className     = 'shift-cell ' + getShiftClass(selectedMark);
-      span.style.cssText = getShiftStyle(selectedMark);
+      span.className     = 'shift-cell ' + getShiftClass(selectedMark) + (isWork(selectedMark) ? ' ' + shiftToneClass(selectedMark) + ' c-lock' : '');
+      span.style.cssText = '';
       autoSave();
       scheduleRequestAlerts();
     });
@@ -1711,20 +1733,20 @@ function renderShiftLegend() {
   if (!el) return;
   let html = AppState.shiftTypes.map(t =>
     `<div class="legend-item">
-      <span class="legend-color" style="background-color:${safeColor(t.color, '#e2e8f0')}"></span>
+      <span class="legend-color" style="background-color:${shiftToneVar(t.key)}"></span>
       <span>${escapeHtml(t.key)}: ${escapeHtml(t.label)}</span>
     </div>`
   ).join('');
   html += `<div class="legend-item">
-    <span class="legend-color" style="background:#eeeeee"></span>
+    <span class="legend-color" style="background:transparent;border-color:var(--border-control)"></span>
     <span>休/公/☆: 公休系</span>
   </div>`;
   html += `<div class="legend-item">
-    <span class="legend-color" style="background:#fff9c4"></span>
+    <span class="legend-color" style="background:transparent;box-shadow:inset 0 0 0 1px var(--border-control)"></span>
     <span>有: 有給</span>
   </div>`;
   html += `<div class="legend-item">
-    <span class="legend-color" style="background:#ffe0b2"></span>
+    <span class="legend-color" style="background:repeating-linear-gradient(135deg, var(--sur) 0 4px, var(--sur-2) 4px 8px)"></span>
     <span>余: 余剰（人員余り）</span>
   </div>`;
   el.innerHTML = html;
@@ -1743,7 +1765,7 @@ function _renderResultTableInner() {
 
   if (!AppState.generated || AppState.staff.length === 0) {
     table.innerHTML =
-      '<tr><td style="padding:30px;text-align:center;color:#999">' +
+      '<tr><td style="padding:30px;text-align:center;color:var(--text-muted)">' +
       'まだシフトが生成されていません。「⑤ 自動生成」タブから実行してください。</td></tr>';
     const sa = document.getElementById('summaryArea');
     if (sa) sa.innerHTML = '';
@@ -1775,9 +1797,10 @@ function _renderResultTableInner() {
     const w   = getWeekday(AppState.settings.targetMonth, d);
     const cls = w === 0 ? 'weekend-sun' : w === 6 ? 'weekend-sat' : '';
     const dv  = dayVio[d];
-    const dCls = dv ? ' day-violation' : '';
+    const dLv  = dv ? vioLevelOf(dv) : '';
+    const dCls = dv ? ' day-violation lv-' + dLv : '';
     const dTtl = dv ? ` title="${escapeHtml(msgsOf(dv))}"` : '';
-    const mark = dv ? `<span class="vio-badge">!</span>` : '';
+    const mark = dv ? `<span class="vio-badge lv-${dLv}">!</span>` : '';
     headRow += `<th class="${cls}${dCls}" data-dayhead="${d}"${dTtl}>${d}${mark}<br><small>${getWeekdayLabel(w)}</small></th>`;
   }
   headRow += '<th>公休</th><th>有給他</th><th>余<br><small>余剰</small></th><th>出勤</th><th>差</th><th>労働<br><small>時間</small></th></tr>';
@@ -1800,16 +1823,16 @@ function _renderResultTableInner() {
       const tr = document.createElement('tr');
       let workCount = 0, publicOffCount = 0, otherOffCount = 0, surplusCount = 0, totalHours = 0;
       const sv = staffVio[s.id];
-      let cells = `<td data-staffhead="${s.id}"${sv ? ` class="row-violation" title="${escapeHtml(msgsOf(sv))}"` : ''}>` +
-                  `${escapeHtml(s.name)}${sv ? '<span class="vio-badge">!</span>' : ''}</td>`;
+      const sLv = sv ? vioLevelOf(sv) : '';
+      let cells = `<td data-staffhead="${s.id}"${sv ? ` class="row-violation lv-${sLv}" title="${escapeHtml(msgsOf(sv))}"` : ''}>` +
+                  `${escapeHtml(s.name)}${sv ? `<span class="vio-badge lv-${sLv}">!</span>` : ''}</td>`;
       for (let d = 1; d <= days; d++) {
         const w     = getWeekday(AppState.settings.targetMonth, d);
         const wcls  = w === 0 ? 'weekend-sun' : w === 6 ? 'weekend-sat' : '';
         const shift = (AppState.shifts[s.id] || {})[d] || '';
-        const cls   = getShiftClass(shift);
-        const sty   = getShiftStyle(shift);
+        const cls   = getShiftClass(shift) + (isWork(shift) ? ' ' + shiftToneClass(shift) : '');
         const vList   = (cellVio[s.id] || {})[d];
-        const vio     = vList ? ' violation' : '';
+        const vio     = vList ? ' violation e-' + vioLevelOf(vList) : '';
         const vMsg    = vio ? escapeHtml(msgsOf(vList)) : '';
         const isFixed = !!((AppState.fixedShifts[s.id] || {})[d]);
         const fixCls  = isFixed ? ' cell-fixed' : '';
@@ -1821,15 +1844,15 @@ function _renderResultTableInner() {
         else if (shift === '余') surplusCount++;
         else if (isOff(shift)) otherOffCount++;
         cells += `<td class="${wcls}${fixCls}" data-sid="${s.id}" data-day="${d}">
-          <span class="shift-cell ${cls}${vio}" style="${sty}" draggable="true" ${titleAttr}>${escapeHtml(shift)}</span>
+          <span class="shift-cell ${cls}${vio}" draggable="true" ${titleAttr}>${escapeHtml(shift)}</span>
         </td>`;
       }
       // 差 = 公休 - 目標公休（+は余剰、-は不足）
       const offDiff = publicOffCount - (s.maxOff || 0);
       const diffStr = offDiff === 0 ? '0' : (offDiff > 0 ? `+${offDiff}` : `${offDiff}`);
-      const diffSty = offDiff < 0 ? 'color:#c53030;font-weight:700'
-                    : offDiff > 0 ? 'color:#b7791f;font-weight:700' : '';
-      const surplusStr = surplusCount > 0 ? `<span style="color:#bf5b00;font-weight:700">${surplusCount}</span>` : '';
+      const diffSty = offDiff < 0 ? 'color:var(--lv-must);font-weight:700'
+                    : offDiff > 0 ? 'color:var(--link);font-weight:700' : '';
+      const surplusStr = surplusCount > 0 ? `<span style="color:var(--sur-fg);font-weight:700">${surplusCount}</span>` : '';
       cells += `<td>${publicOffCount}</td><td>${otherOffCount || ''}</td><td>${surplusStr}</td>` +
                `<td>${workCount}</td><td style="${diffSty}">${diffStr}</td>` +
                `<td>${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)}</td>`;
@@ -1855,12 +1878,12 @@ function _renderResultTableInner() {
         const cls = count < dayReq ? 'under' : (count > dayReq ? 'over' : '');
         // 配置人数(count)を上に小さく、その下に編集できる定数(必要人数)入力
         cells += `<td class="${cls}" style="padding:0">
-          <div style="font-size:9px;color:#718096;line-height:1">${count}</div>
+          <div style="font-size:10px;color:var(--text-muted);line-height:1">${count}</div>
           <input type="number" min="0" max="99" value="${dayReq}"
             class="summary-req-input" data-key="${escapeHtml(key)}" data-day="${d}"
             data-dept="${deptKey}" data-default="${defaultReq}"
             title="配置 ${count}人 / 必要 ${dayReq}人（この数字が定数。変更できます）"
-            style="width:100%;height:20px;border:none;background:transparent;text-align:center;font-size:11px;font-weight:700;color:#2d3748"/>
+            style="width:100%;height:20px;border:none;background:transparent;text-align:center;font-size:11px;font-weight:700"/>
         </td>`;
       }
       cells += '<td></td><td></td><td></td><td></td><td></td><td></td>';
@@ -2011,22 +2034,22 @@ function renderModalOptions() {
     btn.dataset.shift = t.key;
     btn.textContent   = t.key;
     btn.title         = t.label;
-    btn.style.cssText = `background:${safeColor(t.color, '#e2e8f0')};border-color:${safeColor(t.color, '#e2e8f0')};color:#333`;
+    btn.style.cssText = `background:${shiftToneVar(t.key)};border-color:${shiftToneVar(t.key)};color:var(--text)${String(t.key).indexOf('責') >= 0 ? ';text-decoration:underline 2px' : ''}`;
     container.appendChild(btn);
   });
 
   // 休み系（固定）
   [
-    { shift: '休', label: '公休',       bg: '#eeeeee', color: '#616161' },
-    { shift: '公', label: '公休扱い',   bg: '#f5f5f5', color: '#424242' },
-    { shift: '有', label: '有給',       bg: '#fff9c4', color: '#827717' },
-    { shift: '半', label: '半休',       bg: '#e8f5e9', color: '#2e7d32' },
-    { shift: '余', label: '余剰（人員余り）', bg: '#ffe0b2', color: '#bf5b00' },
-    { shift: '☆', label: '希望休',     bg: '#eeeeee', color: '#616161' },
-    { shift: '季', label: '季節休暇',   bg: '#eeeeee', color: '#616161' },
-    { shift: '引', label: '引継',       bg: '#eeeeee', color: '#616161' },
-    { shift: '慶', label: '慶弔休',     bg: '#eeeeee', color: '#616161' },
-    { shift: '',   label: '空白（消去）', bg: '#ffffff', color: '#aaa'   },
+    { shift: '休', label: '公休',       bg: 'var(--surface)', color: 'var(--text-muted)' },
+    { shift: '公', label: '公休扱い',   bg: 'var(--surface)', color: 'var(--text-muted)' },
+    { shift: '有', label: '有給',       bg: 'var(--surface)', color: 'var(--text-soft)' },
+    { shift: '半', label: '半休',       bg: 'linear-gradient(135deg, var(--surface-3) 0 50%, var(--surface) 50%)', color: 'var(--text-soft)' },
+    { shift: '余', label: '余剰（人員余り）', bg: 'repeating-linear-gradient(135deg, var(--sur) 0 4px, var(--sur-2) 4px 8px)', color: 'var(--sur-fg)' },
+    { shift: '☆', label: '希望休',     bg: 'var(--surface)', color: 'var(--text-muted)' },
+    { shift: '季', label: '季節休暇',   bg: 'var(--surface)', color: 'var(--text-muted)' },
+    { shift: '引', label: '引継',       bg: 'var(--surface)', color: 'var(--text-muted)' },
+    { shift: '慶', label: '慶弔休',     bg: 'var(--surface)', color: 'var(--text-muted)' },
+    { shift: '',   label: '空白（消去）', bg: 'var(--surface)', color: 'var(--text-muted)' },
   ].forEach(o => {
     const btn = document.createElement('button');
     btn.className = 'shift-option';
@@ -2709,7 +2732,7 @@ function applyEditMarks() {
   if (!_editMarks) return;
   editDiff().forEach(x => {
     const td = document.querySelector(`.result-table td[data-sid="${x.sid}"][data-day="${x.day}"]`);
-    if (td) { td.classList.add('edit-mark'); td.style.boxShadow = 'inset 0 0 0 2px #b7791f'; }
+    if (td) { td.classList.add('edit-mark'); }
   });
 }
 function showEditList() {
@@ -2903,9 +2926,9 @@ function applyRelaxPlan(plan) {
 
 // 痛みの表示
 const _RELAX_PAIN = {
-  small: { label: '影響 小', color: '#2f855a', bg: 'rgba(56,161,105,.14)' },
-  mid:   { label: '影響 中', color: '#b7791f', bg: 'rgba(214,158,46,.16)' },
-  large: { label: '影響 大', color: '#c53030', bg: 'rgba(229,62,62,.14)' },
+  small: { label: '影響 小', color: 'var(--ok)', bg: 'var(--ok-bg)' },
+  mid:   { label: '影響 中', color: 'var(--lv-soft)', bg: 'var(--lv-soft-bg)' },
+  large: { label: '影響 大', color: 'var(--lv-must)', bg: 'var(--lv-must-bg)' },
 };
 
 function showRelaxModal() {
@@ -2927,7 +2950,7 @@ function showRelaxModal() {
   const vioN = (AppState.violations || []).length;
 
   const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+  modal.style.cssText = 'position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
   modal.classList.add('calc-lock-area');   // A2
 
   let lastGroup = null;
@@ -2948,11 +2971,11 @@ function showRelaxModal() {
     const lighter = !!(pl.measured && pl.measured.gain <= 0 && pl.measured.lighter);
     return head + `<div class="relax-item" style="border:1px solid ${dud ? 'var(--border)' : good ? 'color-mix(in srgb, var(--success) 45%, transparent)' : 'var(--border)'};border-radius:10px;padding:14px 16px;margin:10px 0;background:var(--surface-2);${dud ? 'opacity:.62' : ''}">
       <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px">
-        <span style="font-weight:700;color:var(--accent)">案${i + 1}</span>
+        <span style="font-weight:700;color:var(--link)">案${i + 1}</span>
         <span style="font-weight:700;flex:1;min-width:200px">${escapeHtml(pl.title)}</span>
         ${dud ? `<span style="font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:var(--text-soft);background:var(--surface)">効果なし</span>` : ''}
-        ${good ? `<span style="font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:#276749;background:color-mix(in srgb, var(--success) 20%, var(--surface))">−${pl.measured.gain}件</span>` : ''}
-        ${lighter ? `<span style="font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:#276749;background:color-mix(in srgb, var(--success) 20%, var(--surface))">軽くなる</span>` : ''}
+        ${good ? `<span style="font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:var(--ok);background:var(--ok-bg)">−${pl.measured.gain}件</span>` : ''}
+        ${lighter ? `<span style="font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:var(--ok);background:var(--ok-bg)">軽くなる</span>` : ''}
         <span style="font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;color:${pain.color};background:${pain.bg}">${pain.label}</span>
         <span style="font-size:13px;font-weight:700;color:var(--text)">${escapeHtml(pl.effect)}</span>
       </div>
@@ -3313,16 +3336,16 @@ function showSurplusResolveModal() {
         ${escapeHtml(lab(r.key))} ${r.from}→${r.to}</span>`).join('');
     $m.style.display = 'block';
     $m.style.background = danger ? 'color-mix(in srgb, var(--danger) 14%, var(--surface))'
-                                 : 'color-mix(in srgb, var(--warning, #e6a700) 16%, var(--surface))';
+                                 : 'color-mix(in srgb, var(--warning) 16%, var(--surface))';
     $m.style.border = '1px solid ' + (danger ? 'color-mix(in srgb, var(--danger) 50%, transparent)'
-                                             : 'color-mix(in srgb, var(--warning, #e6a700) 45%, transparent)');
+                                             : 'color-mix(in srgb, var(--warning) 45%, transparent)');
     $m.innerHTML = `
       ${danger
         ? `<div style="font-size:14px"><b>🚨 増える🚨があります</b></div>
            <div style="margin:4px 0 8px">${chips(crit, 'var(--danger)')}</div>`
         : `<div style="font-size:14px"><b>⚠️ 🟡（注意）だけが増えます</b></div>
            <div class="hint" style="margin:2px 0 6px">🚨（公休・連勤・人員など）は増えません。</div>`}
-      ${soft.length && danger ? `<div style="margin:2px 0 8px">${chips(soft, 'var(--warning, #e6a700)')}</div>` : ''}
+      ${soft.length && danger ? `<div style="margin:2px 0 8px">${chips(soft, 'var(--warning)')}</div>` : ''}
       <div style="margin-top:6px">${escapeHtml(words)}</div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
         <button id="worsenYes" class="btn ${danger ? '' : 'btn-primary'}">${danger ? '🚨が増えても実行する' : '実行する'}</button>
@@ -3338,7 +3361,7 @@ function showSurplusResolveModal() {
     const $s = modal.querySelector('#adjSec');
     if (sec > 0 && $s) { $s.textContent = String(sec); return; }
     say(`⏳ 周りのつじつまを合わせています…（<span id="adjSec">${sec}</span>秒・最大25秒ほど）
-      <button class="btn" data-adjstop="1" style="margin-left:8px;padding:1px 10px;background:#e74c3c;color:#fff">⏹ 中止</button>`, true, true);
+      <button class="btn" data-adjstop="1" style="margin-left:8px;padding:1px 10px;background:var(--surface);color:var(--lv-crit);border-color:var(--lv-crit)">⏹ 中止</button>`, true, true);
   };
   modal.addEventListener('click', (e) => {
     if (e.target && e.target.closest && e.target.closest('[data-adjstop]') && typeof cancelMILP === 'function') cancelMILP();
@@ -3616,7 +3639,7 @@ function showSurplusResolveModal() {
       }
     }
 
-    modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;width:100%;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.35);border:1px solid var(--border)">
+    modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;width:100%;max-height:82vh;display:flex;flex-direction:column;box-shadow:var(--shadow);border:1px solid var(--border)">
       <div id="surplusDrag" style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:move;user-select:none;background:var(--surface-2);border-radius:12px 12px 0 0">
         <h3 style="margin:0;flex:1;font-size:16px">⚖️ 余の解消</h3>
         <span class="hint" style="font-size:11px">ここをつかんで動かせます</span>
@@ -3725,7 +3748,7 @@ function showSurplusResolveModal() {
     const sg = _diffSign(r.sd);
     const comp = r.sd.compUp;
     const icon = comp ? '⛔' : sg <= 0 ? '✅' : scoreWorsened(r.sd.a, r.sd.b).some(x => x.key !== 'soft') ? '🚨' : '⚠️';
-    const col = comp || icon === '🚨' ? 'var(--danger)' : icon === '⚠️' ? '#b7791f' : 'var(--success)';
+    const col = comp ? 'var(--lv-crit)' : icon === '🚨' ? 'var(--danger)' : icon === '⚠️' ? 'var(--lv-soft)' : 'var(--success)';
     return `<span style="color:${col};font-weight:700">${icon} ${escapeHtml(_diffWords(r.sd))}</span>`
          + (comp ? '<span class="hint">（この指定は実行できません）</span>' : '');
   };
@@ -4989,7 +5012,7 @@ function _spMark(r) {
 function _spDeltaTag(r) {
   if (!r.sd) return '';
   const sg = _diffSign(r.sd);
-  const col = sg > 0 ? 'var(--danger)' : (sg < 0 ? 'var(--success, #2e7d32)' : 'var(--text-dim, inherit)');
+  const col = sg > 0 ? 'var(--danger)' : (sg < 0 ? 'var(--success)' : 'var(--text-dim)');
   return `<span style="margin-left:8px;font-size:12px;color:${col}">（${_diffWords(r.sd)}）</span>`;
 }
 
@@ -5083,7 +5106,7 @@ function showSurplusPlanModal() {
   let trial = null, trialRunning = false, trialStopped = false, noTable = false;
 
   const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+  modal.style.cssText = 'position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
   // 🎓「この日に入れる」の候補は、いまの表から作る。開いたまま表が変わったら数え直し、
   // 古い候補のまま反映しない（候補の日がもう入れられない日になっていることがある）。
   let rowsFp = '', rowsLearner = false;
@@ -5135,9 +5158,9 @@ function showSurplusPlanModal() {
     if (r.kind !== 'work' || !r.sd) return _spDeltaTag(r);
     const sg = _diffSign(r.sd);
     const regen = '生成し直すと、余のある人が入ります';
-    if (sg === 0) return `<span style="margin-left:8px;font-size:12px;color:var(--success, #2e7d32)">（${regen}）</span>`;
-    const col = sg > 0 ? 'var(--danger)' : (sg < 0 ? 'var(--success, #2e7d32)' : 'var(--text-dim, inherit)');
-    return `<span style="margin-left:8px;font-size:12px;color:var(--success, #2e7d32)">（${regen}）</span>`
+    if (sg === 0) return `<span style="margin-left:8px;font-size:12px;color:var(--success)">（${regen}）</span>`;
+    const col = sg > 0 ? 'var(--danger)' : (sg < 0 ? 'var(--success)' : 'var(--text-dim)');
+    return `<span style="margin-left:8px;font-size:12px;color:var(--success)">（${regen}）</span>`
          + `<div style="font-size:12px;color:${col}">ほかに: ${_diffWords(r.sd)}</div>`;
   };
   const rowHtml = (r, i) => {
@@ -5211,7 +5234,7 @@ function showSurplusPlanModal() {
 
   const render = () => {
     const capTxt = caps.map(c => c.surplus > 0
-      ? `${caps.length > 1 ? '【' + c.label + '】' : ''}必要 ${c.required}人日 ／ 出せる ${c.avail}人日 → <b style="color:var(--accent)">余り ${c.surplus}人日</b>`
+      ? `${caps.length > 1 ? '【' + c.label + '】' : ''}必要 ${c.required}人日 ／ 出せる ${c.avail}人日 → <b style="color:var(--link)">余り ${c.surplus}人日</b>`
       : `${caps.length > 1 ? '【' + c.label + '】' : ''}余りはありません（${c.surplus < 0 ? (-c.surplus) + '人日 不足' : 'ちょうど'}）`).join('<br>');
     const staffOpt = (AppState.staff || []).map(x =>
       `<option value="${x.id}" ${sel.learner === x.id ? 'selected' : ''}>${escapeHtml(x.name)}</option>`).join('');
@@ -5224,7 +5247,7 @@ function showSurplusPlanModal() {
     const tableNote = !sel.learner ? ''
       : tst === 'none' ? `<div id="spNoTable" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--danger) 12%, var(--surface))">
           ⚠️ この月の表をまだ作っていないので、教わる人がどの日に出勤するか（(a) 出勤日）が分かりません。<b>まず一度生成してから使ってください。</b></div>`
-      : tst === 'stale' ? `<div id="spStale" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--warning, #f9a825) 16%, var(--surface))">
+      : tst === 'stale' ? `<div id="spStale" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--warning) 16%, var(--surface))">
           ⚠️ 表を作ったあとに、希望や設定（必要人数・担当など）を変えています。いまの表で出勤日・休みの日を分けていますが、
           古い表なので、<b>生成し直してから使うと確かです。</b></div>` : '';
     const picker = `<div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px">
@@ -5652,7 +5675,7 @@ function renderNextStep() {
   if (!$c) return;
   let st;
   try { st = computeNextStep(); } catch (e) { $c.innerHTML = ''; return; }
-  const tone = st.ok ? 'var(--success)' : st.danger ? 'var(--danger)' : 'var(--accent)';
+  const tone = st.ok ? 'var(--success)' : st.danger ? 'var(--danger)' : 'var(--link)';
   $c.innerHTML = `<div class="card" style="border-left:5px solid ${tone}">
     <div style="font-size:12px;font-weight:700;letter-spacing:.06em;color:${tone};margin-bottom:4px">つぎにやること</div>
     <h3 style="margin:0 0 6px">${escapeHtml(st.title)}</h3>
@@ -5724,7 +5747,7 @@ function showGenerateWizard() {
     _applyChangeList(list, dir, stepSnap, WZ_KINDS);
   };
   const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9980;padding:16px';
+  modal.style.cssText = 'position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;z-index:9980;padding:16px';
   modal.classList.add('calc-lock-area');   // A2: 計算中は入力を受け付けない
   _snapRebasers.add(wzRebase);
   const days = () => getDaysInMonth(AppState.settings.targetMonth);
@@ -5973,7 +5996,7 @@ function showGenerateWizard() {
     const nav = STEPS.map((s, i) => {
       const n = i + 1, cur = n === step;
       return `<span style="padding:3px 9px;border-radius:999px;font-size:12px;white-space:nowrap;
-        ${cur ? 'background:var(--accent);color:#fff;font-weight:700' : 'background:var(--surface-2);color:var(--text-soft)'}">${n}. ${s}</span>`;
+        ${cur ? 'background:var(--accent);color:var(--accent-text);font-weight:700' : 'background:var(--surface-2);color:var(--text-soft)'}">${n}. ${s}</span>`;
     }).join('<span style="color:var(--text-soft)">›</span>');
     modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:720px;width:100%;max-height:88vh;overflow:auto;padding:20px">
       <h3 style="margin:0 0 8px">🧭 順番に確認して生成する</h3>

@@ -290,8 +290,8 @@ function renderWishFixBox(modal) {
       <div class="hint" style="margin:2px 0 8px">いまの希望で試しに作り、残る🚨（連勤超過・6連勤以上・遅→早）ごとに、希望を変える案を
         1つずつ試しに作り直します。その🚨が消え、ほかの🚨が増えない案だけを出します。変えるのはシフトの種類の希望と休みの希望だけ
         （半休・有給・🔒固定は動かしません）。表・希望は、「この案にする」を押すまで変わりません。1つの案に約1分かかります。</div>
-      <button class="btn" id="wfGo">計算で確かめる</button> <button class="btn" id="wfStop" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button>
-      <div id="wfNote" style="display:none;margin:8px 0 0;padding:6px 10px;border-radius:8px;background:#fefcbf;color:#744210;font-size:13px"></div>
+      <button class="btn" id="wfGo">計算で確かめる</button> <button class="btn" id="wfStop" style="display:none;background:var(--surface);color:var(--lv-crit);border-color:var(--lv-crit)">⏹ 中止</button>
+      <div id="wfNote" style="display:none;margin:8px 0 0;padding:6px 10px;border-radius:8px;background:var(--lv-soft-bg);color:var(--text);border:1px dashed var(--lv-soft);font-size:13px"></div>
       <div id="wfOut" style="margin-top:8px;font-size:13px;line-height:1.7"></div></div>`;
   const $out = box.querySelector('#wfOut'), $go = box.querySelector('#wfGo'), $stop = box.querySelector('#wfStop');
   // 画面の中の帯に出す知らせ（トーストは暗幕の後ろに出て見えなかった）
@@ -407,7 +407,7 @@ function renderWishFixBox(modal) {
         $out.querySelectorAll('[data-wf]').forEach(x => { if (x.textContent !== '変えました') x.disabled = true; });
         let $n = $out.querySelector('#wfStale');
         if (!$n) { $n = document.createElement('div'); $n.id = 'wfStale';
-          $n.style.cssText = 'margin:8px 0;padding:6px 10px;border-radius:8px;background:#fefcbf;color:#744210';
+          $n.style.cssText = 'margin:8px 0;padding:6px 10px;border-radius:8px;background:var(--lv-soft-bg);color:var(--text);border:1px dashed var(--lv-soft)';
           $out.appendChild($n); }
         $n.innerHTML = `${escapeHtml(msg)} <button class="btn" style="padding:1px 10px">計算で確かめる</button>`;
         $n.querySelector('button').addEventListener('click', () => $go.click());
@@ -443,7 +443,7 @@ function renderDayMarginsHtml() {
   const multi = groups.length > 1;
   const cell = (c) => {
     const bg = c.margin < 0 ? 'color-mix(in srgb, var(--danger) 22%, var(--surface))'
-             : c.margin === 0 ? 'color-mix(in srgb, #d69e2e 24%, var(--surface))' : '';
+             : c.margin === 0 ? 'var(--lv-soft-bg)' : '';
     return `<td style="text-align:center;padding:2px 10px;border:1px solid var(--border);${bg ? 'background:' + bg : ''}" title="出られる ${c.avail}人 ／ 必要 ${c.need}人">${c.margin > 0 ? '+' : ''}${c.margin}</td>`;
   };
   const html = groups.map(g => {
@@ -618,9 +618,9 @@ function showForecastModal() {
           <button class="btn" id="fcAdd" style="padding:1px 10px">この組み合わせを候補に加える</button></details>
         <div style="margin:8px 0;font-size:13px">1つの条件で作る回数: <select id="fcRuns"><option>1</option><option selected>2</option><option>3</option></select>
           <button class="btn btn-primary" id="fcGo">見込みを計算する</button>
-          <button class="btn" id="fcStop" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button>
+          <button class="btn" id="fcStop" style="display:none;background:var(--surface);color:var(--lv-crit);border-color:var(--lv-crit)">⏹ 中止</button>
           <span id="fcEst" class="hint"></span></div>
-        <div id="fcNote" style="display:none;margin:6px 0;padding:6px 10px;border-radius:8px;background:#fefcbf;color:#744210;font-size:13px"></div>
+        <div id="fcNote" style="display:none;margin:6px 0;padding:6px 10px;border-radius:8px;background:var(--lv-soft-bg);color:var(--text);border:1px dashed var(--lv-soft);font-size:13px"></div>
         <div id="fcStatus" class="hint"></div>
         <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr>
           <th style="text-align:left;padding:4px">変える内容</th><th style="padding:4px">⛔ 6連勤以上</th><th style="padding:4px">🚨（⛔を除く）</th>
@@ -721,22 +721,22 @@ function showForecastModal() {
       const unitOf = (k) => (k === 'over' || k === 'offShort') ? '日' : k === 'bsOver' ? '回' : '件';
       const words = (keys) => keys.map(k => `${k === 'comp' ? '6連勤以上' : labOf(k)} ${rng(bk[k] || z, '')}→${rng(ck[k] || z, unitOf(k))}`).join('・');
       const upKeys = bad ? up.filter(k => k !== 'comp').concat((upComp || up.indexOf('comp') >= 0) ? ['comp'] : []) : [];
-      const compMark = (bad && upKeys.indexOf('comp') >= 0) ? '<div style="color:#c53030">増えます</div>'
-        : upMax.indexOf('comp') >= 0 ? '<div style="color:#b7791f">回によっては増えます</div>' : '';
+      const compMark = (bad && upKeys.indexOf('comp') >= 0) ? '<div style="color:var(--lv-must)">増えます</div>'
+        : upMax.indexOf('comp') >= 0 ? '<div style="color:var(--lv-soft)">回によっては増えます</div>' : '';
       // 文に出すのは、⛔を除いた数でも増えている項目だけ（⛔だけが増えたときに「0→0件」などと出ていた）
       const mustKeys = (keys) => keys.filter(k => k !== 'comp' &&
         (((ck[k] || z).max > (bk[k] || z).max) || ((ck[k] || z).min > (bk[k] || z).min)));
       const mustTxt = cmp(base.must, x.st.must, '件') + (bad
-        ? (mustKeys(upKeys).length ? `<div style="color:#c53030">増えます（${words(mustKeys(upKeys))}）</div>`
-          : upKeys.indexOf('comp') >= 0 ? '<div style="color:#c53030">6連勤以上が増えるため選べません</div>'
+        ? (mustKeys(upKeys).length ? `<div style="color:var(--lv-must)">増えます（${words(mustKeys(upKeys))}）</div>`
+          : upKeys.indexOf('comp') >= 0 ? '<div style="color:var(--lv-must)">6連勤以上が増えるため選べません</div>'
           // 範囲では増えて見えないが、いちばん良い回どうしでは増えるとき: いちばん良い回どうしの数（⛔込み）をそのまま出す
-          : `<div style="color:#c53030">増えます（いちばん良い回どうしで ${scoreWorsened(x.st.best.sc, base.best.sc).filter(w => counted(w.key) && w.key !== 'comp')
+          : `<div style="color:var(--lv-must)">増えます（いちばん良い回どうしで ${scoreWorsened(x.st.best.sc, base.best.sc).filter(w => counted(w.key) && w.key !== 'comp')
               .map(w => `${labOf(w.key)} ${w.from}→${w.to}${unitOf(w.key)}`).join('・')}）</div>`)
-        : upWorst ? (mustKeys(upMax).length ? `<div style="color:#b7791f">回によっては増えます（${words(mustKeys(upMax))}）</div>`
+        : upWorst ? (mustKeys(upMax).length ? `<div style="color:var(--lv-soft)">回によっては増えます（${words(mustKeys(upMax))}）</div>`
           // ⛔が本当に新しくできた・伸びたときだけ「6連勤以上」。そうでなければ（基準の別々の回の⛔と5連勤が1つの回に
           // まとまった、7連勤が6連勤に縮んだ など）⛔込みの数で出す
-          : compAny ? '<div style="color:#b7791f">回によっては増えます（6連勤以上）</div>'
-          : `<div style="color:#b7791f">回によっては増えます（${(upMax.filter(k => k !== 'comp').length ? upMax.filter(k => k !== 'comp') : ['comp'])
+          : compAny ? '<div style="color:var(--lv-soft)">回によっては増えます（6連勤以上）</div>'
+          : `<div style="color:var(--lv-soft)">回によっては増えます（${(upMax.filter(k => k !== 'comp').length ? upMax.filter(k => k !== 'comp') : ['comp'])
               .map(k => `${k === 'comp' ? '6連勤以上の件数' : labOf(k)} ${rng(bki[k] || z, '')}→${rng(cki[k] || z, unitOf(k))}`).join('・')}）</div>`)
         : '<div class="hint">増えません</div>');
       // 切り替えの超過・🟡が増える案には ⚠️（最小か最大のどちらかが増えたとき）
@@ -850,10 +850,10 @@ function showFeasibilityModal() {
   // 「エラー0件が数学的に可能か」の判定を最上部に出す（配置では消せない原因の特定）
   const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound() : null;
   const colors = {
-    error:   { bg: '#fff5f5', border: '#fc8181', title: '#742a2a', body: '#9b2335' },
-    warning: { bg: '#fffaf0', border: '#f6ad55', title: '#744210', body: '#975a16' },
-    info:    { bg: '#ebf8ff', border: '#63b3ed', title: '#2a4365', body: '#2c5282' },
-    ok:      { bg: '#f0fff4', border: '#68d391', title: '#22543d', body: '#276749' },
+    error:   { bg: 'var(--lv-must-bg)', border: 'var(--lv-must)', title: 'var(--lv-must)', body: 'var(--text)' },
+    warning: { bg: 'var(--lv-soft-bg)', border: 'var(--lv-soft)', title: 'var(--lv-soft)', body: 'var(--text)' },
+    info:    { bg: 'var(--accent-soft)', border: 'var(--link)', title: 'var(--link)', body: 'var(--text)' },
+    ok:      { bg: 'var(--ok-bg)', border: 'var(--ok)', title: 'var(--ok)', body: 'var(--text)' },
   };
   const body = items.map(d => {
     const c = colors[d.level] || colors.info;
@@ -861,7 +861,7 @@ function showFeasibilityModal() {
     return `<div style="background:${c.bg};border-left:4px solid ${c.border};padding:10px 12px;margin:8px 0;border-radius:6px">
       <div style="font-weight:600;color:${c.title};margin-bottom:4px">${escapeHtml(d.title)}</div>
       <div style="color:${c.body};font-size:13px;line-height:1.6">${detail}</div>
-      ${d.suggestion ? `<div style="margin-top:6px;color:#2c5282;font-size:13px">💡 ${escapeHtml(d.suggestion)}</div>` : ''}
+      ${d.suggestion ? `<div style="margin-top:6px;color:var(--link);font-size:13px">💡 ${escapeHtml(d.suggestion)}</div>` : ''}
     </div>`;
   }).join('') || '<p>データが不足しています。</p>';
 
@@ -911,7 +911,7 @@ function showFeasibilityModal() {
   }
 
   const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+  modal.style.cssText = 'position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
   modal.innerHTML = `<div style="background:var(--surface);color:var(--text);border-radius:12px;max-width:720px;width:100%;max-height:85vh;overflow:auto;padding:20px">
     <h3 style="margin:0 0 4px">🔍 実現性チェック（生成する前の判定）</h3>
     <p class="hint" style="margin:0 0 12px">
@@ -1031,7 +1031,7 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
   if (vioCount > 0) {
     const go = document.createElement('button');
     go.className = 'btn';
-    go.style.cssText = 'margin-top:8px;margin-left:8px;background:#dd6b20;color:#fff';
+    go.style.cssText = 'margin-top:8px;margin-left:8px';
     go.textContent = '🩹 エラー解消プランを見る';
     go.addEventListener('click', () => { if (typeof showRelaxModal === 'function') showRelaxModal(); });
     box.appendChild(document.createElement('br'));
@@ -1326,8 +1326,8 @@ function showSurplusPopup() {
       const c = CAUSE[type] || [jp || 'その他のルール', '', ''];
       return `<tr>
         <td style="padding:3px 8px;font-weight:700;white-space:nowrap">${escapeHtml(c[0])}</td>
-        <td style="padding:3px 8px;text-align:center;color:#c53030;font-weight:700">${cnt}件</td>
-        <td style="padding:3px 8px;color:#4a5568">${escapeHtml(c[1])}${c[2] ? `<br><span style="color:#2b6cb0">→ ${escapeHtml(c[2])}</span>` : ''}</td>
+        <td style="padding:3px 8px;text-align:center;color:var(--lv-must);font-weight:700">${cnt}件</td>
+        <td style="padding:3px 8px;color:var(--text-soft)">${escapeHtml(c[1])}${c[2] ? `<br><span style="color:var(--link)">→ ${escapeHtml(c[2])}</span>` : ''}</td>
       </tr>`;
     }).join('');
   // 根本原因（症状の裏にある本当の原因）を最優先で表示
@@ -1336,23 +1336,23 @@ function showSurplusPopup() {
     const roots = analyzeRootCauses().slice(0, 3);
     if (roots.length) {
       rootHtml = `
-        <div style="background:#fff5f5;border-left:4px solid #e53e3e;padding:10px 12px;border-radius:6px;margin-bottom:12px">
+        <div class="note-must" style="padding:10px 12px;border-radius:6px;margin-bottom:12px">
           <b>🔍 根本原因</b>
           ${roots.map((r, i) => `
             <div style="margin-top:${i ? 8 : 6}px">
-              <div style="font-weight:700;color:#c53030">${i + 1}. ${escapeHtml(r.title)}</div>
-              <div style="color:#4a5568;font-size:13px;margin:2px 0">${escapeHtml(r.detail)}</div>
-              <div style="color:#2b6cb0;font-size:13px">→ ${escapeHtml(r.fix)}</div>
+              <div style="font-weight:700;color:var(--lv-must)">${i + 1}. ${escapeHtml(r.title)}</div>
+              <div style="color:var(--text-soft);font-size:13px;margin:2px 0">${escapeHtml(r.detail)}</div>
+              <div style="color:var(--link);font-size:13px">→ ${escapeHtml(r.fix)}</div>
             </div>`).join('')}
         </div>`;
     }
   }
 
   const causeHtml = hasErrors ? `${rootHtml}
-    <div style="background:#fffaf0;border-left:4px solid #ed8936;padding:10px 12px;border-radius:6px;margin-bottom:12px">
+    <div class="note-soft" style="padding:10px 12px;border-radius:6px;margin-bottom:12px">
       <b>📋 今回のエラーの原因（症状の内訳・${allVios.length}件）</b>
       <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:13px;margin-top:6px;width:100%">
-        <tr style="color:#718096"><td style="padding:3px 8px">種類</td><td style="padding:3px 8px;text-align:center">件数</td><td style="padding:3px 8px">原因 → 対処</td></tr>
+        <tr style="color:var(--text-muted)"><td style="padding:3px 8px">種類</td><td style="padding:3px 8px;text-align:center">件数</td><td style="padding:3px 8px">原因 → 対処</td></tr>
         ${causeRows}
       </table></div>
     </div>` : '';
@@ -1364,12 +1364,12 @@ function showSurplusPopup() {
     if (bn.length > 0) {
       const items = bn.map(b => {
         const cand = b.surplusCandidates.length
-          ? `<br><span style="color:#2b6cb0">→ 余っている <b>${escapeHtml(b.surplusCandidates.slice(0, 4).join('・'))}</b> に任せられると分散できます</span>`
+          ? `<br><span style="color:var(--link)">→ 余っている <b>${escapeHtml(b.surplusCandidates.slice(0, 4).join('・'))}</b> に任せられると分散できます</span>`
           : '';
         return `<li>「<b>${escapeHtml(b.key)}</b>」ができるのは <b>${b.capable.length}人</b>だけ（${escapeHtml(b.capable.slice(0, 5).join('・'))}）${cand}</li>`;
       }).join('');
       bottleneckHtml = `
-        <div style="background:#ebf8ff;border-left:4px solid #4299e1;padding:10px 12px;border-radius:6px;margin-top:12px">
+        <div class="note-info" style="padding:10px 12px;border-radius:6px;margin-top:12px">
           <b>⚖️ 根本原因：担当できる人の偏り</b>
           <p style="margin:4px 0">下記は「できる人」が少なく、その人に負担が集中します（＝公休不足）。逆にこの担当ができない人は「余」になります。</p>
           <ul style="margin:4px 0;padding-left:20px;line-height:1.7">${items}</ul>
@@ -1397,10 +1397,10 @@ function showSurplusPopup() {
       : `⚠️ 人手が足りない日があります`;
     body = `${causeHtml}
       <p>必要コマ合計 <b>${requiredWork}</b> に対して、出せるコマ合計は <b>${availableWork}</b> です。
-      ${shortageComa > 0 ? `<b style="color:#c53030">${shortageComa}コマ不足</b>しています。` : '合計は足りていますが、特定の日・シフトで埋められていません。'}</p>
+      ${shortageComa > 0 ? `<b style="color:var(--lv-must)">${shortageComa}コマ不足</b>しています。` : '合計は足りていますが、特定の日・シフトで埋められていません。'}</p>
       ${shortDays ? `<div style="margin:8px 0"><b>埋まっていない主な箇所：</b><ul style="margin:4px 0;padding-left:20px;line-height:1.7">${shortDays}</ul></div>` : ''}
       ${offShort.length ? `<p>公休が足りていない人：<b>${escapeHtml(offShort.join('・'))}</b></p>` : ''}
-      <div style="background:#fff5f5;border-left:4px solid #fc8181;padding:10px 12px;border-radius:6px">
+      <div class="note-must" style="padding:10px 12px;border-radius:6px">
         <b>不足の解消方法：</b>
         <ol style="margin:6px 0 0;padding-left:20px;line-height:1.8">
           <li><b>必要人数（定数）を減らす</b>（②シフト種別 or シフト表の集計行で日別に）</li>
@@ -1414,9 +1414,9 @@ function showSurplusPopup() {
       .map(r => `<li><b>${escapeHtml(r.name)}</b>：余 ${r.yo}コマ</li>`).join('');
     title = `📢 人員が ${surplusTotal}コマ 余っています`;
     body = `${causeHtml}
-      <p>必要人数（定数）を守った結果、下記の人が「<span style="color:#bf5b00;font-weight:700">余</span>（人員余り）」になっています。</p>
+      <p>必要人数（定数）を守った結果、下記の人が「<span style="color:var(--sur-fg);font-weight:700">余</span>（人員余り）」になっています。</p>
       <ul style="margin:8px 0 12px;padding-left:20px;line-height:1.8">${list}</ul>
-      <div style="background:#fff8e1;border-left:4px solid #f6ad55;padding:10px 12px;border-radius:6px;color:#744210">
+      <div class="note-soft" style="padding:10px 12px;border-radius:6px">
         <b>コマ数をぴったりにするには：</b>
         <p style="margin:6px 0 0;line-height:1.8">下のボタンから、余のコマを1つずつ
         <b>「有給にする」</b>か<b>「その日の必要人数を1人増やして出勤にする」</b>かを選べます。
@@ -1427,7 +1427,7 @@ function showSurplusPopup() {
     // 不足も余りもないが、エラー（時間帯切替・リズムなど）がある場合
     title = `⚠️ ${allVios.length}件のエラーがあります`;
     body = `${causeHtml}
-      <div style="background:#fffaf0;border-left:4px solid #ed8936;padding:10px 12px;border-radius:6px">
+      <div class="note-soft" style="padding:10px 12px;border-radius:6px">
         <b>減らし方：</b>
         <ol style="margin:6px 0 0;padding-left:20px;line-height:1.8">
           <li><b>「🛠 エラーを自動修正」</b>を押す（数回押すとさらに減ります）</li>
@@ -1471,18 +1471,18 @@ function renderReport(result) {
   // ── AI 診断セクション ──────────────────────────────────────
   const diagItems = (typeof runAIDiagnosis === 'function') ? runAIDiagnosis() : [];
   const diagColors = {
-    error:   { bg: '#fff5f5', border: '#fc8181', title: '#742a2a', body: '#9b2335' },
-    warning: { bg: '#fffaf0', border: '#f6ad55', title: '#744210', body: '#975a16' },
-    info:    { bg: '#ebf8ff', border: '#63b3ed', title: '#2a4365', body: '#2c5282' },
-    ok:      { bg: '#f0fff4', border: '#68d391', title: '#22543d', body: '#276749' },
+    error:   { bg: 'var(--lv-must-bg)', border: 'var(--lv-must)', title: 'var(--lv-must)', body: 'var(--text)' },
+    warning: { bg: 'var(--lv-soft-bg)', border: 'var(--lv-soft)', title: 'var(--lv-soft)', body: 'var(--text)' },
+    info:    { bg: 'var(--accent-soft)', border: 'var(--link)', title: 'var(--link)', body: 'var(--text)' },
+    ok:      { bg: 'var(--ok-bg)', border: 'var(--ok)', title: 'var(--ok)', body: 'var(--text)' },
   };
   const diagIcons = { error: '🚨', warning: '⚠️', info: 'ℹ️', ok: '✅' };
 
   let diagHtml = '';
   if (result.candidateSummary) {
-    diagHtml += `<div class="diag-item" style="background:#ebf8ff;border-left:4px solid #63b3ed;margin-bottom:8px">
-      <div class="diag-title" style="color:#2a4365">🔀 複数案の比較</div>
-      <div class="diag-detail" style="color:#2c5282">${escapeHtml(result.candidateSummary)}</div>
+    diagHtml += `<div class="diag-item" style="background:var(--accent-soft);border-left:4px solid var(--link);margin-bottom:8px">
+      <div class="diag-title" style="color:var(--link)">🔀 複数案の比較</div>
+      <div class="diag-detail" style="color:var(--text)">${escapeHtml(result.candidateSummary)}</div>
     </div>`;
   }
   // 具体的な直し方（誰の何日をどう入れ替えるか）。
@@ -1534,9 +1534,9 @@ function renderReport(result) {
   // サマリー: 絶対NGが0なら実質クリア扱いのメッセージ
   let html = diagHtml;
   if (comp.length) {
-    html += `<div class="report-warning" style="border-color:var(--danger);font-weight:700">⛔ コンプラ違反（6連勤以上）: ${comp.length}件 ／ 🔴 絶対NG: ${must.length}件 ／ 🟡 注意: ${should.length}件</div>
-      <div class="violation-group-title" style="color:#9b2335;font-weight:700;margin:12px 0 6px">⛔ コンプラ違反（6連勤以上・必ず直す）— ${comp.length}件</div>
-      <div class="violation-list must">${renderItems(comp)}</div>`;
+    html += `<div class="report-warning" style="border:2px solid var(--lv-crit);background:var(--lv-crit-bg);font-weight:700">⛔ コンプラ違反（6連勤以上）: ${comp.length}件 ／ 🔴 絶対NG: ${must.length}件 ／ 🟡 注意: ${should.length}件</div>
+      <div class="violation-group-title" style="color:var(--lv-crit);font-weight:700;margin:12px 0 6px">⛔ コンプラ違反（6連勤以上・必ず直す）— ${comp.length}件</div>
+      <div class="violation-list must crit">${renderItems(comp)}</div>`;
   } else if (must.length === 0) {
     html += `<div class="report-success">✅ 絶対NG（人員不足・スキル・連勤超過・単発出勤など）は 0件！ 残り ${should.length}件 は「できれば避けたい」調整項目です。</div>`;
   } else {
@@ -1545,12 +1545,12 @@ function renderReport(result) {
 
   if (must.length) {
     html += `
-      <div class="violation-group-title" style="color:#9b2335;font-weight:700;margin:12px 0 6px">🔴 絶対NG（必ず直す）— ${must.length}件</div>
+      <div class="violation-group-title" style="color:var(--lv-must);font-weight:700;margin:12px 0 6px">🔴 絶対NG（必ず直す）— ${must.length}件</div>
       <div class="violation-list must">${renderItems(must)}</div>`;
   }
   if (should.length) {
     html += `
-      <div class="violation-group-title" style="color:#975a16;font-weight:700;margin:14px 0 6px">🟡 注意（できれば避けたい）— ${should.length}件</div>
+      <div class="violation-group-title" style="color:var(--lv-soft);font-weight:700;margin:14px 0 6px">🟡 注意（できれば避けたい）— ${should.length}件</div>
       <div class="violation-list should">${renderItems(should)}</div>`;
   }
   $c.innerHTML = html;
@@ -1570,9 +1570,9 @@ function renderFixPlans(root) {
   const now = (typeof checkViolations === 'function') ? checkViolations(AppState.shifts).length : 0;
   if (!now) return;
 
-  box.innerHTML = `<div class="diag-item" style="background:#ebf8ff;border-left:4px solid #63b3ed;margin-bottom:8px">
-      <div class="diag-title" style="color:#2a4365">🔧 具体的な直し方を探す</div>
-      <div class="diag-detail" style="color:#2c5282">
+  box.innerHTML = `<div class="diag-item" style="background:var(--accent-soft);border-left:4px solid var(--link);margin-bottom:8px">
+      <div class="diag-title" style="color:var(--link)">🔧 具体的な直し方を探す</div>
+      <div class="diag-detail" style="color:var(--text)">
         いまの表のまま、<b>同じ日の2人を入れ替える</b>だけでエラーが減る組み合わせを探します。
         その日の人数は変わらないので、必要人数は崩れません。希望・固定のマスは動かしません。<br>
         <b>🚨（連勤超過など、必ず直すエラー）が増える案は出しません。</b>
@@ -1592,9 +1592,9 @@ function renderFixPlans(root) {
       // A9: 案を作ったときの表。押したときに今の表と同じかを確かめる
       const fp0 = (typeof contentFingerprint === 'function') ? contentFingerprint() : null;
       if (!plans.length) {
-        box.innerHTML = `<div class="diag-item" style="background:#fffaf0;border-left:4px solid #f6ad55;margin-bottom:8px">
-          <div class="diag-title" style="color:#744210">🔧 入れ替えでは減らせません</div>
-          <div class="diag-detail" style="color:#975a16">
+        box.innerHTML = `<div class="diag-item" style="background:var(--lv-soft-bg);border-left:4px dashed var(--lv-soft);margin-bottom:8px">
+          <div class="diag-title" style="color:var(--lv-soft)">🔧 入れ替えでは減らせません</div>
+          <div class="diag-detail" style="color:var(--text)">
             2人の入れ替えを全部試しましたが、エラーが減る組み合わせはありませんでした。
             残っているエラーは、希望や必要人数を変えないと減らせません。
             <b>生成前チェック</b>に「避けられない」と出ていないかご確認ください。
@@ -1611,13 +1611,13 @@ function renderFixPlans(root) {
            <b style="min-width:6em">${escapeHtml(name)}</b>
            <span style="opacity:.7">${escapeHtml(from || '—')}</span>
            <span>→</span>
-           <b style="color:var(--accent)">${escapeHtml(to || '—')}</b>
+           <b style="color:var(--link)">${escapeHtml(to || '—')}</b>
          </div>`;
       const line = (m) => cell(m.aName, m.aId, m.day, m.aVal, m.bVal)
                         + cell(m.bName, m.bId, m.day, m.bVal, m.aVal);
-      box.innerHTML = `<div class="diag-item" style="background:#f0fff4;border-left:4px solid #68d391;margin-bottom:8px">
-          <div class="diag-title" style="color:#22543d">🔧 この通りに直すとエラーが減ります（${plans.length}案）</div>
-          <div class="diag-detail" style="color:#276749">
+      box.innerHTML = `<div class="diag-item" style="background:var(--ok-bg);border-left:4px solid var(--ok);margin-bottom:8px">
+          <div class="diag-title" style="color:var(--ok)">🔧 この通りに直すとエラーが減ります（${plans.length}案）</div>
+          <div class="diag-detail" style="color:var(--text)">
             押すまで表は変わりません。押したあとは「元に戻す」で取り消せます。
           </div>
           ${plans.map((p, i) => `<div style="margin-top:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface)">
@@ -1650,9 +1650,9 @@ function renderFixPlans(root) {
         if (!sameFp || !cellsOk || !better) {
           box.innerHTML = '';
           renderFixPlans(root);
-          box.insertAdjacentHTML('afterbegin', `<div class="diag-item" style="background:#fff5f5;border-left:4px solid #fc8181;margin-bottom:8px">
-              <div class="diag-title" style="color:#742a2a">表が変わったので、この案は使えません</div>
-              <div class="diag-detail" style="color:#9b2335">表は変えていません。もう一度探してください。</div></div>`);
+          box.insertAdjacentHTML('afterbegin', `<div class="diag-item" style="background:var(--lv-must-bg);border-left:4px solid var(--lv-must);margin-bottom:8px">
+              <div class="diag-title" style="color:var(--lv-must)">表が変わったので、この案は使えません</div>
+              <div class="diag-detail" style="color:var(--text)">表は変えていません。もう一度探してください。</div></div>`);
           return;
         }
         if (typeof recordShiftHistory === 'function') recordShiftHistory();
@@ -1781,7 +1781,7 @@ function setupResultPanel() {
             <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:13px"><thead>${candHead()}</thead><tbody id="rcRows"></tbody></table></div>
             <div id="rcStatus" style="margin-top:8px"></div>
             <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn" id="rcStop" style="background:#e74c3c;color:#fff">⏹ 中止（出ている案は選べます）</button>
+              <button class="btn" id="rcStop" style="background:var(--surface);color:var(--lv-crit);border-color:var(--lv-crit)">⏹ 中止（出ている案は選べます）</button>
               <button class="btn" id="rcCancel">反映しないで閉じる</button>
             </div>
           </div></div>`;

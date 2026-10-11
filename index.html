@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=249" />
+<link rel="stylesheet" href="css/style.css?v=250" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -20,7 +20,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v249</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v250</span>
   </div>
   <div class="header-actions">
     <button id="btnTheme" class="btn btn-ghost btn-theme" aria-label="テーマ切替" title="明暗を切り替え">🌙</button>
@@ -165,7 +165,7 @@
               <th>集計対象</th>
               <th>研修扱い</th>
               <th>夜勤</th>
-              <th>色</th>
+              <th title="画面のマスはカテゴリ（早番系・遅番系）で塗ります。この色は Excel に出力するときの色です">Excel出力<br><small>の色</small></th>
               <th>労働時間<br><small>(h/コマ)</small></th>
               <th>必要人数/日<br><small>(社員)</small></th>
               <th>必要人数/日<br><small>(キャスト)</small></th>
@@ -274,7 +274,7 @@
     <div class="card" style="text-align:center">
       <button id="btnWizard" class="btn btn-primary btn-large" style="font-size:16px;padding:14px 28px">🧭 順番に確認して生成する（はじめての方はこちら）</button>
       <p class="hint" style="margin:8px 0 0">ルール → 必要人数 → 希望の噛み合わせ → 余の使い道 → 生成 の順に、1つずつ確認しながら進みます。</p>
-      <div style="margin-top:10px"><button id="btnCancelGenerate" class="btn btn-large" style="display:none;background:#e74c3c;color:#fff">⏹ 中止</button></div>
+      <div style="margin-top:10px"><button id="btnCancelGenerate" class="btn btn-large btn-stop" style="display:none">⏹ 中止</button></div>
     </div>
     <details class="card" id="advGenerate">
       <summary style="cursor:pointer;font-weight:700">🔧 慣れた方向け（個別に実行する）</summary>
@@ -285,11 +285,11 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="btnGenerateFast" class="btn btn-large btn-primary">⚡ 速い生成（証明なし・最大60秒）</button>
-        <button id="btnGenerate" class="btn btn-large" style="background:#4c51bf;color:#fff">🎯 じっくり生成（証明あり・最大約11分）</button>
-        <button id="btnFeasibility" class="btn btn-large" style="background:#38a169;color:#fff">🔍 実現性チェック（生成前）</button>
-        <button id="btnRelax" class="btn btn-large" style="background:#dd6b20;color:#fff">🩹 エラー解消プラン</button>
-        <button id="btnSurplusPlan" class="btn btn-large" style="background:#2b6cb0;color:#fff">⚖️ 余の使い道を決める</button>
-        <button id="btnForecast" class="btn btn-large" style="background:#6b46c1;color:#fff">🔮 設定を変えたときの見込み</button>
+        <button id="btnGenerate" class="btn btn-large">🎯 じっくり生成（証明あり・最大約11分）</button>
+        <button id="btnFeasibility" class="btn btn-large">🔍 実現性チェック（生成前）</button>
+        <button id="btnRelax" class="btn btn-large">🩹 エラー解消プラン</button>
+        <button id="btnSurplusPlan" class="btn btn-large">⚖️ 余の使い道を決める</button>
+        <button id="btnForecast" class="btn btn-large">🔮 設定を変えたときの見込み</button>
       </div>
       <p class="hint" style="margin-top:8px">
         バックグラウンドで処理されるため、実行中もアプリは操作可能です。<br>
@@ -335,11 +335,11 @@
       <div id="editSummary" style="margin:8px 0"></div>
       <!-- 自動修正の進捗（シフト表用） -->
       <div id="repairProgress" style="display:none;margin:10px 0">
-        <div style="background:#e2e8f0;border-radius:6px;height:14px;overflow:hidden">
-          <div id="repairBar" style="width:0%;height:100%;background:#667eea;transition:width .2s"></div>
+        <div style="background:var(--surface-3);border-radius:4px;height:8px;overflow:hidden">
+          <div id="repairBar" style="width:0%;height:100%;background:var(--accent);transition:width .2s"></div>
         </div>
-        <div id="repairText" style="font-size:13px;color:#4a5568;margin-top:6px"></div>
-        <button id="btnCancelRepair" class="btn" style="display:none;margin-top:6px;background:#e74c3c;color:#fff">⏹ 中止</button>
+        <div id="repairText" style="font-size:13px;color:var(--text-soft);margin-top:6px"></div>
+        <button id="btnCancelRepair" class="btn btn-stop" style="display:none;margin-top:6px">⏹ 中止</button>
       </div>
       <!-- 凡例：シフト種別から動的生成 -->
       <div class="legend" id="shiftLegend"></div>
@@ -374,12 +374,12 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=249"></script>
-<script src="js/optimizer.v6.js?v=249"></script>
-<script src="js/worker-client.v6.js?v=249"></script>
-<script src="js/ai-explain.v6.js?v=249"></script>
-<script src="js/ui.v6.js?v=249"></script>
-<script src="js/milp.v6.js?v=249"></script>
-<script src="js/app.v6.js?v=249"></script>
+<script src="js/data.v6.js?v=250"></script>
+<script src="js/optimizer.v6.js?v=250"></script>
+<script src="js/worker-client.v6.js?v=250"></script>
+<script src="js/ai-explain.v6.js?v=250"></script>
+<script src="js/ui.v6.js?v=250"></script>
+<script src="js/milp.v6.js?v=250"></script>
+<script src="js/app.v6.js?v=250"></script>
 </body>
 </html>

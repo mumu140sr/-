@@ -6,7 +6,7 @@
    - キャンセル機能つき
    =========================================== */
 
-const WORKER_URL = 'js/optimizer.worker.js?v=249';
+const WORKER_URL = 'js/optimizer.worker.js?v=250';
 
 let _activeWorker  = null;
 let _activeWorkers = [];

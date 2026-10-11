@@ -322,7 +322,7 @@ function showAIExplanationModal() {
           </ul>
         `}
 
-        <div style="margin-top:24px;padding-top:16px;border-top:1px solid #eee;text-align:right">
+        <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);text-align:right">
           <button class="btn btn-primary" id="aiExplainOk">わかった</button>
         </div>
       </div>
