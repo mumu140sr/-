@@ -426,6 +426,124 @@ a { color: var(--link); }
 .lv-chip.is-zero .ic { color: var(--text-muted); }
 .res-hint { margin: 0 0 8px; }
 
+/* ===== ③ スタッフ管理：左に一覧、右に選んだ人の設定（v255） =====
+   表（staffTableBody）は今のまま。ui-shell が表の形（見出し19列）を確かめてから .is-split を付け、選んだ行に .is-selected を付ける。
+   項目名と区分の見出しは、何列目かで CSS が出す（列の順番が変わったら ui-shell が .is-split を外し、表のまま出す） */
+.staff-carry-hint { margin: -6px 0 12px; }
+.staff-split:not(.is-split) .staff-list-card, .staff-split:not(.is-split) .staff-detail-h { display: none; }
+.staff-split.is-split { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 16px; }
+.staff-split.is-split > .card { margin-bottom: 0; }
+.card.staff-list-card { flex: 1 1 260px; max-width: 340px; padding: 0; overflow: hidden; position: sticky; top: calc(var(--header-h) + 12px); }
+.staff-list-h { display: flex; align-items: center; gap: 8px; padding: 12px 16px; font-weight: 700; border-bottom: 1px solid var(--border-subtle); }
+.staff-list-h .grow { flex: 1; }
+.staff-list { max-height: calc(100vh - var(--header-h) - 120px); overflow-y: auto; }
+.staff-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 8px 16px;
+  border: none; border-bottom: 1px solid var(--border-subtle); background: var(--surface); color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.staff-item:last-child { border-bottom: none; }
+.staff-item:hover { background: var(--surface-2); }
+.staff-item[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+:root[data-theme="dark"] .staff-item[aria-selected="true"] { box-shadow: inset 3px 0 0 var(--link); }
+.staff-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.staff-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.staff-item-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.staff-item-sub { font-size: var(--fs-xs); color: var(--text-muted); }
+.staff-item-tags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 45%; }
+.staff-tag { padding: 1px 6px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; background: var(--surface-3); color: var(--text); }
+
+.card.staff-detail { flex: 999 1 420px; min-width: 0; }
+.staff-split.is-split .card.staff-detail { padding: 0; position: relative; container-type: inline-size; }
+.staff-detail-h { padding: 14px 200px 14px 20px; font-size: var(--fs-lg); font-weight: 700; border-bottom: 1px solid var(--border-subtle); min-height: 52px; }
+.staff-split.is-split .table-wrap { border: none; border-radius: 0; overflow: visible; background: transparent; }
+.staff-split.is-split .staff-table, .staff-split.is-split .staff-table tbody { display: block; width: auto; min-width: 0; }
+.staff-split.is-split .staff-table thead { display: none; }
+.staff-split.is-split .staff-table tbody tr { display: none; }
+.staff-split.is-split .staff-table tbody tr.is-selected {
+  --sd-cols: 3; --sd-gap: 16px;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--sd-gap); row-gap: 14px;
+  padding: 4px 20px 20px; background: transparent;
+  grid-template-areas: "name dept pos" "allow allow allow" "skill skill skill" "maxoff paid pairt" "offrun rest week"
+                       "prefs bal cons" "needp needp needp" "pcons plast note";
+}
+.staff-split.is-split .staff-table tbody tr.is-selected > td {
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  border: none; padding: 0; text-align: left; overflow: visible; position: relative; min-width: 0; height: auto;
+}
+.staff-split.is-split .staff-table tbody tr.is-selected > td::after { order: -1; font-size: var(--fs-xs); font-weight: 700; color: var(--text); line-height: 1.4; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(1)  { grid-area: name; }   .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(1)::after  { content: "名前"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(2)  { grid-area: dept; }   .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(2)::after  { content: "部門"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(3)  { grid-area: pos; }    .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(3)::after  { content: "役職"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(4)  { grid-area: allow; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(5)  { grid-area: skill; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(6)  { grid-area: maxoff; } .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(6)::after  { content: "公休数（月の休み数）"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(7)  { grid-area: paid; }   .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(7)::after  { content: "有給（月の有給数）"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(8)  { grid-area: prefs; }  .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(8)::after  { content: "希望（早可／遅可）"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(9)  { grid-area: bal; }    .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(9)::after  { content: "早遅バランス（割合／のみ＝絶対）"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(10) { grid-area: cons; }   .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(10)::after { content: "連勤上限（個人・空欄＝全体）"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(11) { grid-area: offrun; } .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(11)::after { content: "連休上限（個人・空欄＝全体）"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(12) { grid-area: needp; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(12)::after { content: "遅→早は連休必須"; order: 1; font-weight: 500; font-size: var(--fs-sm); }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(13) { grid-area: week; }   .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(13)::after { content: "土日休み希望"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(14) { grid-area: rest; }   .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(14)::after { content: "休み方（連休／分散）"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(15) { grid-area: pairt; }  .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(15)::after { content: "連休回数（月・空欄＝全体）"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(16) { grid-area: pcons; }  .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(16)::after { content: "前月末の連勤日数（0＝月末は休み）"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(17) { grid-area: plast; }  .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(17)::after { content: "前月末シフト（連勤1日以上で選択）"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(18) { grid-area: note; }   .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(18)::after { content: "備考"; }
+/* 削除は詳細の右上（見出しの行）に出す */
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) { position: absolute; top: 8px; right: 12px; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) .btn-icon { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); padding: 4px 10px; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) .btn-icon::after { content: "このスタッフを削除"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) .btn-icon .ic { width: 16px; height: 16px; }
+/* 区分の見出し（基本・担当シフト・スキル・休み・勤務の希望・前月末・備考）。その区分の最初の欄の上に出す */
+.staff-split.is-split .staff-table tbody tr.is-selected > td:is(:nth-child(1), :nth-child(4), :nth-child(5), :nth-child(6), :nth-child(8), :nth-child(16))::before {
+  position: absolute; top: 0; left: 0; width: calc(var(--sd-cols) * 100% + (var(--sd-cols) - 1) * var(--sd-gap));
+  padding-top: 12px; border-top: 1px solid var(--border-subtle);
+  font-size: var(--fs-sm); font-weight: 700; color: var(--link);
+}
+.staff-split.is-split .staff-table tbody tr.is-selected > td:is(:nth-child(4), :nth-child(5))::before { width: 100%; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(1)::before  { content: "基本"; border-top: none; padding-top: 6px; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(4)::before  { content: "担当シフト"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(5)::before  { content: "スキル"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(6)::before  { content: "休み"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(8)::before  { content: "勤務の希望"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(16)::before { content: "前月末・備考"; }
+/* 見出しの分だけ、区分の最初の行を下げる（3列のとき） */
+.staff-split.is-split .staff-table tbody tr.is-selected > td:is(:nth-child(1), :nth-child(2), :nth-child(3)) { padding-top: 30px; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:is(:nth-child(4), :nth-child(5), :nth-child(6), :nth-child(7), :nth-child(15), :nth-child(8), :nth-child(9), :nth-child(10), :nth-child(16), :nth-child(17), :nth-child(18)) { padding-top: 44px; }
+/* 中の部品を詳細の幅に合わせる */
+.staff-split.is-split .staff-table tbody tr.is-selected input[type="text"] { width: 100%; min-width: 0; }
+.staff-split.is-split .staff-table tbody tr.is-selected input[type="number"] { width: 96px !important; }   /* 表のときの幅（style 属性）を上書き */
+.staff-split.is-split .staff-table tbody tr.is-selected select { width: 100%; min-width: 0 !important; }
+.staff-split.is-split .staff-table tbody tr.is-selected .shift-pref { justify-content: flex-start; }
+.staff-split.is-split .staff-table tbody tr.is-selected .allowed-shifts-wrap { min-width: 0; gap: 6px; }
+.staff-split.is-split .staff-table tbody tr.is-selected .skill-checks { flex-direction: row !important; flex-wrap: wrap; gap: 6px 14px !important; min-width: 0 !important; }
+.staff-split.is-split .staff-table tbody tr.is-selected:hover { background: transparent; }
+/* 詳細の幅が狭いとき（2列・1列）。見出しの付く行を、並べ方に合わせて変える */
+@container (max-width: 560px) {
+  .staff-split.is-split .staff-table tbody tr.is-selected {
+    --sd-cols: 2; grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "name dept" "pos ." "allow allow" "skill skill" "maxoff paid" "pairt offrun" "rest week"
+                         "prefs bal" "cons needp" "pcons plast" "note note";
+  }
+  .staff-split.is-split .staff-table tbody tr.is-selected > td:is(:nth-child(3), :nth-child(15), :nth-child(10), :nth-child(18)) { padding-top: 0; }
+}
+@container (max-width: 380px) {
+  .staff-split.is-split .staff-table tbody tr.is-selected {
+    --sd-cols: 1; grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "name" "dept" "pos" "allow" "skill" "maxoff" "paid" "pairt" "offrun" "rest" "week"
+                         "prefs" "bal" "cons" "needp" "pcons" "plast" "note";
+  }
+  .staff-split.is-split .staff-table tbody tr.is-selected > td:is(:nth-child(2), :nth-child(7), :nth-child(9), :nth-child(17)) { padding-top: 0; }
+}
+@media (max-width: 640px) {
+  .card.staff-list-card { max-width: none; position: static; }
+  .staff-list { max-height: 40vh; }
+  .staff-detail-h { padding-right: 20px; }
+  .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) { position: static; grid-column: 1 / -1; }
+}
+
 /* 各画面の下の「前へ」「次へ」 */
 .step-nav { display: flex; justify-content: space-between; gap: 12px; padding-top: 4px; margin-top: 8px; }
 .step-nav .step-next { margin-left: auto; }

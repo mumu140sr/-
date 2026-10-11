@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=254" />
+<link rel="stylesheet" href="css/style.css?v=255" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -68,7 +68,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v254</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v255</span>
   </div>
   <div class="header-actions">
     <!-- 「データ」メニュー：今のボタンそのものを中に置く（id はそのまま。開閉は js/ui-shell.v6.js） -->
@@ -247,15 +247,26 @@
 
   <!-- ③ スタッフ管理 -->
   <section class="tab-panel" id="panel-staff">
-    <div class="page-head"><div class="page-step">手順 3 / 6</div><h2>スタッフ管理</h2></div>
-    <div class="card">
-      <div class="toolbar">
-        <button class="btn btn-primary" id="btnAddStaff"><svg class="ic" aria-hidden="true"><use href="#i-user-plus"/></svg>スタッフ追加</button>
-        <button class="btn" id="btnCarryOver"><svg class="ic" aria-hidden="true"><use href="#i-carry"/></svg>前月末の連勤・シフトを取り込む</button>
-        <span class="hint">今表示中のシフト表の末尾から「前月末連勤日数／前月末シフト」を自動入力します</span>
+    <div class="page-head page-head-row">
+      <div class="grow"><div class="page-step">手順 3 / 6</div><h2>スタッフ管理</h2></div>
+      <div class="res-actions">
+        <button class="btn" id="btnCarryOver" title="今表示中のシフト表の末尾から「前月末連勤日数／前月末シフト」を自動入力します"><svg class="ic" aria-hidden="true"><use href="#i-carry"/></svg>前月末の連勤・シフトを取り込む</button>
+        <button class="btn btn-outline" id="btnAddStaff"><svg class="ic" aria-hidden="true"><use href="#i-user-plus"/></svg>スタッフ追加</button>
       </div>
-      <div class="table-wrap">
-        <table class="staff-table">
+    </div>
+    <p class="hint staff-carry-hint">「前月末の連勤・シフトを取り込む」は、今表示中のシフト表の末尾から「前月末連勤日数／前月末シフト」を自動入力します。</p>
+
+    <!-- 左に一覧、右に選んだ人の設定（v255）。表（staffTableBody）は今のまま描き、選んだ人の行だけを CSS で「詳細の形」に見せる。
+         一覧の作成・選ぶ行の切り替え・形の確かめ（違えば表のまま出す）は js/ui-shell.v6.js -->
+    <div class="staff-split" id="staffSplit">
+      <section class="card staff-list-card" aria-label="スタッフ一覧">
+        <div class="staff-list-h"><span class="grow">スタッフ</span><span id="staffCount" class="fold-sub"></span></div>
+        <div id="staffList" class="staff-list" role="listbox" aria-label="スタッフ一覧"></div>
+      </section>
+      <section class="card staff-detail" aria-label="スタッフの設定">
+        <div class="staff-detail-h">スタッフの設定</div>
+        <div class="table-wrap">
+          <table class="staff-table">
           <thead>
             <tr>
               <th>名前</th>
@@ -280,25 +291,31 @@
             </tr>
           </thead>
           <tbody id="staffTableBody"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="card">
-      <h3>スキル設定</h3>
-      <p class="hint">「営業できる人」などのスキルを登録し、早番／遅番に最低何人必要かを設定できます。登録すると上のスタッフ表に各スキルのチェック欄が表示されます。</p>
-      <div class="toolbar" style="margin-bottom:8px">
-        <button class="btn btn-primary" id="btnAddSkill"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>スキル追加</button>
-      </div>
-      <div id="skillsList"></div>
+          </table>
+        </div>
+      </section>
     </div>
 
-    <div class="card">
-      <h3>役職タイプ説明</h3>
-      <ul class="hint-list">
-        <li><b>副店長</b>: 毎日少なくとも1人が出勤します（全員が同じ日に休むことを禁止）。特別日は早責/遅責に固定</li>
-        <li><b>チーフ / リーダー / スタッフ</b>: 担当シフト欄で入れるシフトを直接指定してください</li>
-      </ul>
-    </div>
+    <details class="card fold-card">
+      <summary class="fold-sum"><span class="grow">スキル設定</span><span class="fold-sub">「営業できる人」などのスキルと、早番／遅番の必要人数</span></summary>
+      <div class="fold-body adv-body">
+        <p class="hint" style="margin-top:0">「営業できる人」などのスキルを登録し、早番／遅番に最低何人必要かを設定できます。登録すると、スタッフの設定の「スキル」に各スキルのチェック欄が表示されます。</p>
+        <div class="toolbar" style="margin-bottom:8px">
+          <button class="btn btn-primary" id="btnAddSkill"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>スキル追加</button>
+        </div>
+        <div id="skillsList"></div>
+      </div>
+    </details>
+
+    <details class="card fold-card">
+      <summary class="fold-sum"><span class="grow">役職タイプ説明</span></summary>
+      <div class="fold-body adv-body">
+        <ul class="hint-list" style="margin:0">
+          <li><b>副店長</b>: 毎日少なくとも1人が出勤します（全員が同じ日に休むことを禁止）。特別日は早責/遅責に固定</li>
+          <li><b>チーフ / リーダー / スタッフ</b>: 担当シフト欄で入れるシフトを直接指定してください</li>
+        </ul>
+      </div>
+    </details>
     <!-- 前へ・次へ：左メニューのボタンを押すのと同じ（js/ui-shell.v6.js） -->
     <div class="step-nav"><button type="button" class="btn step-prev" data-go="roles"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>シフト種別</button><button type="button" class="btn step-next btn-primary" data-go="calendar">次へ：希望休入力<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button></div>
   </section>
@@ -487,13 +504,13 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=254"></script>
-<script src="js/optimizer.v6.js?v=254"></script>
-<script src="js/worker-client.v6.js?v=254"></script>
-<script src="js/ai-explain.v6.js?v=254"></script>
-<script src="js/ui.v6.js?v=254"></script>
-<script src="js/milp.v6.js?v=254"></script>
-<script src="js/app.v6.js?v=254"></script>
-<script src="js/ui-shell.v6.js?v=254"></script>
+<script src="js/data.v6.js?v=255"></script>
+<script src="js/optimizer.v6.js?v=255"></script>
+<script src="js/worker-client.v6.js?v=255"></script>
+<script src="js/ai-explain.v6.js?v=255"></script>
+<script src="js/ui.v6.js?v=255"></script>
+<script src="js/milp.v6.js?v=255"></script>
+<script src="js/app.v6.js?v=255"></script>
+<script src="js/ui-shell.v6.js?v=255"></script>
 </body>
 </html>
