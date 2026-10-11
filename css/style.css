@@ -568,12 +568,14 @@ tbody tr:hover { background: var(--surface-2); }
 
 /* ===== シフト種別テーブル ===== */
 /* v252: 1つの行（tr）の中で、1段目に主な列、2段目に「詳細」（.role-more）を出す。
-   行を2つに分けないのは、記号・色を変えたときに同じ行の見本を書き換える処理があるため */
-.role-table { display: block; min-width: 720px; }
-.role-table thead, .role-table tbody { display: block; }
-.role-table tr { display: grid; grid-template-columns: 96px minmax(150px, 220px) 120px 112px 112px 112px minmax(96px, 1fr); align-items: center; border-bottom: 1px solid var(--border-subtle); }
+   行を2つに分けないのは、記号・色を変えたときに同じ行の見本を書き換える処理があるため。
+   表全体を grid にし、見出し・行は subgrid で同じ列幅を使う（見出しの列幅のドラッグが今までどおり効く） */
+.role-table { display: grid; grid-template-columns: auto minmax(150px, auto) auto auto auto auto minmax(96px, 1fr); min-width: 720px; }
+.role-table thead, .role-table tbody, .role-table tr { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; }
+.role-table tr { align-items: center; border-bottom: 1px solid var(--border-subtle); }
 .role-table th, .role-table td { display: block; border: none; text-align: left; }
-.role-table thead th { position: static; background: var(--surface); }
+.role-table thead th { position: relative; background: var(--surface); }
+.role-table .col-resizer { right: 0; }   /* 隣の見出しの下に半分隠れないよう、見出しの中に収める */
 .role-table td.rc-num { display: flex; align-items: center; gap: 6px; }
 .role-table td.rc-num .unit { color: var(--text-muted); }
 .role-table td.rc-more { text-align: right; }

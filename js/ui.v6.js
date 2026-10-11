@@ -2577,7 +2577,8 @@ function enableColumnResize(table, key) {
 
 // 各表に列幅調整を有効化（描画のたびに呼ばれても安全）
 function setupAllColumnResizers() {
-  enableColumnResize(document.querySelector('.role-table'),  'role');
+  // v252: ②の列の並びを変えたので、前に保存した列幅（列の番号で覚えている）が別の列に当たらないよう名前を変える
+  enableColumnResize(document.querySelector('.role-table'),  'role2');
   enableColumnResize(document.querySelector('.staff-table'), 'staff');
   enableColumnResize(document.getElementById('resultTable'), 'result');
 }
