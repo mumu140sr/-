@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=253" />
+<link rel="stylesheet" href="css/style.css?v=254" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -68,7 +68,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v253</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v254</span>
   </div>
   <div class="header-actions">
     <!-- 「データ」メニュー：今のボタンそのものを中に置く（id はそのまま。開閉は js/ui-shell.v6.js） -->
@@ -412,23 +412,37 @@
 
   <!-- ⑥ シフト表 -->
   <section class="tab-panel" id="panel-result">
-    <div class="page-head"><div class="page-step">手順 6 / 6</div><h2>シフト表</h2></div>
-    <div class="card">
-      <div class="toolbar">
-        <button class="btn btn-primary" id="btnExportExcel"><svg class="ic" aria-hidden="true"><use href="#i-excel"/></svg>Excelエクスポート</button>
-        <button class="btn" id="btnExportCSV"><svg class="ic" aria-hidden="true"><use href="#i-csv"/></svg>CSVエクスポート</button>
-        <button class="btn" id="btnRecheck"><svg class="ic" aria-hidden="true"><use href="#i-rulecheck"/></svg>ルールチェック</button>
-        <button class="btn btn-primary" id="btnRepair"><svg class="ic" aria-hidden="true"><use href="#i-repair"/></svg>エラーを自動修正</button>
-        <button class="btn" id="btnResolveSurplus" title="余（人員余り）のコマを、有給にするか、その日の必要人数を増やして出勤にするかを選べます"><svg class="ic" aria-hidden="true"><use href="#i-sur-fix"/></svg>余の解消</button>
+    <div class="page-head page-head-row">
+      <div class="grow"><div class="page-step">手順 6 / 6</div><h2>シフト表</h2></div>
+      <!-- 上の段: 元に戻す・やり直す・その他の操作（メニュー）・Excel出力。メニューの中は今のボタンそのもの（開閉は js/ui-shell.v6.js） -->
+      <div class="res-actions">
         <button class="btn" id="btnUndo" disabled><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</button>
         <button class="btn" id="btnRedo" disabled><svg class="ic" aria-hidden="true"><use href="#i-redo"/></svg>やり直す</button>
-        <button class="btn" id="btnRangeLock" title="ドラッグで範囲を選んで、まとめて固定／解除できます">まとめて固定</button>
-        <button class="btn" id="btnPartialRegen" title="指定した日より前をそのまま残し、その日以降だけを作り直します"><svg class="ic" aria-hidden="true"><use href="#i-partial"/></svg>途中から作り直す</button>
-        <button class="btn" id="btnClearFixed"><svg class="ic" aria-hidden="true"><use href="#i-unlock"/></svg>固定をすべて解除</button>
-        <span class="hint">セルをドラッグ&ドロップでシフト交換、クリックで直接編集（編集すると固定されます）。Ctrl+Z で元に戻す／Ctrl+Y でやり直し。</span>
+        <div class="menu-wrap">
+          <button id="btnResultMenu" class="btn menu-btn" aria-haspopup="true" aria-expanded="false" aria-controls="resultMenu">その他の操作<svg class="ic" aria-hidden="true"><use href="#i-down"/></svg></button>
+          <div id="resultMenu" class="menu-pop" hidden>
+            <button class="btn btn-ghost menu-item" id="btnExportCSV"><svg class="ic" aria-hidden="true"><use href="#i-csv"/></svg>CSV出力</button>
+            <button class="btn btn-ghost menu-item" id="btnRecheck"><svg class="ic" aria-hidden="true"><use href="#i-rulecheck"/></svg>ルールチェック</button>
+            <button class="btn btn-ghost menu-item" id="btnResolveSurplus" title="余（人員余り）のコマを、有給にするか、その日の必要人数を増やして出勤にするかを選べます"><svg class="ic" aria-hidden="true"><use href="#i-sur-fix"/></svg>余の解消</button>
+            <div class="menu-sep" role="separator"></div>
+            <button class="btn btn-ghost menu-item" id="btnRangeLock" title="ドラッグで範囲を選んで、まとめて固定／解除できます">まとめて固定</button>
+            <button class="btn btn-ghost menu-item" id="btnPartialRegen" title="指定した日より前をそのまま残し、その日以降だけを作り直します"><svg class="ic" aria-hidden="true"><use href="#i-partial"/></svg>途中から作り直す</button>
+            <button class="btn btn-ghost menu-item" id="btnClearFixed"><svg class="ic" aria-hidden="true"><use href="#i-unlock"/></svg>固定をすべて解除</button>
+          </div>
+        </div>
+        <button class="btn btn-outline" id="btnExportExcel"><svg class="ic" aria-hidden="true"><use href="#i-excel"/></svg>Excel出力</button>
       </div>
+    </div>
+
+    <!-- 件数の帯: 6連勤以上・絶対・できれば・余（ui.v6.js の renderResultBand。分け方は一覧・マスの印と同じ）と、エラーを自動修正 -->
+    <div class="card res-band">
+      <div id="resultBand" class="res-counts"></div>
+      <button class="btn btn-primary" id="btnRepair"><svg class="ic" aria-hidden="true"><use href="#i-repair"/></svg>エラーを自動修正</button>
+    </div>
+
+    <div class="card">
       <!-- 生成から変えたマス（生成直後の表と比べる） -->
-      <div id="editSummary" style="margin:8px 0"></div>
+      <div id="editSummary" style="margin:0 0 8px"></div>
       <!-- 自動修正の進捗（シフト表用） -->
       <div id="repairProgress" style="display:none;margin:10px 0">
         <div style="background:var(--surface-3);border-radius:4px;height:8px;overflow:hidden">
@@ -439,6 +453,7 @@
       </div>
       <!-- 凡例：シフト種別から動的生成 -->
       <div class="legend" id="shiftLegend"></div>
+      <p class="hint res-hint">マスをクリックで変更（変更すると固定されます）／ドラッグ&ドロップで入れ替え。Ctrl+Z で元に戻す／Ctrl+Y でやり直し。</p>
       <div class="table-wrap">
         <div id="partialIgnoreBar" style="display:none"></div>
         <table id="resultTable" class="result-table"></table>
@@ -472,13 +487,13 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=253"></script>
-<script src="js/optimizer.v6.js?v=253"></script>
-<script src="js/worker-client.v6.js?v=253"></script>
-<script src="js/ai-explain.v6.js?v=253"></script>
-<script src="js/ui.v6.js?v=253"></script>
-<script src="js/milp.v6.js?v=253"></script>
-<script src="js/app.v6.js?v=253"></script>
-<script src="js/ui-shell.v6.js?v=253"></script>
+<script src="js/data.v6.js?v=254"></script>
+<script src="js/optimizer.v6.js?v=254"></script>
+<script src="js/worker-client.v6.js?v=254"></script>
+<script src="js/ai-explain.v6.js?v=254"></script>
+<script src="js/ui.v6.js?v=254"></script>
+<script src="js/milp.v6.js?v=254"></script>
+<script src="js/app.v6.js?v=254"></script>
+<script src="js/ui-shell.v6.js?v=254"></script>
 </body>
 </html>

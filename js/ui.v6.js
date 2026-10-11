@@ -55,6 +55,24 @@ function shiftToneClass(key) {
   const n = shiftTone(key);
   return n ? `c-${n}${String(key).indexOf('責') >= 0 ? ' c-resp' : ''}` : '';
 }
+// ===== ⑥の上の帯（v254）: 6連勤以上・絶対・できれば・余の件数 =====
+// 分け方は⑤の一覧とマスの印と同じ（vioLevelOf: 6連勤以上 → isMustViolation → それ以外）。新しい計算はしない。
+// scoreViolations は、利用者が「できれば」にしたルールも「絶対」に数えることがあり、一覧と食い違うので使わない。
+function renderResultBand() {
+  const el = document.getElementById('resultBand');
+  if (!el) return;
+  if (!AppState.generated) {
+    el.innerHTML = '<span class="hint">シフトを生成すると、ここにエラーの件数が出ます。</span>';
+    return;
+  }
+  const n = { crit: 0, must: 0, soft: 0 };
+  (AppState.violations || []).forEach(v => { const lv = vioLevelOf([v]); if (lv) n[lv]++; });
+  const sur = (typeof listSurplusCells === 'function') ? listSurplusCells().length : 0;
+  const chip = (lv, label, k) => `<span class="lv-chip lv-chip-${lv}${k ? '' : ' is-zero'}">${uiIcon(lv)}${label}<b>${k}</b><span class="lv-unit">件</span></span>`;
+  el.innerHTML = chip('crit', '6連勤以上', n.crit) + chip('must', '絶対', n.must) + chip('soft', 'できれば', n.soft)
+    + `<span class="lv-chip lv-chip-sur${sur ? '' : ' is-zero'}"><span class="sur-sw" aria-hidden="true"></span>余<b>${sur}</b><span class="lv-unit">コマ</span></span>`;
+}
+
 // ===== 線画のアイコンと、絵文字を使わない言葉（v251） =====
 // アイコンは index.html の #iconSprite。3段階は crit=6連勤以上（四角）・must=絶対（丸）・soft=できれば（三角）。
 // HTML を組み立てる文字列の中だけで使う（トースト・確認の文・title は文字だけなので言葉にする）。
@@ -1766,7 +1784,7 @@ function renderShiftLegend() {
 
 // 表を描き直すたびに、⑤の生成の結果の文がいまの表のものかを見直す（手直し・入れ替え・自動修正など。A6）
 function renderResultTable() {
-  try { _renderResultTableInner(); } finally { syncGenerateResult(); }
+  try { _renderResultTableInner(); } finally { syncGenerateResult(); try { renderResultBand(); } catch (_) {} }
 }
 function _renderResultTableInner() {
   try { renderPartialIgnoreBanner(); } catch (_) {}
@@ -1799,7 +1817,8 @@ function _renderResultTableInner() {
       (staffVio[v.staffId] = staffVio[v.staffId] || []).push(v);
     }
   });
-  const msgsOf = arr => (arr || []).map(x => x.message || x.type).join('\n');
+  // ふきだしの文は、optimizer.v6.js の検査の文の先頭の印（🚨・⚠️ など）を外して出す（v254。マスの印の形で段階が分かるため）
+  const msgsOf = arr => (arr || []).map(x => stripLeadMark(x.message || x.type)).join('\n');
 
   // ヘッダー
   const STAT_COLS = 7; // 名前列1 + 統計列6（公休/有給他/余/出勤/差/労働時間）

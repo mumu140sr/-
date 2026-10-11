@@ -46,6 +46,7 @@ id	btnRepair	HTML	1	app.v6.js
 id	btnReqRulePreset	HTML	1	ui.v6.js
 id	btnReset	HTML	1	app.v6.js
 id	btnResolveSurplus	HTML	1	app.v6.js
+id	btnResultMenu	HTML	1	ui-shell.v6.js
 id	btnSave	HTML	1	app.v6.js
 id	btnSurplusPlan	HTML	1	app.v6.js
 id	btnTheme	HTML	1	app.v6.js
@@ -135,6 +136,8 @@ id	reportCard	HTML	1	app.v6.js,ui.v6.js
 id	reportContent	HTML	1	app.v6.js
 id	reqAlerts	HTML	1	ui.v6.js
 id	resolveMsg	JS	0	ui.v6.js
+id	resultBand	HTML	1	ui.v6.js
+id	resultMenu	HTML	1	ui-shell.v6.js
 id	resultTable	HTML	1	ui.v6.js
 id	roleTableBody	HTML	1	ui-shell.v6.js,ui.v6.js
 id	ruleLevelsInputs	HTML	1	ui.v6.js
@@ -197,7 +200,7 @@ id	wzReset	JS	0	ui.v6.js($)
 id	wzUndo	JS	0	ui.v6.js($)
 class	active	HTML	2	app.v6.js,ui.v6.js
 class	allowed-label	JS	0	ui.v6.js
-class	btn-primary	HTML	10	ui.v6.js
+class	btn-primary	HTML	9	ui.v6.js
 class	calc-lock-area	JS	0	milp.v6.js,ui.v6.js
 class	chip-btn	HTML	4	ui.v6.js
 class	col-resizer	JS	0	ui.v6.js

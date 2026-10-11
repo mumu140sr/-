@@ -405,6 +405,27 @@ a { color: var(--link); }
 .adv-pad { margin: 8px 0 12px; }
 @media (max-width: 640px) { .mk-choices { grid-template-columns: 1fr; } }
 
+/* ⑥ 上の段（元に戻す・やり直す・その他の操作・Excel出力）と件数の帯 */
+.res-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.card.res-band { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; padding: 14px 18px; }
+.res-counts { display: flex; gap: 8px; flex-wrap: wrap; flex: 1 1 360px; min-width: 0; align-items: center; }
+.lv-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: var(--r-md);
+  font-size: var(--fs-sm); font-weight: 500; line-height: 1.4;
+}
+.lv-chip b { font-size: 18px; font-variant-numeric: tabular-nums; margin-left: 2px; }
+.lv-chip .lv-unit { font-size: var(--fs-xs); }
+.lv-chip .ic { width: 16px; height: 16px; }
+.lv-chip-crit { background: var(--lv-crit-bg); border: 2px solid var(--lv-crit); color: var(--lv-crit); }
+.lv-chip-must { background: var(--lv-must-bg); border: 1px solid var(--lv-must); color: var(--lv-must); }
+.lv-chip-soft { background: var(--lv-soft-bg); border: 2px dashed var(--lv-soft); color: var(--lv-soft); }
+.lv-chip-sur  { background: var(--sur-2); border: 1px solid var(--sur); color: var(--sur-fg); }
+.lv-chip .sur-sw { width: 14px; height: 14px; border-radius: 3px; background: repeating-linear-gradient(135deg, var(--sur) 0 3px, var(--sur-2) 3px 6px); border: 1px solid var(--sur-fg); }
+/* 0件の段階は目立たせない（形は同じまま） */
+.lv-chip.is-zero { background: var(--surface); color: var(--text-muted); border-color: var(--border); }
+.lv-chip.is-zero .ic { color: var(--text-muted); }
+.res-hint { margin: 0 0 8px; }
+
 /* 各画面の下の「前へ」「次へ」 */
 .step-nav { display: flex; justify-content: space-between; gap: 12px; padding-top: 4px; margin-top: 8px; }
 .step-nav .step-next { margin-left: auto; }

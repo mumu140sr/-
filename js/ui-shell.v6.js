@@ -4,6 +4,7 @@
    - ヘッダーの「データ」メニューを開く・閉じる（中のボタンは今のボタンそのもの）
    - ②の各行の「詳細」を開く・閉じる（v252）
    - ⑤「シフトを作る」: 選んだ作り方の今のボタンを click() し、元が押せない間は押せなくする（v253）
+   - ⑥「その他の操作」メニューを開く・閉じる（中のボタンは今のボタンそのもの。v254）
    計算・保存・生成には触らない。新しい処理はここに足さない。
    =========================================== */
 (function () {
@@ -73,5 +74,6 @@
     setupRoleMore();
     setupStepNav();
     setupMenu(document.getElementById('btnDataMenu'), document.getElementById('dataMenu'));
+    setupMenu(document.getElementById('btnResultMenu'), document.getElementById('resultMenu'));   // ⑥「その他の操作」（v254）
   });
 })();
