@@ -9,7 +9,7 @@ function setupUIChrome() {
   const KEY = 'shiftapp-theme';
   const apply = (t) => {
     root.setAttribute('data-theme', t);
-    if (btnTheme) btnTheme.textContent = (t === 'dark') ? '☀️' : '🌙';
+    if (btnTheme) btnTheme.textContent = (t === 'dark') ? 'ライト表示に切り替え' : 'ダーク表示に切り替え';
   };
   let saved = null;
   try { saved = localStorage.getItem(KEY); } catch (_) {}
@@ -1059,10 +1059,10 @@ function setupGeneratePanel() {
   const btn = document.getElementById('btnGenerate');          // 🎯 じっくり生成（証明あり）
   const btnFast = document.getElementById('btnGenerateFast');  // ⚡ 速い生成（証明なし）
   // じっくり生成は中で1分生成も作って比べるので、最大で約11分
-  const BTN_LABEL = { proof: '🎯 じっくり生成（証明あり・最大約11分）', fast: '⚡ 速い生成（証明なし・最大60秒）' };
+  const BTN_LABEL = { proof: 'じっくり生成（証明あり・最大約11分）', fast: '速い生成（証明なし・最大60秒）' };
   const setBusy = (busy) => {
     [btn, btnFast].forEach(b => { if (b) b.disabled = busy; });
-    if (busy) { if (btn) btn.textContent = '⏳ 計算中...'; if (btnFast) btnFast.textContent = '⏳ 計算中...'; }
+    if (busy) { if (btn) btn.textContent = '計算中...'; if (btnFast) btnFast.textContent = '計算中...'; }
     else { if (btn) btn.textContent = BTN_LABEL.proof; if (btnFast) btnFast.textContent = BTN_LABEL.fast; }
   };
   const btnCancel = document.getElementById('btnCancelGenerate');

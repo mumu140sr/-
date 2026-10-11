@@ -4461,7 +4461,7 @@ const RangeLock = {
     tbl.classList.add('range-select-mode');
     this.bar();
     const btn = document.getElementById('btnRangeLock');
-    if (btn) { btn.textContent = '✅ まとめて固定を終了'; btn.classList.add('btn-primary'); }
+    if (btn) { btn.textContent = 'まとめて固定を終了'; btn.classList.add('btn-primary'); }
     if (!silent) toast('表の上をドラッグして範囲を選んでください', 'info', 3500);
   },
 
@@ -4471,7 +4471,7 @@ const RangeLock = {
     document.querySelectorAll('td.range-sel').forEach(td => td.classList.remove('range-sel'));
     const bar = document.getElementById('rangeLockBar'); if (bar) bar.remove();
     const btn = document.getElementById('btnRangeLock');
-    if (btn) { btn.textContent = '🔒 まとめて固定'; btn.classList.remove('btn-primary'); }
+    if (btn) { btn.textContent = 'まとめて固定'; btn.classList.remove('btn-primary'); }
   },
 
   toggle() { this.on ? this.disable() : this.enable(); },
