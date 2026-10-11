@@ -3,6 +3,7 @@
    - 各画面の下の「前へ」「次へ」：左メニューのボタンを click() するだけ
    - ヘッダーの「データ」メニューを開く・閉じる（中のボタンは今のボタンそのもの）
    - ②の各行の「詳細」を開く・閉じる（v252）
+   - ⑤「シフトを作る」: 選んだ作り方の今のボタンを click() し、元が押せない間は押せなくする（v253）
    計算・保存・生成には触らない。新しい処理はここに足さない。
    =========================================== */
 (function () {
@@ -50,7 +51,25 @@
     new MutationObserver(apply).observe(tb, { childList: true });
   }
 
+  // ⑤「シフトを作る」: 選んだ作り方の今のボタン（1分生成＝btnGenerateFast、じっくり生成＝btnGenerate）を押すだけ。
+  // 元のボタンが押せない間（計算中など）は「シフトを作る」も押せなくする（元の disabled を見て写す）
+  function setupMakeShift() {
+    const go = document.getElementById('btnMakeShift');
+    const fast = document.getElementById('btnGenerateFast'), deep = document.getElementById('btnGenerate');
+    if (!go || !fast || !deep) return;
+    const pick = () => {
+      const r = document.querySelector('input[name="genMode"]:checked');
+      return r && r.value === 'deep' ? deep : fast;
+    };
+    const mirror = () => { go.disabled = !!pick().disabled; };
+    go.addEventListener('click', () => { const b = pick(); if (!b.disabled) b.click(); });
+    document.querySelectorAll('input[name="genMode"]').forEach(r => r.addEventListener('change', mirror));
+    [fast, deep].forEach(b => new MutationObserver(mirror).observe(b, { attributes: true, attributeFilter: ['disabled'] }));
+    mirror();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
+    setupMakeShift();
     setupRoleMore();
     setupStepNav();
     setupMenu(document.getElementById('btnDataMenu'), document.getElementById('dataMenu'));

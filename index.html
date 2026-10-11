@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="stylesheet" href="css/style.css?v=252" />
+<link rel="stylesheet" href="css/style.css?v=253" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -68,7 +68,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v252</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v253</span>
   </div>
   <div class="header-actions">
     <!-- 「データ」メニュー：今のボタンそのものを中に置く（id はそのまま。開閉は js/ui-shell.v6.js） -->
@@ -340,32 +340,31 @@
   <section class="tab-panel" id="panel-generate">
     <div class="page-head"><div class="page-step">手順 5 / 6</div><h2>自動生成</h2></div>
     <div id="nextStepCard"></div>
-    <div class="card" style="text-align:center">
-      <button id="btnWizard" class="btn btn-primary btn-large" style="font-size:16px;padding:14px 28px"><svg class="ic" aria-hidden="true"><use href="#i-wizard"/></svg>順番に確認して生成する（はじめての方はこちら）</button>
-      <p class="hint" style="margin:8px 0 0">ルール → 必要人数 → 希望の噛み合わせ → 余の使い道 → 生成 の順に、1つずつ確認しながら進みます。</p>
-      <div style="margin-top:10px"><button id="btnCancelGenerate" class="btn btn-large btn-stop" style="display:none"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>中止</button></div>
+
+    <!-- 作り方を選ぶ：「シフトを作る」は、選んだほうの今のボタン（下の「詳しい機能」の中）を押すだけ（js/ui-shell.v6.js）。
+         元のボタンが押せない間は「シフトを作る」も押せない -->
+    <section class="card set-card mk-card">
+      <h3 class="set-h">作り方を選ぶ</h3>
+      <div class="mk-body">
+        <div class="mk-choices" role="radiogroup" aria-label="作り方">
+          <label class="mk-choice"><input type="radio" name="genMode" value="fast" checked />
+            <span class="mk-text"><span class="mk-name"><svg class="ic" aria-hidden="true"><use href="#i-gen-fast"/></svg>1分生成（おためし）<span class="mk-time">最大60秒</span></span>
+            <span class="mk-desc">設定を直しながら何度も試すとき。1部門あたり最大60秒で打ち切り、その時点のいちばん良い表を返します（証明なし）。</span></span></label>
+          <label class="mk-choice"><input type="radio" name="genMode" value="deep" />
+            <span class="mk-text"><span class="mk-name"><svg class="ic" aria-hidden="true"><use href="#i-gen-deep"/></svg>じっくり生成（本番）<span class="mk-time">最大約11分</span></span>
+            <span class="mk-desc">最終確定はこちら。時間をかけて、より良い組み合わせを探します（証明あり）。</span></span></label>
+        </div>
+        <button type="button" id="btnMakeShift" class="btn btn-primary btn-make">シフトを作る</button>
+        <div class="mk-stop"><button id="btnCancelGenerate" class="btn btn-large btn-stop" style="display:none"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>中止</button></div>
+      </div>
+    </section>
+
+    <div class="card wz-card">
+      <div class="grow"><b>はじめての方は</b>
+        <div class="hint">ルール → 必要人数 → 希望の噛み合わせ → 余の使い道 → 生成 の順に、1つずつ確認しながら進みます。</div></div>
+      <button id="btnWizard" class="btn btn-outline"><svg class="ic" aria-hidden="true"><use href="#i-wizard"/></svg>順番に確認して生成する</button>
     </div>
-    <details class="card" id="advGenerate">
-      <summary style="cursor:pointer;font-weight:700">慣れた方向け（個別に実行する）</summary>
-      <p class="hint" style="margin:8px 0 0">上のボタンで順番に進めば、ここは使わなくても大丈夫です。手順が分かっている方は、個別に実行できます。</p>
-      <div class="genmode" style="margin-top:10px">
-        <div class="genmode-row"><b>速い生成（証明なし）</b><span>1部門あたり最大60秒で打ち切り、その時点の最良の表を返します。設定を直しながら何度も試す段階はこちらが快適です。</span></div>
-        <div class="genmode-row"><b>じっくり生成（証明あり）</b><span>「これ以上良い組み合わせは存在しない」と数学的に確かめるまで解きます。1部門あたり最大約11分（中で1分生成の答えも作り、良いほうを採るため）。<b>最終確定はこちら</b>で。条件が厳しい月ほど、速い生成との差が大きくなります。</span></div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button id="btnGenerateFast" class="btn btn-large btn-primary">速い生成（証明なし・最大60秒）</button>
-        <button id="btnGenerate" class="btn btn-large">じっくり生成（証明あり・最大約11分）</button>
-        <button id="btnFeasibility" class="btn btn-large"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</button>
-        <button id="btnRelax" class="btn btn-large"><svg class="ic" aria-hidden="true"><use href="#i-plan"/></svg>エラー解消プラン</button>
-        <button id="btnSurplusPlan" class="btn btn-large"><svg class="ic" aria-hidden="true"><use href="#i-sur-use"/></svg>余の使い道を決める</button>
-        <button id="btnForecast" class="btn btn-large"><svg class="ic" aria-hidden="true"><use href="#i-forecast"/></svg>設定を変えたときの見込み</button>
-      </div>
-      <p class="hint" style="margin-top:8px">
-        バックグラウンドで処理されるため、実行中もアプリは操作可能です。<br>
-        「実現性チェック」を押すと、<b>生成する前に</b>「どのエラーが人員的に避けられないか／配置で避けられるか」を判定します。<br>
-        「エラー解消プラン」は、<b>どの設定をいくつ動かせばエラーが消えるか</b>を影響の小さい順に並べ、ボタン1つで設定を変更できます。
-      </p>
-    </details>
+
     <div class="card" id="progressArea" style="display:none">
       <div class="progress-info">
         <span id="progressText">準備中...</span>
@@ -381,6 +380,32 @@
       </div>
       <div id="reportContent"></div>
     </div>
+
+    <!-- 詳しい機能（ふだんは閉じる。中のボタンは今のまま） -->
+    <details class="card fold-card" id="advGenerate">
+      <summary class="fold-sum"><span class="grow">詳しい機能</span><span class="fold-sub">実現性チェック・エラー解消プラン・余の使い道・設定を変えたときの見込み・生成のボタン</span></summary>
+      <div class="fold-body adv-body">
+        <div class="adv-btns">
+          <button id="btnFeasibility" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</button>
+          <button id="btnRelax" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-plan"/></svg>エラー解消プラン</button>
+          <button id="btnSurplusPlan" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-sur-use"/></svg>余の使い道を決める</button>
+          <button id="btnForecast" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-forecast"/></svg>設定を変えたときの見込み</button>
+        </div>
+        <p class="hint adv-hint">
+          「実現性チェック」を押すと、<b>生成する前に</b>「どのエラーが人員的に避けられないか／配置で避けられるか」を判定します。<br>
+          「エラー解消プラン」は、<b>どの設定をいくつ動かせばエラーが消えるか</b>を影響の小さい順に並べ、ボタン1つで設定を変更できます。
+        </p>
+        <h4 class="fold-h">生成のボタン（個別に実行する）</h4>
+        <div class="genmode adv-pad">
+          <div class="genmode-row"><b>1分生成（証明なし）</b><span>1部門あたり最大60秒で打ち切り、その時点の最良の表を返します。設定を直しながら何度も試す段階はこちらが快適です。</span></div>
+          <div class="genmode-row"><b>じっくり生成（証明あり）</b><span>「これ以上良い組み合わせは存在しない」と数学的に確かめるまで解きます。1部門あたり最大約11分（中で1分生成の答えも作り、良いほうを採るため）。<b>最終確定はこちら</b>で。条件が厳しい月ほど、1分生成との差が大きくなります。</span></div>
+        </div>
+        <div class="adv-btns">
+          <button id="btnGenerateFast" class="btn">1分生成（証明なし・最大60秒）</button>
+          <button id="btnGenerate" class="btn">じっくり生成（証明あり・最大約11分）</button>
+        </div>
+      </div>
+    </details>
     <!-- 前へ・次へ：左メニューのボタンを押すのと同じ（js/ui-shell.v6.js） -->
     <div class="step-nav"><button type="button" class="btn step-prev" data-go="calendar"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>希望休入力</button><button type="button" class="btn step-next" data-go="result">次へ：シフト表<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button></div>
   </section>
@@ -447,13 +472,13 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=252"></script>
-<script src="js/optimizer.v6.js?v=252"></script>
-<script src="js/worker-client.v6.js?v=252"></script>
-<script src="js/ai-explain.v6.js?v=252"></script>
-<script src="js/ui.v6.js?v=252"></script>
-<script src="js/milp.v6.js?v=252"></script>
-<script src="js/app.v6.js?v=252"></script>
-<script src="js/ui-shell.v6.js?v=252"></script>
+<script src="js/data.v6.js?v=253"></script>
+<script src="js/optimizer.v6.js?v=253"></script>
+<script src="js/worker-client.v6.js?v=253"></script>
+<script src="js/ai-explain.v6.js?v=253"></script>
+<script src="js/ui.v6.js?v=253"></script>
+<script src="js/milp.v6.js?v=253"></script>
+<script src="js/app.v6.js?v=253"></script>
+<script src="js/ui-shell.v6.js?v=253"></script>
 </body>
 </html>

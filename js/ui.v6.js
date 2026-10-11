@@ -68,6 +68,9 @@ function levelWords(s) {
 function scoreSummaryText(r) { return levelWords(scoreSummary(r)); }
 // optimizer.v6.js の見出しの絵文字（⛔🚨⚠️✅🔍🔴🟡 など。部門名のあとに入るものも）を外す。
 // 見出しの前には段階のアイコンを別に付ける。矢印と ☆（希望休の記号）は残す
+// optimizer.v6.js（変えてはいけない）の検査の文の先頭の印（🚨・⚠️・⛔ など）を1つだけ外す（v253）。
+// 画面では、その違反の段階のアイコン（vioLevelOf）を前に付ける
+function stripLeadMark(s) { return String(s == null ? '' : s).replace(/^\s*(?![\u2190-\u21FF\u2605\u2606])\p{Extended_Pictographic}\uFE0F?\s*/u, ''); }
 function stripMarks(s) { return String(s == null ? '' : s).replace(/(?![\u2190-\u21FF\u2605\u2606])\p{Extended_Pictographic}\uFE0F?\s*/gu, ''); }
 /** マスにある違反の段階（いちばん重いもの）: crit=6連勤以上 / must=絶対 / soft=できれば */
 function vioLevelOf(list) {
@@ -4573,8 +4576,8 @@ function showPartialRegenModal() {
           </p>
 
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button id="prGoDeep" class="btn btn-primary">${uiIcon('gen-deep')}じっくり作り直す（最大10分）</button>
-            <button id="prGoFast" class="btn">${uiIcon('gen-fast')}速く作り直す（最大60秒）</button>
+            <button id="prGoDeep" class="btn btn-primary">${uiIcon('gen-deep')}じっくり生成で作り直す（最大10分）</button>
+            <button id="prGoFast" class="btn">${uiIcon('gen-fast')}1分生成で作り直す（最大60秒）</button>
             <button id="prCancel" class="btn">やめる</button>
           </div>
         </div>
@@ -5455,7 +5458,7 @@ function showSurplusPlanModal() {
         // 20000 で余ゼロまで届いた。設定は書き換えず、この計算にだけ渡す。
         // 試し計算なので、結果は本物の表に反映しない（noApply）。候補を拾うのにだけ使う。
         const res = await optimizeScheduleMILP(
-          (pct, msg) => { $c.textContent = String(msg || '').slice(0, 22); },
+          (pct, msg) => { $c.textContent = levelWords(String(msg || '')).slice(0, 22); },
           { fastMode: true, pickBy: 'surplus', noApply: true,
             settingsPatch: { useUpSurplus: true, penalties: { offSurplusUnused: 20000 } } });
         rows = _collectSurplusRows(res._shifts);
@@ -5631,7 +5634,7 @@ function computeNextStep() {
     return S('設定を変えました。作り直してください',
              '変えた設定は、シフトを作り直して初めて反映されます。いまの表はまだ前の設定のままです。',
              { btn: 'じっくり生成で作り直す', run: 'generate',
-               skip: '速い生成で様子を見る', skipRun: 'generateFast',
+               skip: '1分生成で様子を見る', skipRun: 'generateFast',
                why: '作り直すと、いま見えているエラーの数も変わります。' });
   }
 
@@ -5976,7 +5979,7 @@ function showGenerateWizard() {
           ${best ? `<br>${uiIcon('info')} 前回の表では「${escapeHtml(levelWords(best.title))}」で ${best.measured.gain}件 減りました。` : ''}
         </div>
         ${allChecked ? '' : '<p class="hint" style="margin-top:8px;color:var(--danger)">4つ全部にチェックを入れると、生成できるようになります。</p>'}`,
-      sub: [{ label: '速い生成（1分）で様子を見る', run: () => { modal.remove(); const b = document.getElementById('btnGenerateFast'); if (b) b.click(); } }],
+      sub: [{ label: '1分生成で様子を見る', run: () => { modal.remove(); const b = document.getElementById('btnGenerateFast'); if (b) b.click(); } }],
       after: () => {
         modal.querySelectorAll('[data-ck]').forEach(cb => cb.addEventListener('change', () => {
           checkState[cb.dataset.ck] = cb.checked; reRender();

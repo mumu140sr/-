@@ -379,6 +379,32 @@ a { color: var(--link); }
 .fold-sub-card > .fold-h { padding-left: 0; padding-right: 0; }
 .fold-body > .usage { margin: 12px 20px 8px; }
 
+/* ⑤ 作り方を選ぶ（2択）と「シフトを作る」 */
+.mk-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.mk-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.mk-choice {
+  display: flex; gap: 12px; align-items: flex-start; cursor: pointer;
+  border: 1px solid var(--border-control); background: var(--surface); border-radius: var(--r-lg); padding: 15px 17px;
+}
+.mk-choice:has(input:checked) { border: 2px solid var(--accent); background: var(--accent-soft); padding: 14px 16px; }
+:root[data-theme="dark"] .mk-choice:has(input:checked) { border-color: var(--link); }
+.mk-choice input { margin: 4px 0 0; flex: none; }
+.mk-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mk-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--text); flex-wrap: wrap; }
+.mk-time { font-weight: 400; font-size: var(--fs-xs); color: var(--text-soft); }
+.mk-desc { font-size: var(--fs-xs); color: var(--text-soft); line-height: 1.6; }
+.btn-make { min-height: 52px; font-size: 16px; width: 100%; border-radius: var(--r-lg); }
+.mk-stop:empty, .mk-stop:has(> button[style*="display:none"]), .mk-stop:has(> button[style*="display: none"]) { display: none; }
+.mk-stop { text-align: center; }
+.wz-card { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; padding: 14px 20px; }
+.wz-card .grow { flex: 1 1 260px; min-width: 0; }
+.adv-body { padding: 14px 20px 18px; }
+.adv-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.adv-hint { margin: 10px 0 0; }
+.adv-body > .fold-h { padding-left: 0; padding-right: 0; }
+.adv-pad { margin: 8px 0 12px; }
+@media (max-width: 640px) { .mk-choices { grid-template-columns: 1fr; } }
+
 /* 各画面の下の「前へ」「次へ」 */
 .step-nav { display: flex; justify-content: space-between; gap: 12px; padding-top: 4px; margin-top: 8px; }
 .step-nav .step-next { margin-left: auto; }

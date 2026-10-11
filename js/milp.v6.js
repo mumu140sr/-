@@ -82,7 +82,7 @@ function calcBusyToast() {
   if (typeof toast !== 'function') return;
   const what = _calcOwner || '計算';
   const how = /確認待ち/.test(what) ? '余の解消パネルの質問に答えてからにしてください'
-            : CALC_HAS_STOP.has(what) ? '終わるのを待つか、⏹ 中止を押してからにしてください'
+            : CALC_HAS_STOP.has(what) ? '終わるのを待つか、「中止」を押してからにしてください'
             : '終わるまでお待ちください';
   toast(`いまは「${what}」の${/確認待ち/.test(what) ? '途中' : '計算中'}です。${how}`, 'warning', 6000);
 }
@@ -152,7 +152,7 @@ function milpTrial(payload, variant, timeOverride) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=252'); }
+    try { worker = new Worker('js/milp.worker.js?v=253'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     const untrack = _milpTrack(worker, () => { clearTimeout(timeout); reject(new Error(MILP_CANCEL_MSG)); });
     const timeout = setTimeout(() => { untrack(); try { worker.terminate(); } catch (_) {} reject(new Error('タイムアウト')); }, 600000);
@@ -248,7 +248,7 @@ function _milpOnce(onProgress, opts, variant) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=252'); }
+    try { worker = new Worker('js/milp.worker.js?v=253'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     // 1部門あたり最大10分。部門数ぶん待てるよう十分な余裕を持たせる（誤タイムアウト防止）
     const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（30分）')); }, 1800000);

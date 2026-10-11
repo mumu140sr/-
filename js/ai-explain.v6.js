@@ -230,14 +230,14 @@ function buildAIExplanation() {
     if (shortage.length > 0) {
       const detail = shortage.map(v => {
         const m = (v.message || '').match(/休日数 (\d+)日.*目標(\d+)日.*差(-?\d+)/);
-        return `${staffName(v.staffId)}: ${m ? `${m[1]}日（目標${m[2]}日、不足${Math.abs(m[3])}日）` : v.message}`;
+        return `${staffName(v.staffId)}: ${m ? `${m[1]}日（目標${m[2]}日、不足${Math.abs(m[3])}日）` : stripLeadMark(v.message)}`;
       }).join('\n• ');
       body += `【公休不足】${shortage.length}名\n• ${detail}\n\n`;
     }
     if (over.length > 0) {
       const detail = over.map(v => {
         const m = (v.message || '').match(/休日数 (\d+)日.*目標(\d+)日.*差\+(\d+)/);
-        return `${staffName(v.staffId)}: ${m ? `${m[1]}日（目標${m[2]}日、余剰${m[3]}日）` : v.message}`;
+        return `${staffName(v.staffId)}: ${m ? `${m[1]}日（目標${m[2]}日、余剰${m[3]}日）` : stripLeadMark(v.message)}`;
       }).join('\n• ');
       body += `【公休余剰】${over.length}名（人員余剰のため自然と休みが増えています）\n• ${detail}\n\n`;
     }

@@ -30,10 +30,11 @@ id	btnExportData	HTML	1	app.v6.js
 id	btnExportExcel	HTML	1	app.v6.js
 id	btnFeasibility	HTML	1	app.v6.js
 id	btnForecast	HTML	1	app.v6.js
-id	btnGenerate	HTML	1	app.v6.js,ui.v6.js
-id	btnGenerateFast	HTML	1	app.v6.js,ui.v6.js
+id	btnGenerate	HTML	1	app.v6.js,ui-shell.v6.js,ui.v6.js
+id	btnGenerateFast	HTML	1	app.v6.js,ui-shell.v6.js,ui.v6.js
 id	btnImportData	HTML	1	app.v6.js
 id	btnLoad	HTML	1	app.v6.js
+id	btnMakeShift	HTML	1	ui-shell.v6.js
 id	btnNavToggle	HTML	1	app.v6.js
 id	btnPartialRegen	HTML	1	app.v6.js
 id	btnProofOptimize	JS	0	app.v6.js
@@ -135,7 +136,7 @@ id	reportContent	HTML	1	app.v6.js
 id	reqAlerts	HTML	1	ui.v6.js
 id	resolveMsg	JS	0	ui.v6.js
 id	resultTable	HTML	1	ui.v6.js
-id	roleTableBody	HTML	1	ui.v6.js
+id	roleTableBody	HTML	1	ui-shell.v6.js,ui.v6.js
 id	ruleLevelsInputs	HTML	1	ui.v6.js
 id	ruleLevelsPanel	HTML	1	ui.v6.js
 id	ruleLevelsToggle	HTML	1	ui.v6.js
@@ -196,7 +197,7 @@ id	wzReset	JS	0	ui.v6.js($)
 id	wzUndo	JS	0	ui.v6.js($)
 class	active	HTML	2	app.v6.js,ui.v6.js
 class	allowed-label	JS	0	ui.v6.js
-class	btn-primary	HTML	12	ui.v6.js
+class	btn-primary	HTML	10	ui.v6.js
 class	calc-lock-area	JS	0	milp.v6.js,ui.v6.js
 class	chip-btn	HTML	4	ui.v6.js
 class	col-resizer	JS	0	ui.v6.js
@@ -208,7 +209,7 @@ class	dragging	JS	0	ui.v6.js
 class	edit-mark	JS	0	ui.v6.js
 class	is-jumpable	JS	0	ui.v6.js
 class	nav-link	HTML	1	ui.v6.js
-class	open	JS	0	app.v6.js
+class	open	JS	0	app.v6.js,ui-shell.v6.js
 class	range-sel	JS	0	ui.v6.js
 class	range-select-mode	JS	0	ui.v6.js
 class	req-alert	JS	0	ui.v6.js
@@ -217,6 +218,7 @@ class	result-table	HTML	1	ui.v6.js
 class	rl-mode	JS	0	ui.v6.js
 class	role-combined-input	JS	0	ui.v6.js
 class	role-hours-input	JS	0	ui.v6.js
+class	role-more-btn	JS	0	ui-shell.v6.js
 class	role-req-cast-input	JS	0	ui.v6.js
 class	role-req-input	JS	0	ui.v6.js
 class	role-table	HTML	1	ui.v6.js
@@ -281,6 +283,7 @@ attr	data-wzfix	JS	0	ui.v6.js
 attr	data-wzq	JS	0	ui.v6.js
 attr	data-wzsub	JS	0	ui.v6.js
 attr	draggable	JS	0	ui.v6.js
+attr	name	HTML	3	ui-shell.v6.js
 value	data-tab=settings	HTML	1	ui.v6.js
 id	panel-settings	HTML	1	ui.v6.js
 value	data-tab=roles	HTML	1	ui.v6.js
@@ -293,8 +296,8 @@ value	data-tab=generate	HTML	1	ui.v6.js
 id	panel-generate	HTML	1	ui.v6.js
 value	data-tab=result	HTML	1	ui.v6.js
 id	panel-result	HTML	1	ui.v6.js
-value	data-mark=有	HTML	1	ui.v6.js
 value	data-mark=休	HTML	1	ui.v6.js
+value	data-mark=有	HTML	1	ui.v6.js
 value	data-mark=半	HTML	1	ui.v6.js
 value	data-mark=	HTML	1	ui.v6.js
 onclick	toggleDailyReqPanel	HTML	1	index.html

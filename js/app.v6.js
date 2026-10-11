@@ -955,7 +955,7 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
     // 速い生成: 証明していないので「最良とは限らない」と正直に出し、証明ありへの導線を置く
     box.style.background = 'color-mix(in srgb, var(--accent) 12%, var(--surface))';
     box.style.border = '1px solid color-mix(in srgb, var(--accent) 32%, transparent)';
-    box.innerHTML = `${uiIcon('gen-fast')} <b>速い生成（証明なし）で完了しました（${elapsed}秒）</b>：` +
+    box.innerHTML = `${uiIcon('gen-fast')} <b>1分生成（証明なし）で完了しました（${elapsed}秒）</b>：` +
       (vioCount === 0
         ? 'エラー0件です。<b>0件なのでこれ以上良くなりようがありません</b>。このまま使えます。'
         : `エラー ${vioCount}件。<b>これが最良とは限りません</b>（60秒で打ち切ったため、証明していません）。<br>
@@ -1059,7 +1059,7 @@ function setupGeneratePanel() {
   const btn = document.getElementById('btnGenerate');          // 🎯 じっくり生成（証明あり）
   const btnFast = document.getElementById('btnGenerateFast');  // ⚡ 速い生成（証明なし）
   // じっくり生成は中で1分生成も作って比べるので、最大で約11分
-  const BTN_LABEL = { proof: 'じっくり生成（証明あり・最大約11分）', fast: '速い生成（証明なし・最大60秒）' };
+  const BTN_LABEL = { proof: 'じっくり生成（証明あり・最大約11分）', fast: '1分生成（証明なし・最大60秒）' };
   const setBusy = (busy) => {
     [btn, btnFast].forEach(b => { if (b) b.disabled = busy; });
     if (busy) { if (btn) btn.textContent = '計算中...'; if (btnFast) btnFast.textContent = '計算中...'; }
@@ -1108,7 +1108,7 @@ function setupGeneratePanel() {
       if (typeof optimizeScheduleMILP !== 'function') {
         throw new Error('数理最適化モジュールが未読込です。ページを再読み込み（Ctrl+Shift+R）してください。');
       }
-      const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + msg; };
+      const prog = (pct, msg) => { $bar.style.width = pct + '%'; $text.textContent = '数理最適化: ' + levelWords(msg); };
       // 生成する前の表を控える。生成のあと元に戻すの履歴に積み、↩ で戻れるようにする（v243）
       // 途中から作り直すときは、🔒をかける前に撮った控えを使う（↩ 1回で作り直す前に戻る。A1）
       const preGen = opts.preGen !== undefined ? opts.preGen
@@ -1148,7 +1148,7 @@ function setupGeneratePanel() {
       } : null;
       const notTimeout = info && cutOff && !info.timedOut;
       $text.textContent = `完了！ 違反 ${res.violations.length}件（${elapsed}秒）` +
-                          (opts.fastMode ? '｜速い生成（証明なし）'
+                          (opts.fastMode ? '｜1分生成（証明なし）'
                                          : (info && info.pickedFast) ? '｜1分生成の答えのほうが良かったので、そちらを採りました'
                                          : notTimeout ? '｜画面の検査で悪くなる答えを外して、良いほうを採りました（時間切れではありません）'
                                          : cutOff ? '｜時間内でいちばん良い答え（最良とは確認できていません）'
@@ -1387,7 +1387,7 @@ function showSurplusPopup() {
     const shortDays = understaffVios
       .filter(v => v.type === 'understaff' || v.type === 'skill-late')
       .slice(0, 12)
-      .map(v => `<li>${escapeHtml(v.message.replace(/^🚨\s*/, ''))}</li>`).join('');
+      .map(v => `<li>${escapeHtml(stripLeadMark(v.message))}</li>`).join('');
     const offShort = understaffVios.filter(v => v.type === 'off-count')
       .map(v => { const s = AppState.staff.find(m => m.id === v.staffId); return s ? s.name : ''; })
       .filter(Boolean);
@@ -1526,7 +1526,7 @@ function renderReport(result) {
     return `
       <div class="violation-item is-jumpable"${jump} title="クリックでシフト表の該当箇所を表示">
         <span class="v-target">${escapeHtml(targetName)}${dayStr}</span>
-        ${escapeHtml(v.message)}
+        ${uiIcon(vioLevelOf([v]))} ${escapeHtml(stripLeadMark(v.message))}
         <span class="v-action">${uiIcon('info')} ${escapeHtml(v.action)}</span>
       </div>`;
   }).join('');

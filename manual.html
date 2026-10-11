@@ -278,9 +278,9 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
             <li><span class="n">1</span><span class="t"><b>①基本設定</b>で「対象年月」を来月に変える<small>前の月の表・希望休・固定などが残っていると、<b>「◯月に切り替えます」</b>の画面が出ます。<b>「先に書き出してから片付ける」</b>を選ぶと、前の月のデータをファイルに残してから片付けます（保存を取り消した場合は片付けません）。ちょうど翌月に進めたときは<b>「前月末の連勤日数・最後のシフトを引き継ぐ」</b>にチェックを入れたままにしてください。月をまたぐ連勤や休みのつながりが正しく計算されます。「やめる」を選ぶと月も変わりません。</small></span></li>
             <li><span class="n">2</span><span class="t"><b>③スタッフ管理</b>で人の増減・公休数・有給を確認する<small>入退社があった月だけ。無ければ飛ばして構いません。</small></span></li>
             <li><span class="n">3</span><span class="t"><b>④希望休入力</b>に、集めた希望休をすべて入力する<small>ここが唯一の手入力作業です。ここを丁寧にやれば後が楽になります。</small></span></li>
-            <li><span class="n">4</span><span class="t"><b>⑤自動生成</b>の <span class="btnref">実現性チェック</span> を先に押す<small>「そもそも人手が足りているか」を生成前に判定します。<b>「必ずエラーが出ます」と出たら、生成しても必ずエラーが残ります。</b>先に公休数や必要人数を見直してください。</small></span></li>
-            <li><span class="n">5</span><span class="t"><span class="btnref">シフト自動生成を実行</span> を押して待つ<small>ふつうは数秒〜数十秒。計算中も他の画面は触れます。1部門あたり最大10分で打ち切ります。</small></span></li>
-            <li><span class="n">6</span><span class="t">エラーが残ったら <span class="btnref">エラー解消プラン</span> を押す<small>「どの設定をいくつ動かせばエラーが消えるか」を影響の小さい順に並べてくれます。上の案から1つずつ試し、そのつど生成し直してください。</small></span></li>
+            <li><span class="n">4</span><span class="t"><b>⑤自動生成</b>の「詳しい機能」を開き、<span class="btnref">実現性チェック</span> を先に押す<small>「そもそも人手が足りているか」を生成前に判定します。<b>「必ずエラーが出ます」と出たら、生成しても必ずエラーが残ります。</b>先に公休数や必要人数を見直してください。</small></span></li>
+            <li><span class="n">5</span><span class="t">「作り方を選ぶ」で <b>1分生成（おためし）</b> か <b>じっくり生成（本番）</b> を選び、<span class="btnref">シフトを作る</span> を押して待つ<small>1分生成は1部門あたり最大60秒、じっくり生成は最大約11分です。最終確定はじっくり生成で。</small></span></li>
+            <li><span class="n">6</span><span class="t">エラーが残ったら「詳しい機能」の <span class="btnref">エラー解消プラン</span> を押す<small>「どの設定をいくつ動かせばエラーが消えるか」を影響の小さい順に並べてくれます。上の案から1つずつ試し、そのつど生成し直してください。</small></span></li>
             <li><span class="n">7</span><span class="t"><b>⑥シフト表</b>で結果を確認し、必要なら手で微調整する<small>細かい入れ替えは手作業のほうが早いこともあります。</small></span></li>
             <li><span class="n">8</span><span class="t"><span class="btnref">Excelエクスポート</span> で出力して保存・配布する<small>これで完了です。ファイルは必ず保管してください。</small></span></li>
           </ol>
@@ -445,7 +445,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <p class="sec-sub">ボタンは2つ。必ず先に「実現性チェック」を押してください</p>
 
         <h3>先に：実現性チェック</h3>
-        <p><span class="btnref">実現性チェック</span> は<b>生成する前に</b>、必要な人手と出せる人手を計算して足りているかを判定します。</p>
+        <p>「詳しい機能」の中の <span class="btnref">実現性チェック</span> は<b>生成する前に</b>、必要な人手と出せる人手を計算して足りているかを判定します。</p>
         <div class="tw"><table>
           <thead><tr><th class="nw">表示</th><th>意味</th><th>やること</th></tr></thead>
           <tbody>
@@ -456,10 +456,10 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         </table></div>
 
         <h3>生成する</h3>
-        <p><span class="btnref">シフト自動生成を実行</span> を押します。多くの場合は数秒〜数十秒、条件が複雑だと数分かかります。<b>1部門あたり最大10分</b>で打ち切ります。計算中も他のタブは操作できます。</p>
+        <p>「作り方を選ぶ」で <b>1分生成（おためし）</b>（1部門あたり最大60秒）か <b>じっくり生成（本番）</b>（最大約11分。時間をかけて、より良い組み合わせを探します）を選び、<span class="btnref">シフトを作る</span> を押します。設定を直しながら試すときは1分生成、最終確定はじっくり生成で。計算中は、ほかの計算や表の手直しはできません（「中止」で止められます）。</p>
 
         <h3>エラー解消プラン（エラーが残ったとき）</h3>
-        <p><span class="btnref">エラー解消プラン</span> を押すと、<b>いまの設定をどう変えればエラーが消えるか</b>を具体的な数字で並べます。生成後のレポートからも開けます。</p>
+        <p>「詳しい機能」の中の <span class="btnref">エラー解消プラン</span> を押すと、<b>いまの設定をどう変えればエラーが消えるか</b>を具体的な数字で並べます。生成後のレポートからも開けます。</p>
         <ul>
           <li>まず<b>人日の収支</b>（必要◯人日 / 出せる◯人日 / 不足◯人日）が表示されます</li>
           <li><b>① 人手を増やす</b> … 有給・日別必要人数・公休目標・定数。人員不足と公休不足の根本原因はここです</li>
@@ -551,7 +551,7 @@ footer{margin-top:72px; padding-top:24px; border-top:1px solid var(--rule); colo
         <div class="sec-head"><span class="step">▪</span><h2>エラー対処表</h2></div>
         <p class="sec-sub">出たエラーの名前で探してください</p>
         <div class="note">
-          <b>まず ⑤自動生成 の <span class="btnref">エラー解消プラン</span> を試してください</b>
+          <b>まず ⑤自動生成 の「詳しい機能」の <span class="btnref">エラー解消プラン</span> を試してください</b>
           <p>「どの設定をいくつ動かせば消えるか」を自動で計算し、ボタン1つで変更できます。この表は、そのうえで自分で判断したいときの早見表です。</p>
         </div>
 
