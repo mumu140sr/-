@@ -2,6 +2,7 @@
    ui-shell.js - 画面の外枠（見た目の作り直し 工程2〜。v251）
    - 各画面の下の「前へ」「次へ」：左メニューのボタンを click() するだけ
    - ヘッダーの「データ」メニューを開く・閉じる（中のボタンは今のボタンそのもの）
+   - ②の各行の「詳細」を開く・閉じる（v252）
    計算・保存・生成には触らない。新しい処理はここに足さない。
    =========================================== */
 (function () {
@@ -28,7 +29,29 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) { close(); btn.focus(); } });
   }
 
+  // ②の各行の「詳細」を開く・閉じる。表を描き直しても（合算を切り替えたときなど）、開いていた行は開いたままにする
+  function setupRoleMore() {
+    const tb = document.getElementById('roleTableBody');
+    if (!tb) return;
+    const open = new Set();
+    const apply = () => tb.querySelectorAll('.role-more-btn').forEach(b => {
+      const on = open.has(b.dataset.more);
+      const tr = b.closest('tr');
+      if (tr) tr.classList.toggle('open', on);
+      b.setAttribute('aria-expanded', on ? 'true' : 'false');
+    });
+    tb.addEventListener('click', (e) => {
+      const b = e.target.closest('.role-more-btn');
+      if (!b) return;
+      const k = b.dataset.more;
+      if (open.has(k)) open.delete(k); else open.add(k);
+      apply();
+    });
+    new MutationObserver(apply).observe(tb, { childList: true });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
+    setupRoleMore();
     setupStepNav();
     setupMenu(document.getElementById('btnDataMenu'), document.getElementById('dataMenu'));
   });

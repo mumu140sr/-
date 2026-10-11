@@ -340,6 +340,45 @@ a { color: var(--link); }
 .page-head { margin: 0 0 16px; }
 .page-step { font-size: var(--fs-xs); color: var(--text-muted); }
 .page-head h2 { margin: 4px 0 0; }
+/* 見出しの右に入力を置く画面（①の対象年月・②の シフト追加 など） */
+.page-head-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.page-head-row .grow { flex: 1; min-width: 0; }
+.page-head-field { display: inline-flex; align-items: center; gap: 10px; font-size: var(--fs-sm); color: var(--text-soft); }
+
+/* 設定の行（①：左に名前と説明・右に入力） */
+.set-card { padding: 0; }
+.set-h { margin: 0; padding: 14px 20px; font-size: var(--fs-lg); font-weight: 700; border-bottom: 1px solid var(--border-subtle); }
+.set-row { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
+.set-row:last-child { border-bottom: none; }
+.set-lbl { flex: 1 1 320px; min-width: 0; }
+.set-name, .set-name label { font-weight: 500; color: var(--text); }
+.set-desc { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 2px; line-height: 1.55; }
+.set-ctl { display: flex; align-items: center; gap: 8px; flex: none; }
+.set-ctl .unit { color: var(--text-soft); font-size: var(--fs-sm); }
+.set-ctl input[type="number"] { width: 80px; text-align: right; }
+
+/* 折りたたみのカード（詳しい設定・使い方 など。中身は DOM に残る） */
+.fold-card { padding: 0; }
+.fold-card > summary.fold-sum {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  min-height: var(--h-primary); padding: 12px 20px; font-size: var(--fs-lg); font-weight: 700;
+}
+.fold-card > summary.fold-sum::-webkit-details-marker { display: none; }
+.fold-card > summary.fold-sum::before {
+  content: ""; width: 16px; height: 16px; flex: none; background: currentColor; transition: transform .15s;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.fold-card[open] > summary.fold-sum::before { transform: rotate(90deg); }
+.fold-card[open] > summary.fold-sum { border-bottom: 1px solid var(--border-subtle); }
+.fold-sum .grow { flex: 1; min-width: 0; }
+.fold-sub { font-size: var(--fs-xs); font-weight: 400; color: var(--text-muted); }
+.fold-body { padding: 4px 0 8px; }
+.fold-h { margin: 0; padding: 14px 20px 4px; font-size: var(--fs-md); font-weight: 700; color: var(--text); }
+.fold-sub-card { border-top: 1px solid var(--border-subtle); padding: 0 20px 14px; }
+.fold-sub-card > .fold-h { padding-left: 0; padding-right: 0; }
+.fold-body > .usage { margin: 12px 20px 8px; }
+
 /* 各画面の下の「前へ」「次へ」 */
 .step-nav { display: flex; justify-content: space-between; gap: 12px; padding-top: 4px; margin-top: 8px; }
 .step-nav .step-next { margin-left: auto; }
@@ -451,6 +490,24 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .btn-large { min-height: var(--h-primary); padding: 8px 22px; font-size: var(--fs-md); }
 
+/* 枠つきのボタン（紺の枠と文字。見出しの右の「追加」など） */
+.btn-outline { background: var(--surface); border-color: var(--accent); color: var(--link); }
+:root[data-theme="dark"] .btn-outline { border-color: var(--link); }
+.btn-outline:hover { background: var(--accent-soft); }
+/* 見えないが読み上げる文字 */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* 帯（お知らせ）: 左にアイコン */
+.band { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-radius: var(--r-lg); margin-bottom: 16px; font-size: var(--fs-sm); line-height: 1.6; color: var(--text); }
+.band > .ic { width: 18px; height: 18px; margin-top: 2px; }
+.band .grow { flex: 1; min-width: 0; }
+.band-info { background: var(--accent-soft); border: 1px solid var(--border); }
+.band-info > .ic { color: var(--link); }
+.band-must { background: var(--lv-must-bg); border: 1px solid var(--lv-must); }
+.band-must > .ic { color: var(--lv-must); }
+/* 表だけのカード（余白なし・角まで表） */
+.card-flush { padding: 0; overflow: hidden; }
+.table-wrap-flush { border: none; border-radius: 0; }
+
 .btn-ghost {
   background: transparent;
   color: var(--link);
@@ -479,6 +536,17 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   font-size: var(--fs-sm);
 }
 .chip-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; }
+/* ④ 入れる記号（ボタン1列。選択中は濃い色。シフトのボタンは色が直に付くので !important で上書きする） */
+.chip-btn { display: inline-flex; align-items: center; gap: 6px; }
+.chip-btn.active { background: var(--accent) !important; color: var(--accent-text) !important; border-color: var(--accent) !important; }
+.mark-card { padding: 12px 18px; }
+.mark-bar { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+.mark-title { font-size: var(--fs-sm); font-weight: 700; color: var(--text); }
+.mark-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mark-shifts { display: contents; }
+.mark-grp { font-size: 11px; color: var(--text-muted); margin: 0 2px 0 4px; }
+.mark-sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+#reqAlerts:not(:empty) { margin-bottom: 16px; }
 
 /* ===== テーブル共通 ===== */
 .table-wrap {
@@ -499,7 +567,28 @@ th {
 tbody tr:hover { background: var(--surface-2); }
 
 /* ===== シフト種別テーブル ===== */
-.role-table th, .role-table td { padding: 4px 5px !important; font-size: var(--fs-xs); }
+/* v252: 1つの行（tr）の中で、1段目に主な列、2段目に「詳細」（.role-more）を出す。
+   行を2つに分けないのは、記号・色を変えたときに同じ行の見本を書き換える処理があるため */
+.role-table { display: block; min-width: 720px; }
+.role-table thead, .role-table tbody { display: block; }
+.role-table tr { display: grid; grid-template-columns: 96px minmax(150px, 220px) 120px 112px 112px 112px minmax(96px, 1fr); align-items: center; border-bottom: 1px solid var(--border-subtle); }
+.role-table th, .role-table td { display: block; border: none; text-align: left; }
+.role-table thead th { position: static; background: var(--surface); }
+.role-table td.rc-num { display: flex; align-items: center; gap: 6px; }
+.role-table td.rc-num .unit { color: var(--text-muted); }
+.role-table td.rc-more { text-align: right; }
+.role-table .role-more-btn { min-height: var(--h-min); padding: 0 10px; font-size: var(--fs-xs); }
+.role-table .role-more-btn .ic { transition: transform .15s; }
+.role-table tr.open .role-more-btn .ic { transform: rotate(180deg); }
+.role-table td.role-more { display: none; grid-column: 1 / -1; background: var(--surface-2); border-top: 1px solid var(--border-subtle); }
+.role-table tr.open td.role-more { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; }
+.role-table .rm-item { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--text); cursor: pointer; }
+.role-table td.role-more .grow { flex: 1; }
+.role-table .rm-del { color: var(--lv-crit); min-height: var(--h-min); }
+.role-table .rm-del:hover { background: var(--lv-crit-bg); }
+.role-table tbody tr:hover { background: transparent; }
+.role-table th, .role-table td { padding: 8px 12px !important; font-size: var(--fs-xs); }
+.role-table td.role-more { padding: 12px 16px !important; }
 .role-table input[type="number"] { width: 64px !important; }
 .role-table input[type="color"]  { width: 38px !important; height: 26px; border: 1px solid var(--border-control); cursor: pointer; border-radius: var(--r-sm); padding: 0; }
 .role-table input[type="text"]   { padding: 3px 6px; }

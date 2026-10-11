@@ -644,72 +644,67 @@ function renderRoleTable() {
       ? AppState.roleRequirementsCast[type.key] : 0;
     const hours = type.workHours != null ? type.workHours : 8;
     const tr = document.createElement('tr');
+    // v252: 表の列を絞り、残り（集計対象・研修扱い・夜勤・合算・Excel出力の色・削除）は2段目の「詳細」に出す。
+    // 同じ行（tr）のままにする（記号・色を変えたとき、同じ行の見本 .shift-preview を書き換えるため）。
+    // 「詳細」の開け閉めは js/ui-shell.v6.js。
     tr.innerHTML = `
-      <td>
+      <td class="rc-key">
         <input type="text" value="${escapeHtml(type.key)}"
                data-idx="${idx}" data-field="key"
-               class="role-key-input" style="width:72px;font-weight:700"/>
+               class="role-key-input" style="width:72px;font-weight:700" aria-label="記号"/>
       </td>
-      <td>
+      <td class="rc-label">
         <input type="text" value="${escapeHtml(type.label)}"
-               data-idx="${idx}" data-field="label" style="width:130px"/>
+               data-idx="${idx}" data-field="label" style="width:130px" aria-label="名称"/>
       </td>
       <td>
-        <select data-idx="${idx}" data-field="category" style="width:90px">
+        <select data-idx="${idx}" data-field="category" style="width:90px" aria-label="カテゴリ">
           <option value="A" ${type.category === 'A' ? 'selected' : ''}>A（早番）</option>
           <option value="B" ${type.category === 'B' ? 'selected' : ''}>B（遅番）</option>
         </select>
       </td>
-      <td>
-        <label class="switch">
-          <input type="checkbox" data-idx="${idx}" data-field="countForStaff"
-                 ${type.countForStaff ? 'checked' : ''}/>
-          <span></span>
-        </label>
-      </td>
-      <td>
-        <label class="switch">
-          <input type="checkbox" data-idx="${idx}" data-field="isTraining"
-                 ${type.isTraining ? 'checked' : ''}/>
-          <span></span>
-        </label>
-      </td>
-      <td>
-        <label class="switch">
-          <input type="checkbox" data-idx="${idx}" data-field="isNight"
-                 ${type.isNight ? 'checked' : ''}/>
-          <span></span>
-        </label>
-      </td>
-      <td style="white-space:nowrap">
-        <input type="color" value="${safeColor(type.color, '#e2e8f0')}" data-idx="${idx}" data-field="color"
-               style="width:46px;height:28px;border:none;cursor:pointer;border-radius:4px;vertical-align:middle"/>
-        <span class="shift-preview" style="background-color:${safeColor(type.color, '#e2e8f0')}">
-          ${escapeHtml(type.key)}
-        </span>
-      </td>
-      <td>
+      <td class="rc-num">
         <input type="number" min="0" max="24" step="0.5" value="${hours}"
-               data-idx="${idx}" class="role-hours-input" style="width:60px"/>
+               data-idx="${idx}" class="role-hours-input" style="width:60px" aria-label="労働時間"/><span class="unit">h</span>
       </td>
-      <td>
+      <td class="rc-num">
         <input type="number" min="0" max="99" value="${req}"
-               data-idx="${idx}" class="role-req-input" style="width:60px"/>
+               data-idx="${idx}" class="role-req-input" style="width:60px" aria-label="必要人数（社員）"/>
       </td>
-      <td>
+      <td class="rc-num">
         <input type="number" min="0" max="99" value="${reqCast}"
-               data-idx="${idx}" class="role-req-cast-input" style="width:60px"
+               data-idx="${idx}" class="role-req-cast-input" style="width:60px" aria-label="必要人数（キャスト）"
                ${isCombinedShift(type.key) ? 'disabled title="合算モードでは社員側の数を合計値として使います"' : ''}/>
       </td>
-      <td style="text-align:center">
-        <label class="switch" title="社員＋キャストを合算した合計人数で判定（社員側の数を合計値として使用）">
+      <td class="rc-more">
+        <button type="button" class="btn btn-ghost role-more-btn" data-more="${idx}" aria-expanded="false">詳細${uiIcon('down')}</button>
+      </td>
+      <td class="role-more">
+        <label class="rm-item"><span class="switch">
+          <input type="checkbox" data-idx="${idx}" data-field="countForStaff"
+                 ${type.countForStaff ? 'checked' : ''}/>
+          <span></span></span>集計対象</label>
+        <label class="rm-item"><span class="switch">
+          <input type="checkbox" data-idx="${idx}" data-field="isTraining"
+                 ${type.isTraining ? 'checked' : ''}/>
+          <span></span></span>研修扱い</label>
+        <label class="rm-item"><span class="switch">
+          <input type="checkbox" data-idx="${idx}" data-field="isNight"
+                 ${type.isNight ? 'checked' : ''}/>
+          <span></span></span>夜勤</label>
+        <label class="rm-item" title="社員＋キャストを合算した合計人数で判定（社員側の数を合計値として使用）"><span class="switch">
           <input type="checkbox" data-idx="${idx}" data-field="combined"
                  class="role-combined-input" ${isCombinedShift(type.key) ? 'checked' : ''}/>
-          <span></span>
-        </label>
-      </td>
-      <td>
-        <button class="btn-icon" data-del-idx="${idx}" title="削除" aria-label="削除">${uiIcon('trash')}</button>
+          <span></span></span>合算（社員＋キャスト）</label>
+        <span class="rm-item" title="画面のマスはカテゴリ（早番系・遅番系）で塗ります。この色は Excel に出力するときの色です">Excel出力の色
+          <input type="color" value="${safeColor(type.color, '#e2e8f0')}" data-idx="${idx}" data-field="color"
+                 style="width:46px;height:28px;border:none;cursor:pointer;border-radius:4px;vertical-align:middle" aria-label="Excel出力の色"/>
+          <span class="shift-preview" style="background-color:${safeColor(type.color, '#e2e8f0')}">
+            ${escapeHtml(type.key)}
+          </span>
+        </span>
+        <span class="grow"></span>
+        <button class="btn btn-ghost rm-del" data-del-idx="${idx}" title="削除">${uiIcon('trash')}削除</button>
       </td>
     `;
     tbody.appendChild(tr);
