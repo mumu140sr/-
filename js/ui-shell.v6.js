@@ -133,10 +133,10 @@
       const ok = shapeOk();
       split.classList.toggle('is-split', ok);
       const rs = rows(), ids = rs.map(idOf);
-      if (!ids.includes(selId)) {
-        const added = ids.filter(x => !prevIds.includes(x));
-        if (prevIds.length && added.length === 1 && ids.length === prevIds.length + 1) selId = added[0];   // 追加した直後は新しい人
-        else if (selId != null && ids.length === prevIds.length - 1 && prevIds.filter(x => x !== selId).every((x, k) => x === ids[k])) {
+      const added = ids.filter(x => !prevIds.includes(x));
+      if (prevIds.length && added.length === 1 && ids.length === prevIds.length + 1) selId = added[0];     // 追加した直後は新しい人
+      else if (!ids.includes(selId)) {
+        if (selId != null && ids.length === prevIds.length - 1 && prevIds.filter(x => x !== selId).every((x, k) => x === ids[k])) {
           const i = prevIds.indexOf(selId);                                                                // 削除した直後は同じ位置の人
           selId = ids[Math.min(i, ids.length - 1)] || null;
         } else selId = ids[0] || null;                                                                     // そのほか（読込など）は先頭
