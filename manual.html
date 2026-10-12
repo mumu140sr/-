@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=259" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=259" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=259" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=259">
+<link rel="icon" href="favicon.svg?v=260" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=260" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=260" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=260">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=259" />
+<link rel="stylesheet" href="css/style.css?v=260" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -414,6 +414,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
             </ul>
           </li>
           <li>作ったあと、この画面の「<span class="m-ui">AI診断レポート</span>」に、エラーの一覧が出ます。行を押すと、<span class="m-tab" data-n="6">シフト表</span> のその場所へ移って光ります。</li>
+          <li>表を手直ししたり、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> を押したりしたあとも、「<span class="m-ui">AI診断レポート</span>」はいまの表で出し直します。下の「作り終わったときの知らせ」は、エラーの数が変わると消えます。</li>
         </ul>
         <p>作り終わったときの知らせ（この画面の「<span class="m-ui">AI診断レポート</span>」の上に出ます）：</p>
         <div class="m-tw"><table class="m-table">
@@ -425,6 +426,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
             <tr><td><span class="m-msg" data-pat="時間内でいちばん良い答えです">時間内でいちばん良い答えです</span></td><td>時間内に計算しきれませんでした。まだ減らせるかもしれません。</td><td><span class="m-btn pri wrap">妥協なしで再計算（早期停止を無効・最大約11分）</span> が出ていれば押します。無ければ、人手と設定を見直します。</td></tr>
           </tbody>
         </table></div>
+        <p>妥協なしで再計算・じっくり生成で解き直す の答えが、いまの表より良くなかったときは、表を変えずに知らせます。知らせの中の「<span class="m-msg" data-pat="決め手は">決め手は…です</span>」が、どこで比べていまの表のほうが良かったかです。</p>
       </details>
     </div>
 
@@ -535,7 +537,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <details><summary>計算している間、入力できない</summary>
         <p>計算中は、設定・希望・表の手直しを止めています。見ることはできます（折りたたみや「<span class="m-ui">詳細</span>」を開く、列の幅を変える、文字を選ぶ、<span class="m-tab" data-n="4">希望休入力</span> の「<span class="m-ui">入れる記号</span>」を選び替える、もできます）。計算中に入れた文字は消えるので、終わってから入れ直してください。終わるのを待つか、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>中止</span> が出ていれば押してください。</p></details>
       <details><summary>画面が前のままで、新しくならない</summary>
-        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v259 など）が出ています。知らされた番号と同じか確かめます。</p></details>
+        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v260 など）が出ています。知らされた番号と同じか確かめます。</p></details>
       <details><summary>データが消えた／別のパソコンで使いたい</summary>
         <p><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-export"/></svg>書き出し</span> で作ったファイルがあれば、「<span class="m-ui">データ</span>」の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg>取り込み</span> で戻せます。別のパソコンでも同じです。ファイルが無いと戻せません。</p></details>
       <details><summary>「人が足りない」と出る</summary>
