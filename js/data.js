@@ -188,12 +188,23 @@ function newStaffId() {
   ['requests', 'fixedShifts', 'shifts'].forEach(k => Object.keys(AppState[k] || {}).forEach(id => used.add(id)));
   // 行事の対象にだけ残っているID（削除したスタッフ）も使わない。重なると新しい人が行事の対象になっていた。
   (AppState.events || []).forEach(ev => (ev.staffIds || []).forEach(id => used.add(id)));
+  // C10: 生成直後の控え（genBase）と変えたマスの記録（editLog）に残っているIDも使わない
+  // （消した人のIDを次の人に付けると、変えたマスの記録がその人のものに見えていた）
+  const gb = AppState.genBase || {};
+  ['shifts', 'fixed'].forEach(k => Object.keys((gb && gb[k]) || {}).forEach(id => used.add(id)));
+  (AppState.editLog || []).forEach(e => { if (e && e.sid != null) used.add(String(e.sid)); });
+  // 番号として読むのは S と9桁までの数字だけ（1e17 や Infinity の番号で、下の繰り返しが終わらなくなっていた）
   let maxN = 0;
-  used.forEach(id => { const m = /^S(\d+)$/.exec(id || ''); if (m) maxN = Math.max(maxN, parseInt(m[1], 10)); });
-  let n = Math.max(_staffIdCounter, maxN + 1), id;
+  used.forEach(id => { const m = /^S(\d{1,9})$/.exec(id || ''); if (m) maxN = Math.max(maxN, parseInt(m[1], 10)); });
+  let n = Math.max(safeStaffIdCounter(_staffIdCounter) || 1, maxN + 1), id;
   do { id = 'S' + String(n++).padStart(3, '0'); } while (used.has(id));
   _staffIdCounter = n;
   return id;
+}
+// 通し番号として使ってよい値（安全な整数 1〜999999999）なら数を、そうでなければ 0 を返す（C10）
+function safeStaffIdCounter(v) {
+  const n = Number(v);
+  return (Number.isSafeInteger(n) && n >= 1 && n <= 999999999) ? n : 0;
 }
 
 // ===== ユーティリティ =====
@@ -541,39 +552,86 @@ function safeColor(c, fallback) {
 // 取り込むファイルのスタッフIDと数の欄を確かめる（v248、A5）。合わなければ例外にして取り込まない。
 // 出口でのエスケープだけでは、ID が属性や data- の中に入る所を守りきれないため、入口で断る。
 // 起動時の読込（loadFromStorage）では確かめない（保存済みのデータが読めずにサンプルで上書きされるため）。
-function validateImportIdsAndNumbers(d) {
+function validateImportIdsAndNumbers(d) { _appValueProblems(d, true); }
+/**
+ * 保存データの正しくない値の一覧（C10）。起動・読込では断らずに知らせるだけ（以前の取り込みで保存された値のため）。
+ * 画面へは出口でエスケープして出す。
+ */
+function appValueProblems(d) {
+  try { return _appValueProblems(d, false); } catch (e) { return [e.message]; }
+}
+// stop が true なら最初の1つで例外にする（取り込み）。false なら全部を集めて返す（起動・読込）
+function _appValueProblems(d, stop) {
+  const out = [];
+  const bad = (m) => { if (stop) throw new Error(m); out.push(m); };
+  if (!d || typeof d !== 'object') { bad('データの形が正しくありません'); return out; }
   const ID = /^[A-Za-z0-9_-]{1,40}$/;
   const num = (v, where) => {
     if (v == null || v === '') return;
-    if (typeof v === 'boolean' || !Number.isFinite(Number(v))) throw new Error(`${where} が数ではありません`);
+    if (typeof v === 'boolean' || !Number.isFinite(Number(v))) bad(`${where} が数ではありません`);
   };
-  (d.staff || []).forEach((s, i) => {
-    if (!s || typeof s !== 'object') throw new Error(`${i + 1}人目のスタッフの形が正しくありません`);
-    if (!ID.test(String(s.id))) throw new Error(`${i + 1}人目のスタッフのIDが正しくありません`);
+  const obj = (m) => m && typeof m === 'object' && !Array.isArray(m);
+  (Array.isArray(d.staff) ? d.staff : []).forEach((s, i) => {
+    if (!s || typeof s !== 'object') { bad(`${i + 1}人目のスタッフの形が正しくありません`); return; }
+    if (!ID.test(String(s.id))) bad(`${i + 1}人目のスタッフのIDが正しくありません`);
     ['maxOff', 'paidLeave', 'prevConsecutive', 'personalMaxCons', 'personalMaxOff', 'pairRestTarget']
       .forEach(k => num(s[k], `${i + 1}人目のスタッフの ${k}`));
   });
   ['requests', 'shifts', 'fixedShifts'].forEach(k => {
     const m = d[k];
     if (m == null) return;
-    if (typeof m !== 'object' || Array.isArray(m)) throw new Error(`${k} の形が正しくありません`);
-    Object.keys(m).forEach(id => { if (!ID.test(id)) throw new Error(`${k} のスタッフIDが正しくありません`); });
+    if (!obj(m)) { bad(`${k} の形が正しくありません`); return; }
+    Object.keys(m).forEach(id => { if (!ID.test(id)) bad(`${k} のスタッフIDが正しくありません`); });
   });
   ['roleRequirements', 'roleRequirementsCast'].forEach(k => {
     const m = d[k]; if (m == null) return;
-    if (typeof m !== 'object') throw new Error(`${k} の形が正しくありません`);
+    if (typeof m !== 'object') { bad(`${k} の形が正しくありません`); return; }
     Object.keys(m).forEach(x => num(m[x], `${k} の ${x}`));
   });
   ['dailyRequirements', 'dailyRequirementsCast'].forEach(k => {
     const m = d[k]; if (m == null) return;
-    if (typeof m !== 'object') throw new Error(`${k} の形が正しくありません`);
+    if (typeof m !== 'object') { bad(`${k} の形が正しくありません`); return; }
     Object.keys(m).forEach(x => { const r = m[x]; if (r && typeof r === 'object') Object.keys(r).forEach(dd => num(r[dd], `${k} の ${x}`)); });
   });
+  // C10: 画面の入力欄・文に入る数の欄（シフト種別の労働時間・必要人数のルール・スキル・日別スキル・行事）
+  (Array.isArray(d.shiftTypes) ? d.shiftTypes : []).forEach((t, i) => {
+    if (obj(t)) num(t.workHours, `${i + 1}つ目のシフト種別の労働時間`);
+  });
+  const rules = d.settings && Array.isArray(d.settings.reqRules) ? d.settings.reqRules : [];
+  rules.forEach((r, i) => {
+    if (!obj(r)) return;
+    num(r.to, `${i + 1}つ目の必要人数のルールの人数`);
+    const w = obj(r.when) ? r.when : {};
+    ['days', 'weekday', 'dayEnds'].forEach(f => {
+      if (w[f] == null) return;
+      if (!Array.isArray(w[f])) { bad(`${i + 1}つ目の必要人数のルールの条件の形が正しくありません`); return; }
+      w[f].forEach(v => num(v, `${i + 1}つ目の必要人数のルールの条件`));
+    });
+  });
+  (Array.isArray(d.skills) ? d.skills : []).forEach((k, i) => {
+    if (!obj(k)) return;
+    ['req', 'min', 'lateReq'].forEach(f => num(k[f], `${i + 1}つ目のスキルの人数`));
+  });
+  if (d.dailySkills != null) {
+    if (!obj(d.dailySkills)) bad('日別のスキル指定の形が正しくありません');
+    else Object.keys(d.dailySkills).forEach(n => {
+      const m = d.dailySkills[n];
+      if (obj(m)) Object.keys(m).forEach(dd => { const o = m[dd]; if (obj(o)) ['req', 'min'].forEach(f => num(o[f], `日別のスキル指定（${n}）の人数`)); });
+    });
+  }
+  (Array.isArray(d.events) ? d.events : []).forEach((ev, i) => { if (obj(ev)) num(ev.day, `${i + 1}つ目の行事の日`); });
+  return out;
 }
 
 // ===== ローカルストレージ =====
 
+// C10: 読めなかった保存データの控えを書けなかった（容量不足など）ときは、元のデータ（本体）を守るため保存を止める。
+// 取り込み・リセットで解除する。「データ」メニューの「保存」は「上書きして消えます」と確かめてから解除して書く。
+let _storageHold = false;
+function storageHeld() { return _storageHold; }
+function releaseStorageHold() { _storageHold = false; }
 function saveToStorage() {
+  if (_storageHold) return false;
   try {
     localStorage.setItem('shiftAppData', JSON.stringify({
       version: 4,
@@ -704,8 +762,9 @@ function normalizeAppData(data, base) {
         personalMaxOff:  parseInt(s.personalMaxOff)  || 0, // 個人の連休上限（0=全体設定）
         needPairRest:    !!s.needPairRest,                 // 遅→早の切替時は2連休以上必須
         // 個人希望は「なるべく」のみ（旧データの'絶対'は自動でなるべくに変換）
-        weekendPref:     s.weekendPref === 'hard' ? 'soft' : (s.weekendPref || ''),
-        restStyle:       (s.restStyle || '').replace('-hard', '-soft'),
+        // C10: 文字だけを通す（true や数が入った保存データで例外になり、起動でサンプルが出て本体が上書きされていた）
+        weekendPref:     s.weekendPref === 'hard' ? 'soft' : (typeof s.weekendPref === 'string' ? s.weekendPref : ''),
+        restStyle:       (typeof s.restStyle === 'string' ? s.restStyle : '').replace('-hard', '-soft'),
         pairRestTarget:  parseInt(s.pairRestTarget) || 0, // 月の連休回数（個人・0=全体設定）
       };
     });
@@ -723,7 +782,8 @@ function normalizeAppData(data, base) {
                            || !!(data.shifts && Object.keys(data.shifts).length);
     out.genBase = data.genBase || null;
   out.editLog = Array.isArray(data.editLog) ? data.editLog : [];
-  out._staffIdCounter = data._staffIdCounter || (out.staff.length + 1);
+  // 通し番号は安全な整数（1〜999999999）のときだけ使う。それ以外（1e17・Infinity・文字など）は人数+1（C10）
+  out._staffIdCounter = safeStaffIdCounter(data._staffIdCounter) || (out.staff.length + 1);
   return out;
 }
 /** normalizeAppData の結果を AppState に入れる（settings・roleRequirements は同じ入れ物のまま中身を入れ替える） */
@@ -737,21 +797,28 @@ function applyAppData(n) {
 // 保存データが読めなかったとき、元のデータを別のキーに退避しておく（次の起動でサンプルに上書きされないように）
 const UNREADABLE_KEY = 'shiftAppData_unreadable';
 let _loadUnreadable = false;
+let _loadBackupKept = false;   // 読めなかったデータの控えを書けたか（C10）
+let _loadProblems = [];        // 読めたが、正しくない値があった（以前の取り込みで保存されたもの。知らせるだけ。C10）
 
 function loadFromStorage() {
   const raw = localStorage.getItem('shiftAppData');
-  _loadUnreadable = false;
+  _loadUnreadable = false; _loadProblems = [];
   if (!raw) return false;
-  let n;
+  let n, parsed;
   try {
     // 全部直してから入れる（途中で失敗したら AppState は1つも変わらない）
-    n = normalizeAppData(JSON.parse(raw), defaultAppDataBase());
+    parsed = JSON.parse(raw);
+    n = normalizeAppData(parsed, defaultAppDataBase());
   } catch (e) {
     console.error('読込エラー', e);
-    try { localStorage.setItem(UNREADABLE_KEY, raw); } catch (_) {}
+    // C10: 控えを書けたかを確かめる。書けなかったら、本体の元のデータを守るため保存を止める
+    _loadBackupKept = false;
+    try { localStorage.setItem(UNREADABLE_KEY, raw); _loadBackupKept = localStorage.getItem(UNREADABLE_KEY) === raw; } catch (_) {}
+    if (!_loadBackupKept) _storageHold = true;
     _loadUnreadable = true;
     return false;
   }
+  _loadProblems = appValueProblems(parsed);
   applyAppData(n);
   // 違反の一覧は、保存されていたものを使わず、いまの表から必ず数え直す。
   // 保存されていた一覧は古い検査で作られていることがあり、それと比べると、
@@ -784,6 +851,7 @@ function resetAll() {
   AppState.dailySkills           = {};
   AppState.settings.penalties = { ...DEFAULT_PENALTIES };
   _staffIdCounter = 1;
+  _storageHold = false;   // リセットで、読めなかった元のデータを守るための保存の停止も解除する（C10）
   localStorage.removeItem('shiftAppData');
 }
 

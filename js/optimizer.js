@@ -4464,18 +4464,22 @@ function countPaidRequests(s, days) {
 function measureRelaxEffect(mut) {
   const shifts = AppState.shifts || {};
   if (!Object.keys(shifts).length) return null;      // 表がまだ無いときは測れない
-  const snapSettings = JSON.parse(JSON.stringify(AppState.settings || {}));
-  const snapSkills   = JSON.parse(JSON.stringify(AppState.skills || []));
+  // C4: 本物の入れ物は置き換えない。写しに差し替えて試算し、finally で本物の参照に戻す。
+  // 以前は本物を写しで「戻して」いたため、入れ物が替わり、①の必要人数のルール欄が捕まえている
+  // 古い配列への次の変更が捨てられていた（「つぎにやること」を描き直すたびにここが走る）。
+  const realSettings = AppState.settings, realSkills = AppState.skills;
   let before = 0, after = 0, bSc = null, aSc = null;
   try {
     const bv = checkViolations(shifts); before = bv.length; bSc = scoreViolations(bv);
+    AppState.settings = JSON.parse(JSON.stringify(realSettings || {}));
+    AppState.skills   = JSON.parse(JSON.stringify(realSkills || []));
     mut(AppState);
     const av = checkViolations(shifts); after = av.length; aSc = scoreViolations(av);
   } catch (e) {
     return null;
   } finally {
-    AppState.settings = snapSettings;
-    AppState.skills = snapSkills;
+    AppState.settings = realSettings;
+    AppState.skills = realSkills;
   }
   // 件数が同じでも、連勤の上限を1日上げると超過日数は減る。件数だけ見ると
   // 「減りません」になってしまうので、scoreBetter で軽くなったかも返す。
@@ -4988,7 +4992,17 @@ function analyzeLowerBound() {
         const r = maxSkillInBand(g, sk, bandKeys, d);
         if (r.max >= min) return;
         let fix = '';
-        if (r.blocker) {
+        // C6: 塞いでいる人のその日が固定（🔒）なら、④の希望を書いても効かない（B1 で🔒を先に読む）。
+        // ボタンは出さず、手で直してもらう（表があれば⑥の表で、無ければ固定を外してから）
+        const locked = !!(r.blocker && ((AppState.fixedShifts || {})[r.blocker.id] || {})[d]);
+        const hasTable = !!(AppState.generated && Object.keys(AppState.shifts || {}).length);
+        if (r.blocker && locked) {
+          const alt = r.blocker.alt;
+          fix = `${r.blocker.name}さんの${d}日は「${shiftSym(r.blocker.key)}」に固定されているため、ボタンでは直せません。`
+              + (hasTable
+                  ? `「シフト表」でこのマスを${alt ? `「${shiftSym(alt)}」に` : ''}直してください`
+                  : `「シフト表」の「その他の操作」にある「固定をすべて解除」で固定を外してから、${alt ? `希望を「${shiftSym(alt)}」に変えてください` : '直してください'}`);
+        } else if (r.blocker) {
           const alt = r.blocker.alt;
           fix = alt
             ? `${r.blocker.name}さんの${d}日の希望を「${shiftSym(r.blocker.key)}」から「${shiftSym(alt)}」に変えると収まります`
@@ -5000,7 +5014,7 @@ function analyzeLowerBound() {
         res.reasons.push({
           kind: 'skill-slot', day: d, skill: sk.name, need: min, have: r.max, fix,
           // ボタン1つで直せる操作。null なら手で直してもらう
-          act: (r.blocker && r.blocker.alt)
+          act: (r.blocker && r.blocker.alt && !locked)
             ? { type: 'request', staffId: r.blocker.id, day: d, to: r.blocker.alt,
                 label: `${r.blocker.name}さんの${d}日を「${shiftSym(r.blocker.alt)}」に変える` } : null,
           text: `${pfx}${d}日: スキル「${sk.name}」は最低 ${min}人 必要ですが、`
