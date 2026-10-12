@@ -1079,6 +1079,41 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
   });
 }
 
+// 並べ方（scoreCompare）の順で、最初に違った項目を返す（C7。表を変えなかった「決め手」を言うため）。同じなら null
+function scoreDecider(a, b) {
+  const items = [
+    ['comp', '6連勤以上', '件'], ['under', '人員不足', '件'], ['must', '「絶対」の違反', '件'], ['over', '連勤の超過日数', '日'],
+    ['offShort', '公休の不足日数', '日'], ['bsOver', '切り替えの超過回数', '回'], ['soft', '「できれば」の違反', '件'],
+  ];
+  for (const [k, label, unit] of items) {
+    let x = a[k] || 0, y = b[k] || 0;
+    if (k === 'must') { x -= (a.comp || 0); y -= (b.comp || 0); }   // 画面の「絶対」の件数は6連勤以上を除いて出す
+    if (x !== y) return { key: k, label, unit, a: x, b: y };
+  }
+  return null;
+}
+// 妥協なしで再計算・じっくり生成で解き直す で、いまの表より良くなかったので表を変えなかったときの文（C7）。
+// 時間切れかどうかは、ふつうの完了の文（showOptimalityNotice）と同じ分け方で言う（以前は solverProven だけで
+// 「時間切れ」と言い、21人以上の差2%で止めた回・1分生成の答えを採った回にも出ていた）。決め手の項目もいつも出す。
+function keepWorseMessage(what, sNew, sCur, res, info, opts) {
+  let msg = `${what}の答え（${scoreSummaryText(sNew)}）は、いまの表（${scoreSummaryText(sCur)}）より良くなかったので、表は変えていません。`;
+  const dec = scoreDecider(sNew, sCur);
+  if (dec) msg += `決め手は${dec.label}です（答え ${dec.a}${dec.unit}・いまの表 ${dec.b}${dec.unit}）。`;
+  if (info) {
+    if (info.timedOut && res.usedGap === true && !opts.deepMode) {
+      msg += '21人以上の部門は、時間を短くするため「ほぼ最良（差2%以内）」のところで計算を止めています（時間切れではありません）。';
+    } else if (info.timedOut) {
+      msg += info.pickedFast ? '1分生成の答えのほうが良かったのでそちらを採りましたが、じっくり生成の側は時間内に最後まで計算しきれませんでした。'
+                             : '時間内に最後まで計算しきれない段がありました。';
+    } else if (info.pickedFast) {
+      msg += 'じっくり生成の答えより1分生成の答えのほうが良かったので、そちらを採っています（時間切れではありません）。';
+    }
+  } else if (res.allOptimal === false) {
+    msg += '時間内に最後まで計算しきれない段がありました。';
+  }
+  return msg;
+}
+
 // ⑤ 自動生成パネル
 function setupGeneratePanel() {
   const btn = document.getElementById('btnGenerate');          // 🎯 じっくり生成（証明あり）
@@ -1150,6 +1185,13 @@ function setupGeneratePanel() {
       const res = await optimizeScheduleMILP(prog, { deepMode: !!opts.deepMode, fastMode: !!opts.fastMode, newTiering: !!opts.newTiering,
                                                      noApply: keepIfWorse });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+      // 🎯 じっくり生成（newTiering）の内訳: 1分生成の答えを採ったか・本当に時間切れか・案Bで答えを外したか
+      // （C7: 表を変えなかったときの文でも同じ分け方を使うので、keepIfWorse より前で求める）
+      const info = opts.newTiering ? {
+        pickedFast: res.safetyPick === 'fast',
+        timedOut: res.safetyPick === 'fast' ? res.deepSolverProven === false : res.solverProven === false,
+        screenRejected: res.safetyPick === 'fast' ? (res.deepScreenRejected || 0) : (res.screenRejected || 0),
+      } : null;
       if (keepIfWorse) {
         const vCur = checkViolations(AppState.shifts);
         const vNew = checkViolations(res._shifts || {});
@@ -1158,8 +1200,7 @@ function setupGeneratePanel() {
           // 表・違反・genBase・editLog・履歴・保存には触らない
           $bar.style.width = '100%';
           const what = opts.deepMode ? '妥協なしで再計算' : 'じっくり生成で解き直す';
-          const msg = `${what}の答え（${scoreSummaryText(sNew)}）は、いまの表（${scoreSummaryText(sCur)}）より良くなかったので、表は変えていません。` +
-                      (res.solverProven === false ? '時間切れで解ききれませんでした。' : '');
+          const msg = keepWorseMessage(what, sNew, sCur, res, info, opts);
           $text.textContent = msg + `（${elapsed}秒）`;
           $report.style.display = 'block';
           if (typeof syncGenerateResult === 'function') syncGenerateResult();
@@ -1170,12 +1211,6 @@ function setupGeneratePanel() {
       }
       $bar.style.width = '100%';
       const cutOff = (res.allOptimal === false);   // 時間切れで打ち切られた＝最良解とは限らない
-      // 🎯 じっくり生成（newTiering）の内訳: 1分生成の答えを採ったか・本当に時間切れか・案Bで答えを外したか
-      const info = opts.newTiering ? {
-        pickedFast: res.safetyPick === 'fast',
-        timedOut: res.safetyPick === 'fast' ? res.deepSolverProven === false : res.solverProven === false,
-        screenRejected: res.safetyPick === 'fast' ? (res.deepScreenRejected || 0) : (res.screenRejected || 0),
-      } : null;
       const notTimeout = info && cutOff && !info.timedOut;
       $text.textContent = `完了！ 違反 ${res.violations.length}件（${elapsed}秒）` +
                           (opts.fastMode ? '｜1分生成（証明なし）'
