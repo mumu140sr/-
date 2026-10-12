@@ -157,20 +157,70 @@ function refreshAllUI() {
   if ($numCand) $numCand.value = AppState.settings.numCandidates || 3;
 }
 
-// ===== ⑤ 生成の結果の文が、いまの表のものか（A6） =====
-// 「完了！違反N件」「✅確認済み」などの文と📊レポートは生成の完了でしか書かれないので、
-// 表を手で直した・↩・月の切り替え・取り込みのあとも古いまま残っていた。
-// 書いたときの表の鍵を data-gen-key に控え、いまの鍵と違えば隠し、同じ表に戻れば（↪）また出す。
-// 鍵に違反の一覧は入れない（⑥ルールチェックなどで数え直しても、表が同じなら消さない）。
+// ===== ⑤ 生成の結果の文とレポート（A6・C1） =====
+// 性質の違う2つを分けて扱う（C1。A6 は2つを同じ「表の鍵」で出し入れしていた）。
+//  ・生成の結果の文（進み具合の欄の「完了！違反N件」・中止・失敗の文、案内の箱）は、その生成の表についての文。
+//    書いたときの鍵（genTextKey: 表の鍵＋違反の種類ごとの件数）を data-gen-key に控え、いまの鍵と違えば隠し、
+//    同じに戻れば（↩・↪）また出す（A6）。文を書く出口（完了・中止・失敗・「良くなかった」）のすべてで控える。
+//  ・AI診断レポートは、いまの表の検査の結果。隠さずに、出ている間は表か違反が変わるたびに描き直す（syncReport）。
 function genResultKey() {
   const st = AppState.settings || {};
   return JSON.stringify([st.targetMonth || '', _fpClean(AppState.shifts || {}),
     parseInt(st.ignoreVioBeforeDay) || 0, _fpClean(st.ruleLevels || {})]);
 }
+// C1: 生成の結果の文（進み具合の欄の文・案内の箱）の鍵。表の鍵に、違反の種類ごとの件数を足したもの。
+// 表は同じで違反の件数だけ変わる操作（連休の上限・日ごとの必要人数など）のあと、古い件数の文を隠すため
+function _vioTypeCounts(vs) {
+  const o = {};
+  (vs || []).forEach(v => { if (v) o[v.type] = (o[v.type] || 0) + 1; });
+  return Object.keys(o).sort().map(k => k + ':' + o[k]).join(',');
+}
+function genTextKey() { return genResultKey() + '|' + _vioTypeCounts(AppState.violations); }
 function _genKeyStale(el, key) { return !!(el && el.dataset.genKey && el.dataset.genKey !== key); }
+// 文を書いた出口（完了・中止・失敗・「良くなかった」）で、その文がいまの表のものだと控える
+function stampGenerateText() {
+  const $area = document.getElementById('progressArea');
+  if (!$area) return;
+  $area.dataset.genKey = genTextKey(); delete $area.dataset.genHid;
+}
+// C1: AI診断レポートは、いまの表の検査の結果。何で描いたか（表・設定・違反の全文・記号・名前）を変数に控え、
+// 出ている間は、それが変わるたびに描き直す（DOM の属性には入れない。大きく、名前も入るため）
+let _reportDrawnKey = null;
+function _reportKey() {
+  return JSON.stringify([_fpClean(AppState.shifts || {}), AppState.settings || {}, AppState.violations || [],
+    (AppState.shiftTypes || []).map(t => [t.key, t.sym || '']), (AppState.staff || []).map(s => [s.id, s.name])]);
+}
+function syncReport() {
+  const $rep = document.getElementById('reportCard');
+  if (!$rep) return;
+  const made = !!(AppState.generated && Object.keys(AppState.shifts || {}).length);
+  if (!made) { if ($rep.style.display !== 'none') $rep.style.display = 'none'; return; }   // 表が無いときだけ隠す
+  if ($rep.style.display === 'none' || typeof _lastReportResult === 'undefined' || !_lastReportResult) return;   // ひとりでには開かない
+  if (_reportKey() === _reportDrawnKey) return;
+  const vs = AppState.violations || [];
+  const r = Object.assign({}, _lastReportResult, { violations: vs, success: vs.length === 0, score: vs.length });
+  // 「複数案の比較」の文は、その生成の表のときだけ出す（違う表に、生成のときの件数を出さない）
+  if (r.candidateKey !== genResultKey()) { delete r.candidateSummary; delete r.candidateKey; }
+  renderReport(r);
+}
+// C1: データを入れ替えたあと（読込・取り込み・リセット・月の片付け）、合わなくなった生成の結果の文・案内・
+// 妥協なしで再計算だけの箱・レポートを捨てる
+function discardGenerateResult() {
+  if (typeof document === 'undefined') return;
+  const $area = document.getElementById('progressArea');
+  if ($area) { $area.style.display = 'none'; delete $area.dataset.genKey; delete $area.dataset.genHid; }
+  const $text = document.getElementById('progressText');
+  if ($text) $text.textContent = '';
+  ['optimalityNotice', 'genStaleDeep'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+  const $rep = document.getElementById('reportCard');
+  if ($rep) $rep.style.display = 'none';
+  if (typeof _lastReportResult !== 'undefined') _lastReportResult = null;
+  _reportDrawnKey = null;
+  if (typeof _fixPlanNote !== 'undefined') _fixPlanNote = null;
+}
 function syncGenerateResult() {
   if (typeof document === 'undefined') return;
-  const key = genResultKey();
+  const key = genTextKey();
   const toggle = (el) => {
     if (!el || !el.dataset.genKey) return;
     if (_genKeyStale(el, key)) {
@@ -180,10 +230,10 @@ function syncGenerateResult() {
   const $rep = document.getElementById('reportCard');
   const $area = document.getElementById('progressArea');
   const $note = document.getElementById('optimalityNotice');
-  if ($rep && !_genKeyStale($rep, key) && $rep.dataset.genHid === '1') { $rep.style.display = 'block'; delete $rep.dataset.genHid; }
-  else toggle($rep);
   if ($area && (typeof calcBusy !== 'function' || !calcBusy())) toggle($area);
   toggle($note);
+  // レポートは隠さず、いまの表と違反で描き直す（表の描き直しの finally から呼ばれるので、ここで止めない）
+  try { syncReport(); } catch (e) { console.warn('[report]', e); }
   // 表が変わっていても「⏳ 妥協なしで再計算」のボタンだけは残す（利用者の判断）
   let $stub = document.getElementById('genStaleDeep');
   const deep = $note && $note.querySelector('#btnDeepOptimize');
@@ -292,6 +342,7 @@ function setupSettingsPanel() {
       AppState.genBase = null; AppState.editLog = [];   // 生成直後の控えと記録も前の月のもの
       if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 前の月の表へ戻せないように
       AppState._needsRegen = false;   // A6: 前の月の「作り直してください」を残さない
+      discardGenerateResult();        // C1: 前の月の生成の結果の文・案内・レポートを捨てる
     }
     refreshAllUI();
     autoSave();
@@ -2351,13 +2402,8 @@ function _afterHistoryApply(touchedStaff) {
 }
 function _afterHistoryApplyInner(touchedStaff) {
   AppState.violations  = checkViolations(AppState.shifts);
-  renderResultTable();
+  renderResultTable();   // レポートの描き直しは、この中の syncGenerateResult に任せる（C1）
   if (touchedStaff && typeof renderStaffTable === 'function') renderStaffTable();
-  const reportCard = document.getElementById('reportCard');
-  if (reportCard && reportCard.style.display !== 'none' && typeof renderReport === 'function') {
-    renderReport({ success: AppState.violations.length === 0,
-      score: AppState.violations.length, violations: AppState.violations });
-  }
   if (typeof saveToStorage === 'function') saveToStorage();
   updateHistoryButtons();
 }
@@ -2527,18 +2573,7 @@ function refreshAfterManualEdit(doneMsg, before) {
   } else if (doneMsg) {
     toast(doneMsg, 'info', 1500);
   }
-  renderResultTable();
-
-  const reportCard = document.getElementById('reportCard');
-  if (reportCard && reportCard.style.display !== 'none') {
-    if (typeof renderReport === 'function') {
-      renderReport({
-        success:    AppState.violations.length === 0,
-        score:      AppState.violations.length,
-        violations: AppState.violations,
-      });
-    }
-  }
+  renderResultTable();   // レポートの描き直しは、この中の syncGenerateResult に任せる（C1）
   if (typeof saveToStorage === 'function') saveToStorage();
 }
 

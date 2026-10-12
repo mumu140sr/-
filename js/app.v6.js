@@ -166,6 +166,7 @@ function setupHeaderActions() {
       // 読み込む前の表へ「元に戻す」で戻れてしまうと、読み込んだデータが古い表で上書きされる
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
       AppState._needsRegen = false;   // 読み込む前のデータの「作り直してください」を残さない（A6）
+      if (typeof discardGenerateResult === 'function') discardGenerateResult();   // C1: 前のデータの文・箱・レポートを捨てる
       refreshAllUI();
       if (_loadProblems.length) toast(loadProblemsText('設定を読込みました'), 'warning', 15000);
       else toast('設定を読込みました', 'success');
@@ -213,6 +214,8 @@ function setupHeaderActions() {
           // C10: 通し番号は、ファイルのもの（無い・正しくなければ人数+1）と取り込む前のもののうち大きいほう
           _staffIdCounter = Math.max(safeStaffIdCounter(saved.counter), n._staffIdCounter);
           AppState._needsRegen = false;   // 取り込んだ表に、前のデータの「作り直してください」を残さない（A6）
+          // C1: 前のデータの文・箱・レポートを捨てる（保存の成否にかかわらず。中身は入れ替わっている）
+          if (typeof discardGenerateResult === 'function') discardGenerateResult();
           try { AppState.violations = AppState.generated ? checkViolations(AppState.shifts) : []; }
           catch (e2) { AppState.violations = []; }
           refreshAllUI();
@@ -248,6 +251,7 @@ function setupHeaderActions() {
       addSampleStaff();
       if (typeof resetShiftHistory === 'function') resetShiftHistory();   // リセット前の表には戻さない
       AppState._needsRegen = false;   // A6
+      if (typeof discardGenerateResult === 'function') discardGenerateResult();   // C1
       refreshAllUI();
       toast('リセットしました', 'info');
     }
@@ -973,7 +977,7 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
   if (old) old.remove();
   const box = document.createElement('div');
   box.id = 'optimalityNotice';
-  if (typeof genResultKey === 'function') box.dataset.genKey = genResultKey();   // A6
+  if (typeof genTextKey === 'function') box.dataset.genKey = genTextKey();   // A6・C1（表と違反の種類ごとの件数）
   box.style.cssText = 'padding:12px 14px;border-radius:10px;margin-bottom:12px;font-size:13px;line-height:1.7';
 
   if (wasFast) {
@@ -1162,6 +1166,8 @@ function setupGeneratePanel() {
     if (!calcBegin('生成')) { if (typeof opts.onAbort === 'function') opts.onAbort(); return; }
     setBusy(true);
     if (btnCancel) btnCancel.style.display = 'inline-block';
+    // C1: 中止・失敗したときは、始める前に出ていたレポートと案内（レポートの中の箱）を出し直す
+    const repShownBefore = $report.style.display !== 'none';
     $area.style.display = 'block';
     $report.style.display = 'none';
     $bar.style.width = '0%';
@@ -1202,6 +1208,7 @@ function setupGeneratePanel() {
           const what = opts.deepMode ? '妥協なしで再計算' : 'じっくり生成で解き直す';
           const msg = keepWorseMessage(what, sNew, sCur, res, info, opts);
           $text.textContent = msg + `（${elapsed}秒）`;
+          if (typeof stampGenerateText === 'function') stampGenerateText();   // C1: この文は、いまの表のもの
           $report.style.display = 'block';
           if (typeof syncGenerateResult === 'function') syncGenerateResult();
           toast(msg, 'info', 9000);
@@ -1225,10 +1232,8 @@ function setupGeneratePanel() {
       // 生成した直後の表を控える（途中から作り直したときも撮り直す）。
       // このあと手などで変えたマスを「生成から変えたマス」として数える。
       if (typeof genBaseTake === 'function') genBaseTake();
-      // A6: この文と結果は、いまの表のもの（表が変わったら syncGenerateResult が隠す）
-      const _gk = (typeof genResultKey === 'function') ? genResultKey() : '';
-      $area.dataset.genKey = _gk; delete $area.dataset.genHid;
-      delete $report.dataset.genHid;
+      // A6・C1: この文は、いまの表のもの（表か違反の種類ごとの件数が変わったら syncGenerateResult が隠す）
+      if (typeof stampGenerateText === 'function') stampGenerateText();
       $report.style.display = 'block';
       try {
         renderReport({ success: res.success, score: res.score, violations: res.violations,
@@ -1256,11 +1261,15 @@ function setupGeneratePanel() {
       }
       // 途中から作り直すなど、生成の前に変えたものを元に戻す
       if (typeof opts.onAbort === 'function') { try { opts.onAbort(); } catch (_) {} }
+      // C1: 中止・失敗の文も、いまの表のものとして控える。始める前に出ていたレポートと案内は出し直す
+      if (typeof stampGenerateText === 'function') stampGenerateText();
+      if (repShownBefore) $report.style.display = 'block';
       return;
     } finally {
       setBusy(false);
       calcEnd();
       if (btnCancel) btnCancel.style.display = 'none';
+      try { if (typeof syncGenerateResult === 'function') syncGenerateResult(); } catch (_) {}
     }
   };
   window._runGenerate = runGenerate;   // 「証明ありで解き直す」等から呼ぶ
@@ -1528,22 +1537,22 @@ function showSurplusPopup() {
 }
 
 // 表示用の記号を変えたあと（v258）: いま出ている⑤のレポートを、新しい記号の文で出し直す。
-// 表が変わって隠れているレポート（A6）は出し直さない（出し直すと、古い表のレポートが今の表の鍵で出てしまう）。
+// C1: 表・違反が変わったときの描き直し（ui.v6.js の syncReport）と同じ1つの仕組みにした。
+// レポートは「何で描いたか」（表・設定・違反の全文・記号・名前）が変われば描き直すので、記号を変えたあとも新しい記号で出る。
 let _lastReportResult = null;
 function rerenderReportIfCurrent() {
-  const rc = document.getElementById('reportCard');
-  if (!rc || !_lastReportResult || rc.style.display === 'none' || rc.dataset.genHid === '1') return;
-  if (typeof genResultKey === 'function' && rc.dataset.genKey && rc.dataset.genKey !== genResultKey()) return;
-  const vs = AppState.violations || [];
-  renderReport(Object.assign({}, _lastReportResult, { violations: vs, success: vs.length === 0, score: vs.length }));
+  if (typeof syncReport === 'function') syncReport();
 }
 
 function renderReport(result) {
+  // 「複数案の比較」の文は、その生成の表のときだけ出す（C1。表が変わって描き直すときは外す）
+  if (result && result.candidateSummary && !result.candidateKey && typeof genResultKey === 'function') {
+    result = Object.assign({}, result, { candidateKey: genResultKey() });
+  }
   _lastReportResult = result;
   const $c = document.getElementById('reportContent');
-  // A6: レポートはいまの表で書いたもの
-  const _rc = document.getElementById('reportCard');
-  if (_rc && typeof genResultKey === 'function') _rc.dataset.genKey = genResultKey();
+  // C1: 何で描いたかを控える（syncReport が、変わったときだけ描き直す）
+  if (typeof _reportKey === 'function') _reportDrawnKey = _reportKey();
 
   // ── AI 診断セクション ──────────────────────────────────────
   const diagItems = (typeof runAIDiagnosis === 'function') ? runAIDiagnosis() : [];
