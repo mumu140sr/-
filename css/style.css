@@ -760,7 +760,12 @@ tbody tr:hover { background: var(--surface-2); }
 .role-table input[type="color"]  { width: 38px !important; height: 26px; border: 1px solid var(--border-control); cursor: pointer; border-radius: var(--r-sm); padding: 0; }
 .role-table input[type="text"]   { padding: 3px 6px; }
 .role-table input[data-field="label"] { width: 96px !important; }
-.role-table input[data-field="key"]   { width: 60px !important; }
+.role-table input[data-field="key"],
+.role-table input[data-field="sym"]   { width: 60px !important; }
+/* v258: 表示用の記号（4文字まで）。ふだんは前の版と同じ 60px、長い記号のときだけ広げる */
+@supports (field-sizing: content) {
+  .role-table input[data-field="sym"] { field-sizing: content; width: auto !important; min-width: 60px; max-width: 88px; }
+}
 .role-table select               { padding: 3px 6px; width: 108px !important; }
 
 /* Excel 出力の色の見本（シフト種別の color。画面のマスの色ではない） */

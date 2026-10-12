@@ -1999,7 +1999,11 @@ function exportToExcel() {
 
   // 列幅設定
   const colWidths = [{ wch: 16 }];
-  for (let d = 1; d <= days; d++) colWidths.push({ wch: 6 });
+  // 日の列は6文字分。表示用の記号（v258）が長いときは、いちばん長い記号に合わせて広げる（全角は2文字分）。
+  // 記号を変えていなければ、いちばん長い「遅総務」でも6なので、前の版と同じ幅
+  const symW = Math.max(0, ...AppState.shiftTypes.map(t => Array.from(shiftSymOf(t)).reduce((a, ch) => a + (/[\u0000-\u00ff\uff61-\uff9f]/.test(ch) ? 1 : 2), 0)));
+  const dayW = Math.max(6, symW);
+  for (let d = 1; d <= days; d++) colWidths.push({ wch: dayW });
   colWidths.push({ wch: 6 }, { wch: 7 }, { wch: 6 }, { wch: 9 }, { wch: 5 }, { wch: 11 });
   ws['!cols'] = colWidths;
 
