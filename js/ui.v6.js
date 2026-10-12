@@ -140,6 +140,11 @@ function refreshAllUI() {
   document.querySelectorAll('[data-sym-key]').forEach(el => { el.textContent = shiftSym(el.dataset.symKey); });
 
   renderRoleTable();
+  // C8: スキル欄と、開いている日別必要人数のパネルも描き直す（読込・取り込み・リセットのあとに古い行が残り、
+  // その行の入力が別のスキルや消えたスキルを書き換えていた）
+  if (typeof renderSkillsPanel === 'function') renderSkillsPanel();
+  const $dp = document.getElementById('dailyReqPanel');
+  if ($dp && $dp.style.display !== 'none' && typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
   renderStaffTable();
   renderShiftChips();
   renderCalendar();
@@ -661,9 +666,7 @@ function afterShiftSymChange() {
     try { AppState.violations = checkViolations(AppState.shifts); } catch (e) { console.warn('recheck', e); }
   }
   autoSave();
-  refreshAllUI();
-  const dp = document.getElementById('dailyReqPanel');
-  if (dp && dp.style.display !== 'none') renderDailyReqPanel();
+  refreshAllUI();   // 開いている日別必要人数のパネルも、この中で描き直す（C8）
   if (typeof rerenderReportIfCurrent === 'function') rerenderReportIfCurrent();
   try { window.dispatchEvent(new Event('shiftsymchange')); } catch (_) {}   // 開いている「余の解消」などが描き直す
 }
@@ -1101,6 +1104,16 @@ function setupStaffPanel() {
 }
 
 // ===== スキル設定（営業など、遅番に必要なスキル保有人数を管理） =====
+// スキルの行に目標人数があるか（C8。目標0の行は、v245 までの「スキル追加」が足した写しのことが多い）
+function _skillHasTarget(k) {
+  return !!k && (parseInt(k.req != null ? k.req : k.lateReq) || 0) > 0;
+}
+// そのスキル名の日別指定が何日分あるか（中身の無い日・入れ物は数えない）
+function _dailySkillDays(name) {
+  const m = (AppState.dailySkills || {})[name];
+  if (!m || typeof m !== 'object') return 0;
+  return Object.keys(m).filter(d => { const o = m[d]; return o && typeof o === 'object' && (o.req != null || o.min != null); }).length;
+}
 function setupSkillsPanel() {
   const btn = document.getElementById('btnAddSkill');
   if (btn && !btn._wired) {
@@ -1189,29 +1202,47 @@ function renderSkillsPanel() {
           toast(`「${newName}」は、ほかのスキルの名前です。別の名前にしてください`, 'warning', 5000);
           return;
         }
-        // 一覧に無いのに、スタッフや日別指定に残っている名前なら知らせる
+        // 同じ名前のスキルがほかに残っているときは、保有者と日別指定はそちらのものとして動かさない（A7）。
+        // C8: ただし、改名した行に目標があり、残る同じ名前の行がどれも目標0なら、改名した行が元のスキル
+        // （v245 までの「スキル追加」は必ず「営業・目標0」を足していた）。保有者と日別指定を一緒に移す。
+        const others = AppState.skills.filter((k, j) => j !== idx && k.name === oldName);
+        const move = !others.length || (_skillHasTarget(AppState.skills[idx]) && others.every(k => !_skillHasTarget(k)));
+        const oldHolders = AppState.staff.filter(s => Array.isArray(s.skills) && s.skills.includes(oldName)).length;
+        const oldDays = _dailySkillDays(oldName);
+        // 一覧に無いのに、スタッフや日別指定に残っている名前なら知らせる（空の入れ物だけなら聞かない）
         const holders = AppState.staff.filter(s => Array.isArray(s.skills) && s.skills.includes(newName)).length;
-        if ((holders || (AppState.dailySkills && AppState.dailySkills[newName])) &&
-            !confirm(`「${newName}」を持つ人が ${holders}人います（前に使っていた名前が残っています）。\nこの名前にすると、その人たちもこのスキルを持つことになります。よいですか？`)) {
-          e.target.value = oldName;
-          return;
+        const leftDays = _dailySkillDays(newName);
+        if (holders || leftDays) {
+          const lines = [`「${newName}」は、前に使っていた名前が残っています。`];
+          if (holders) lines.push(`・「${newName}」を持つ人が ${holders}人 います。この人たちも、このスキルを持つことになります（拾います）。`);
+          if (leftDays) lines.push((move && oldDays)
+            ? `・「${newName}」の日別指定が ${leftDays}日分 残っています。「${oldName}」の日別指定（${oldDays}日分）で置き換えて、残っていた分は消します。`
+            : `・「${newName}」の日別指定が ${leftDays}日分 残っています。このスキルの日別指定として使います（拾います）。`);
+          if (!confirm(lines.join('\n') + '\nよいですか？')) {
+            e.target.value = oldName;
+            return;
+          }
         }
         AppState.skills[idx].name = newName;
-        // 同じ名前のスキルがほかに残っているときは、保有者と日別指定はそちらのものとして動かさない
-        const dupOld = AppState.skills.some((k, j) => j !== idx && k.name === oldName);
-        if (!dupOld) {
-        // スタッフが持つスキル名も追従させる
+        if (move) {
+        // スタッフが持つスキル名も追従させる（残っていた名前を前から持つ人は、重ねて持たせない）
         AppState.staff.forEach(s => {
           if (Array.isArray(s.skills)) {
             const j = s.skills.indexOf(oldName);
-            if (j >= 0) s.skills[j] = newName;
+            if (j >= 0) { if (s.skills.includes(newName)) s.skills.splice(j, 1); else s.skills[j] = newName; }
           }
         });
-        // 日別の上書き設定はスキル名で記録しているので、一緒に引っ越す
+        // 日別の上書き設定はスキル名で記録しているので、一緒に引っ越す（中身の無い入れ物は、残っていた分を消さない）
         if (AppState.dailySkills && oldName !== newName && AppState.dailySkills[oldName]) {
-          AppState.dailySkills[newName] = AppState.dailySkills[oldName];
+          if (oldDays || !AppState.dailySkills[newName]) AppState.dailySkills[newName] = AppState.dailySkills[oldName];
           delete AppState.dailySkills[oldName];
         }
+        if (others.length) toast(`保有者（${oldHolders}人）と日別指定を「${newName}」に移しました。` +
+          `同じ名前の「${oldName}」（目標0）は一覧に残っています。いらなければ削除してください`, 'info', 8000);
+        } else {
+          toast(`同じ名前の「${oldName}」がほかにもあるため（${_skillHasTarget(AppState.skills[idx])
+                  ? 'どちらにも目標があります' : 'そちらが元のスキルです'}）、保有者（${oldHolders}人）と日別指定は「${oldName}」に残しました。` +
+                `「${newName}」を持つ人は、スタッフ管理で選んでください`, 'info', 9000);
         }
         renderStaffTable();
         if (typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
