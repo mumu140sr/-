@@ -1604,15 +1604,36 @@ function renderReport(result) {
  * 定数を崩さない入れ替えだけを実際に試し、エラーが減る組み合わせを並べる。
  * 押すまで表は変わらない（最後に決めるのは人）。
  */
+// 「この通りに直す」の手を、表（または写し）に1手ずつ入れる（C2）。各手の前に、2つのマスが案のままかを確かめ、
+// 違えば入れずに false を返す。空のマスは '' にそろえて比べ、入れ替えたあとも空のマスはマスを消して持つ。
+function _fixStepsApply(table, steps) {
+  const norm = (v) => v || '';
+  for (const m of steps) {
+    const ra = table[m.aId], rb = table[m.bId];
+    if (!ra || !rb || norm(ra[m.day]) !== norm(m.aVal) || norm(rb[m.day]) !== norm(m.bVal)) return false;
+    const t = ra[m.day], u = rb[m.day];
+    if (u === undefined) delete ra[m.day]; else ra[m.day] = u;
+    if (t === undefined) delete rb[m.day]; else rb[m.day] = t;
+  }
+  return true;
+}
+// 「この通りに直す」で反映した直後の知らせ（C2）。その表のままなら、箱を描き直しても先頭に出す
+let _fixPlanNote = null;
+
 function renderFixPlans(root) {
   const scope = root || document;
   const box = scope.querySelector('#fixPlanBox');
   if (!box || typeof findConcreteFixes !== 'function') return;
   if (!AppState.generated || !AppState.shifts) return;
+  const note = (_fixPlanNote && typeof contentFingerprint === 'function' && _fixPlanNote.fp === contentFingerprint())
+    ? `<div class="diag-item" style="background:var(--ok-bg);border-left:4px solid var(--ok);margin-bottom:8px">
+        <div class="diag-title" style="color:var(--ok)">${uiIcon('ok')} 直しました（エラー ${_fixPlanNote.n}件）</div>
+        <div class="diag-detail" style="color:var(--text)">「元に戻す」で取り消せます。続けて探すこともできます。</div></div>` : '';
+  if (!note) _fixPlanNote = null;
   const now = (typeof checkViolations === 'function') ? checkViolations(AppState.shifts).length : 0;
-  if (!now) return;
+  if (!now) { box.innerHTML = note; return; }
 
-  box.innerHTML = `<div class="diag-item" style="background:var(--accent-soft);border-left:4px solid var(--link);margin-bottom:8px">
+  box.innerHTML = note + `<div class="diag-item" style="background:var(--accent-soft);border-left:4px solid var(--link);margin-bottom:8px">
       <div class="diag-title" style="color:var(--link)">具体的な直し方を探す</div>
       <div class="diag-detail" style="color:var(--text)">
         いまの表のまま、<b>同じ日の2人を入れ替える</b>だけでエラーが減る組み合わせを探します。
@@ -1667,7 +1688,7 @@ function renderFixPlans(root) {
             <div class="hint">${escapeHtml(scoreSummaryText(p._base))} → ${escapeHtml(scoreSummaryText(p._sc))}（どの「絶対」の違反も増えません）</div>
             <div style="margin:4px 0 6px">${p.steps.map((m, j) =>
               (p.steps.length > 1 ? `<div class="hint" style="margin-top:4px">${j + 1}つ目</div>` : '') + line(m)).join('')}</div>
-            <div class="hint" style="margin-bottom:6px">この2つを入れ替えるだけです。その日の人数は変わりません。</div>
+            <div class="hint" style="margin-bottom:6px">${p.steps.length > 1 ? '上の2組を順に入れ替えます' : 'この2つを入れ替えるだけです'}。その日の人数は変わりません。</div>
             <button class="btn ${i === 0 ? 'btn-primary' : ''}" data-fixplan="${i}">この通りに直す</button>
           </div>`).join('')}
         </div>`;
@@ -1676,15 +1697,15 @@ function renderFixPlans(root) {
         if (!p) return;
         if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
         // A9: 1つ反映したあとの残りの案・取り込みや月の切り替えのあとの古い案で、表を壊していた。
-        // 表が案を作ったときと同じで、2つのマスがまだ案のままで、入れ替えると改善するときだけ入れる
+        // 表が案を作ったときと同じで、マスがまだ案のままで、入れ替えると改善するときだけ入れる。
+        // C2: 写しに1手ずつ入れながら確かめる（2手目は1手目を入れたあとの表と比べる）。空のマスは '' にそろえて比べる
         const cur = AppState.shifts || {};
         const sameFp = fp0 === null || (typeof contentFingerprint === 'function' && contentFingerprint() === fp0);
-        const cellsOk = p.steps.every(m => cur[m.aId] && cur[m.bId] && cur[m.aId][m.day] === m.aVal && cur[m.bId][m.day] === m.bVal);
+        const trial = JSON.parse(JSON.stringify(cur));
+        const cellsOk = _fixStepsApply(trial, p.steps);
         let better = false;
         if (sameFp && cellsOk) {
           try {
-            const trial = JSON.parse(JSON.stringify(cur));
-            p.steps.forEach(m => { const t = trial[m.aId][m.day]; trial[m.aId][m.day] = trial[m.bId][m.day]; trial[m.bId][m.day] = t; });
             const bv = checkViolations(cur), av = checkViolations(trial);
             better = scoreBetter(scoreViolations(av), scoreViolations(bv)) && !compWorsened(bv, av).length;
           } catch (e) { better = false; }
@@ -1692,20 +1713,20 @@ function renderFixPlans(root) {
         if (!sameFp || !cellsOk || !better) {
           box.innerHTML = '';
           renderFixPlans(root);
+          // 断る文を理由で分ける（表が同じなのに改善しないときは、表が変わったのではない）
+          const changed = !sameFp || !cellsOk;
           box.insertAdjacentHTML('afterbegin', `<div class="diag-item" style="background:var(--lv-must-bg);border-left:4px solid var(--lv-must);margin-bottom:8px">
-              <div class="diag-title" style="color:var(--lv-must)">表が変わったので、この案は使えません</div>
+              <div class="diag-title" style="color:var(--lv-must)">${changed ? '表が変わったので、この案は使えません' : 'いまの表・設定では、この案でエラーが減りません'}</div>
               <div class="diag-detail" style="color:var(--text)">表は変えていません。もう一度探してください。</div></div>`);
           return;
         }
         if (typeof recordShiftHistory === 'function') recordShiftHistory();
         const beforeFix = JSON.parse(JSON.stringify(AppState.shifts));
-        p.steps.forEach(m => {
-          const t = AppState.shifts[m.aId][m.day];
-          AppState.shifts[m.aId][m.day] = AppState.shifts[m.bId][m.day];
-          AppState.shifts[m.bId][m.day] = t;
-        });
+        _fixStepsApply(AppState.shifts, p.steps);
         if (typeof noteEdits === 'function') noteEdits('修正案', beforeFix);
         AppState.violations = checkViolations(AppState.shifts);
+        // 反映したことを、描き直した箱の先頭に出す（表が変わるまで、レポートを描き直しても残す）
+        _fixPlanNote = { fp: (typeof contentFingerprint === 'function') ? contentFingerprint() : '', n: AppState.violations.length };
         if (typeof autoSave === 'function') autoSave();
         if (typeof refreshAllUI === 'function') refreshAllUI();
         if (typeof toast === 'function') toast(`直しました（エラー ${AppState.violations.length}件）`, 'success');

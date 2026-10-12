@@ -3553,7 +3553,12 @@ function findConcreteFixes(opt) {
   const o = opt || {};
   const maxResults = o.maxResults || 12;
   const days = getDaysInMonth(AppState.settings.targetMonth);
-  const staff = AppState.staff || [];
+  // C2: 表に1マスも入っていない人（行が無い・中身が無い）は相手にしない（行が無いと入れ替えで例外になり、
+  // 案が1つも出なかった）。あとから足した人の、まだ入れていない日（空のマス）は相手にしてよい
+  const staff = (AppState.staff || []).filter(s => {
+    const row = (AppState.shifts || {})[s.id];
+    return row && Object.keys(row).some(d => row[d]);
+  });
   if (!days || !staff.length || !AppState.shifts) return [];
 
   // 件数だけで比べると、🟡が2件減って🚨が1件増えても「1件減った」になってしまう。
@@ -3563,20 +3568,24 @@ function findConcreteFixes(opt) {
     : MUST_TYPES_OPT.has(t);
   // 改善かどうかは scoreBetter（どの🚨も増えず、どれかが減る）、並べ方は scoreCompare。
   const score = (vs) => scoreViolations(vs);
-  const baseScore = score(checkViolations(AppState.shifts));
+  const baseVs = checkViolations(AppState.shifts);
+  const baseScore = score(baseVs);
   const base = baseScore.count;
   if (!base) return [];
-  // 採用してよいか: scoreBetter（どの🚨の種類・連勤の超過日数・6連勤以上も増えず、どれかが減る）
-  const better = (n) => scoreBetter(n, baseScore);
+  // 採用してよいか: scoreBetter（どの🚨の種類・連勤の超過日数・6連勤以上も増えず、どれかが減る）。
+  // C2: ⛔（6連勤以上）を新しく作る・伸ばす・別の人へ移す案も出さない（件数が同じでも。押すと断っていた）
+  const ok = (vs, n) => scoreBetter(n, baseScore) && !compWorsened(baseVs, vs).length;
 
   const locked = (id, d) =>
     !!((AppState.requests[id] || {})[d] ||
        (typeof getFixedShiftAt === 'function' ? getFixedShiftAt(id, d) : null));
   const canDo = (s, v) => !v || !isWork(v) || isTraining(v) || (s.allowedShifts || []).includes(v);
+  // 空のマス（undefined）は、入れ替えたあとも undefined のまま（マスを消す）。'' などはそのまま入れ替える
   const swap = (aId, bId, d) => {
-    const t = AppState.shifts[aId][d];
-    AppState.shifts[aId][d] = AppState.shifts[bId][d];
-    AppState.shifts[bId][d] = t;
+    const ra = AppState.shifts[aId], rb = AppState.shifts[bId];
+    const t = ra[d], u = rb[d];
+    if (u === undefined) delete ra[d]; else ra[d] = u;
+    if (t === undefined) delete rb[d]; else rb[d] = t;
   };
   // 入れ替えてよい組み合わせを列挙する
   const movesOn = (d) => {
@@ -3608,9 +3617,9 @@ function findConcreteFixes(opt) {
   hotDays.forEach(d => movesOn(d).forEach(m => first.push(m)));
   first.forEach(m => {
     swap(m.aId, m.bId, m.day);
-    const n = score(checkViolations(AppState.shifts));
+    const vs = checkViolations(AppState.shifts), n = score(vs);
     swap(m.aId, m.bId, m.day);
-    if (better(n)) {
+    if (ok(vs, n)) {
       found.push({ steps: [m], before: base, after: n.count, gain: baseScore.total - n.total,
                    mustBefore: baseScore.mustCount, mustAfter: n.mustCount, _sc: n, _base: baseScore });
     } else {
@@ -3635,10 +3644,10 @@ function findConcreteFixes(opt) {
       for (const m2 of movesOn(d)) {
         if (m2.day === m1.day && m2.aId === m1.aId && m2.bId === m1.bId) continue;
         swap(m2.aId, m2.bId, m2.day);
-        const n = score(checkViolations(AppState.shifts));
+        const vs = checkViolations(AppState.shifts), n = score(vs);
         swap(m2.aId, m2.bId, m2.day);
         seen++;
-        if (better(n)) {
+        if (ok(vs, n)) {
           found.push({ steps: [m1, JSON.parse(JSON.stringify(m2))], before: base, after: n.count,
                        gain: baseScore.total - n.total, mustBefore: baseScore.mustCount, mustAfter: n.mustCount,
                        _sc: n, _base: baseScore });
