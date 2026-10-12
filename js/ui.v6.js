@@ -468,7 +468,7 @@ function renderEventList() {
     div.innerHTML = `
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
         <label>日付</label>
-        <input type="number" min="1" max="31" value="${ev.day || 1}"
+        <input type="number" min="1" max="31" value="${escapeHtml(ev.day || 1)}"
                data-ev-idx="${idx}" data-ev-field="day" style="width:60px"/>
         <label>行事名</label>
         <input type="text" value="${escapeHtml(ev.name || '')}" placeholder="例: 健康診断"
@@ -725,11 +725,11 @@ function renderRoleTable() {
         </select>
       </td>
       <td class="rc-num">
-        <input type="number" min="0" max="24" step="0.5" value="${hours}"
+        <input type="number" min="0" max="24" step="0.5" value="${escapeHtml(hours)}"
                data-idx="${idx}" class="role-hours-input" style="width:60px" aria-label="労働時間"/><span class="unit">h</span>
       </td>
       <td class="rc-num">
-        <input type="number" min="0" max="99" value="${req}"
+        <input type="number" min="0" max="99" value="${escapeHtml(req)}"
                data-idx="${idx}" class="role-req-input" style="width:60px" aria-label="必要人数（社員）"/>
       </td>
       <td class="rc-num">
@@ -927,7 +927,7 @@ function renderDailyReqPanel() {
     countableTypes.forEach(type => {
       const defaultVal = baseReqs[type.key] || 0;
       if (!defaultVal && dept === 'cast') return;
-      html += `<tr><td style="padding:4px 6px;border:1px solid var(--border);white-space:nowrap;position:sticky;left:0;background:var(--surface);z-index:1">${escapeHtml(shiftSymOf(type))}（${deptLabel}・通常: ${defaultVal}）</td>`;
+      html += `<tr><td style="padding:4px 6px;border:1px solid var(--border);white-space:nowrap;position:sticky;left:0;background:var(--surface);z-index:1">${escapeHtml(shiftSymOf(type))}（${deptLabel}・通常: ${escapeHtml(defaultVal)}）</td>`;
       for (let d = 1; d <= days; d++) {
         const w = getWeekday(AppState.settings.targetMonth, d);
         const override = (dailyMap[type.key] || {})[d];
@@ -936,8 +936,8 @@ function renderDailyReqPanel() {
         const cellBg = isOv ? 'var(--accent-soft)' : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
         html += `<td style="padding:1px;border:1px solid var(--border);background:${cellBg}">
           <input type="number" min="0" max="99"
-            value="${isOv ? override : defaultVal}"
-            data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}" data-default="${defaultVal}"
+            value="${escapeHtml(isOv ? override : defaultVal)}"
+            data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}" data-default="${escapeHtml(defaultVal)}"
             class="daily-req-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${isOv ? '700' : '400'};color:${isOv ? 'var(--text)' : 'var(--text-muted)'}"/>
         </td>`;
       }
@@ -953,7 +953,7 @@ function renderDailyReqPanel() {
       const baseVal  = field === 'req' ? baseNeed
                      : ((sk.min != null && sk.min >= 0) ? sk.min : baseNeed);
       html += `<tr><td style="padding:4px 6px;border:1px solid var(--border);white-space:nowrap;position:sticky;left:0;background:var(--surface-2);z-index:1">`
-            + `スキル：${escapeHtml(sk.name)}（${bandLabel}・${fLabel}・通常: ${baseVal}）</td>`;
+            + `スキル：${escapeHtml(sk.name)}（${bandLabel}・${fLabel}・通常: ${escapeHtml(baseVal)}）</td>`;
       for (let d = 1; d <= days; d++) {
         const w  = getWeekday(AppState.settings.targetMonth, d);
         const ov = ((AppState.dailySkills || {})[sk.name] || {})[d] || {};
@@ -962,8 +962,8 @@ function renderDailyReqPanel() {
         const cellBg = isOv ? 'var(--accent-soft)' : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
         html += `<td style="padding:1px;border:1px solid var(--border);background:${cellBg}">
           <input type="number" min="0" max="99"
-            value="${isOv ? override : baseVal}"
-            data-skill="${escapeHtml(sk.name)}" data-sfield="${field}" data-day="${d}" data-default="${baseVal}"
+            value="${escapeHtml(isOv ? override : baseVal)}"
+            data-skill="${escapeHtml(sk.name)}" data-sfield="${field}" data-day="${d}" data-default="${escapeHtml(baseVal)}"
             class="daily-skill-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${isOv ? '700' : '400'};color:${isOv ? 'var(--text)' : 'var(--text-muted)'}"/>
         </td>`;
       }
@@ -1157,10 +1157,10 @@ function renderSkillsPanel() {
         <option value="early" ${target === 'early' ? 'selected' : ''}>早番</option>
       </select>
       <span class="hint">目標人数:</span>
-      <input type="number" min="0" max="20" value="${req}" data-skill-idx="${i}" data-skill-field="req"
+      <input type="number" min="0" max="20" value="${escapeHtml(req)}" data-skill-idx="${i}" data-skill-field="req"
              style="width:56px"/>
       <span class="hint" title="この人数を下回ると「絶対」の違反。目標に届かなくても最低ライン以上なら「できれば」の違反どまり。">最低ライン:</span>
-      <input type="number" min="0" max="20" value="${min}" data-skill-idx="${i}" data-skill-field="min"
+      <input type="number" min="0" max="20" value="${escapeHtml(min)}" data-skill-idx="${i}" data-skill-field="min"
              style="width:56px"/>
       <button class="btn-icon" data-skill-del="${i}" title="削除" aria-label="削除">${uiIcon('trash')}</button>
     </div>`;
@@ -1521,7 +1521,7 @@ function renderStaffTable() {
         delete AppState.shifts[id];
         if (AppState.fixedShifts) delete AppState.fixedShifts[id];   // 消した人の🔒も残さない
         // 🔒を消すと newStaffId の守りが外れるので、同じIDを次の人に付けないよう通し番号を進める
-        const m = /^S(\d+)$/.exec(id || '');
+        const m = /^S(\d{1,9})$/.exec(id || '');   // 9桁まで（C10。newStaffId と同じ読み方）
         if (m) _staffIdCounter = Math.max(_staffIdCounter, parseInt(m[1], 10) + 1);
         renderStaffTable();
         autoSave();
@@ -1946,7 +1946,7 @@ function _renderResultTableInner() {
       if (defaultReq === 0) return;
       const tr = document.createElement('tr');
       tr.className = 'summary-row';
-      let cells = `<td>${escapeHtml(shiftSym(key))} (必要${defaultReq})</td>`;
+      let cells = `<td>${escapeHtml(shiftSym(key))} (必要${escapeHtml(defaultReq)})</td>`;
       for (let d = 1; d <= days; d++) {
         let count = 0;
         g.staff.forEach(s => {
@@ -1957,10 +1957,10 @@ function _renderResultTableInner() {
         // 配置人数(count)を上に小さく、その下に編集できる定数(必要人数)入力
         cells += `<td class="${cls}" style="padding:0">
           <div style="font-size:10px;color:var(--text-muted);line-height:1">${count}</div>
-          <input type="number" min="0" max="99" value="${dayReq}"
+          <input type="number" min="0" max="99" value="${escapeHtml(dayReq)}"
             class="summary-req-input" data-key="${escapeHtml(key)}" data-day="${d}"
-            data-dept="${deptKey}" data-default="${defaultReq}"
-            title="配置 ${count}人 / 必要 ${dayReq}人（この数字が定数。変更できます）"
+            data-dept="${deptKey}" data-default="${escapeHtml(defaultReq)}"
+            title="配置 ${count}人 / 必要 ${escapeHtml(dayReq)}人（この数字が定数。変更できます）"
             style="width:100%;height:20px;border:none;background:transparent;text-align:center;font-size:11px;font-weight:700"/>
         </td>`;
       }
@@ -3022,9 +3022,10 @@ function showRelaxModal() {
   const capLines = getDepartmentGroups(AppState.staff).map(g => {
     const c = calcCapacity(g, _days);
     const label = (getDepartmentGroups(AppState.staff).length > 1) ? `【${g.label}】` : '';
+    // 数は保存データの値から作るので、出口でもエスケープする（C10）
     return c.surplus < 0
-      ? `${label}必要 ${c.required}人日 ／ 出せる ${c.avail}人日 → <b style="color:var(--danger)">${-c.surplus}人日 足りません</b>`
-      : `${label}必要 ${c.required}人日 ／ 出せる ${c.avail}人日 → <b style="color:var(--success)">余裕 ${c.surplus}人日</b>`;
+      ? `${label}必要 ${escapeHtml(c.required)}人日 ／ 出せる ${escapeHtml(c.avail)}人日 → <b style="color:var(--danger)">${escapeHtml(-c.surplus)}人日 足りません</b>`
+      : `${label}必要 ${escapeHtml(c.required)}人日 ／ 出せる ${escapeHtml(c.avail)}人日 → <b style="color:var(--success)">余裕 ${escapeHtml(c.surplus)}人日</b>`;
   }).join('<br>');
   const vioN = (AppState.violations || []).length;
 
@@ -4830,7 +4831,7 @@ function renderReqRules(hostId) {
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;margin-top:6px">
         <span>◯のつく日:</span><span>${endBoxes}</span>
         <span style="margin-left:6px">日付を直接:</span>
-        <input type="text" data-rr="days" data-i="${i}" value="${(w.days || []).join(',')}" placeholder="例: 3,17" style="width:110px"/>
+        <input type="text" data-rr="days" data-i="${i}" value="${escapeHtml((w.days || []).join(','))}" placeholder="例: 3,17" style="width:110px"/>
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;margin-top:8px">
         <span><b>その日の</b></span>
@@ -4838,7 +4839,7 @@ function renderReqRules(hostId) {
           ${keys.map(k => `<option value="${escapeHtml(k)}" ${r.key === k ? 'selected' : ''}>${escapeHtml(shiftSym(k))}</option>`).join('')}
         </select>
         <span>を</span>
-        <input type="number" data-rr="to" data-i="${i}" value="${r.to != null ? r.to : 1}" min="0" max="20" style="width:70px"/>
+        <input type="number" data-rr="to" data-i="${i}" value="${escapeHtml(r.to != null ? r.to : 1)}" min="0" max="20" style="width:70px"/>
         <span>人にする</span>
       </div>
       <div class="hint" style="margin-top:8px">今月あてはまる日：${hitTxt}</div>

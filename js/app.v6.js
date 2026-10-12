@@ -66,20 +66,31 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshAllUI();
 
   if (loaded) {
-    toast('前回のデータを読込みました', 'success');
+    if (_loadProblems.length) toast(loadProblemsText('前回のデータを読込みました'), 'warning', 15000);
+    else toast('前回のデータを読込みました', 'success');
   } else if (typeof _loadUnreadable !== 'undefined' && _loadUnreadable) {
     // 保存データが壊れていて読めなかった（元のデータは別のキーに残してある。サンプルで上書きしたことにしない）
-    toast('前回のデータを読めませんでした。元のデータは消さずに残してあります（ブラウザの保存データ「' + UNREADABLE_KEY + '」）。'
-        + '書き出したファイルがあれば「取り込み」から戻してください。いまはサンプルを表示しています。', 'error', 15000);
+    // C10: 控えを書けなかったときは「残してあります」と言わず、元のデータを守るため保存を止めたことを言う
+    toast(_loadBackupKept
+      ? '前回のデータを読めませんでした。元のデータは消さずに残してあります（ブラウザの保存データ「' + UNREADABLE_KEY + '」）。'
+        + '書き出したファイルがあれば「取り込み」から戻してください。いまはサンプルを表示しています。'
+      : '前回のデータを読めませんでした。元のデータの控えを残せなかったので（ブラウザの保存の容量が足りません）、元のデータを守るため保存を止めています。'
+        + '書き出したファイルがあれば「取り込み」から戻してください。いまはサンプルを表示しています。', 'error', 20000);
   } else {
     toast('シフト自動生成アプリへようこそ！', 'success');
   }
 });
 
-/** 設定一式をファイルに書き出す。うまくいけば true（月を変えるときの「先に書き出す」でも使う） */
-function exportAppData() {
-  try {
-    const data = {
+// 読めたが正しくない値があったときの知らせ（C10。以前の取り込みで保存された値。断らずに知らせるだけ）
+function loadProblemsText(head) {
+  const p = (typeof _loadProblems !== 'undefined' && _loadProblems) || [];
+  return `${head}。ただし、保存データに正しくない値があります（${p.slice(0, 2).join('、')}${p.length > 2 ? ` ほか${p.length - 2}件` : ''}）。`
+       + '画面には文字のまま出しています。その欄を入れ直すか、正しいファイルを取り込んでください';
+}
+
+/** 書き出すファイルの中身（exportAppData・exportAppDataSure で同じもの） */
+function exportPayload() {
+  return {
       _app: 'shift-app', _version: 1, _savedAt: new Date().toISOString(),
       settings: AppState.settings, shiftTypes: AppState.shiftTypes,
       roleRequirements: AppState.roleRequirements, roleRequirementsCast: AppState.roleRequirementsCast,
@@ -88,7 +99,15 @@ function exportAppData() {
       staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
       specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
       genBase: AppState.genBase || null, editLog: AppState.editLog || [],   // 生成直後の表と、変えたマスの記録
-    };
+      // スタッフIDの通し番号（C10。入れていなかったので、取り込んだあと、消した人のIDを次の人に付けていた）
+      _staffIdCounter,
+  };
+}
+
+/** 設定一式をファイルに書き出す。うまくいけば true（月を変えるときの「先に書き出す」でも使う） */
+function exportAppData() {
+  try {
+    const data = exportPayload();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -110,16 +129,7 @@ async function exportAppDataSure() {
   const month = AppState.settings.targetMonth || '未設定';
   if (typeof window.showSaveFilePicker === 'function') {
     try {
-      const data = {
-        _app: 'shift-app', _version: 1, _savedAt: new Date().toISOString(),
-        settings: AppState.settings, shiftTypes: AppState.shiftTypes,
-        roleRequirements: AppState.roleRequirements, roleRequirementsCast: AppState.roleRequirementsCast,
-        dailyRequirements: AppState.dailyRequirements, dailyRequirementsCast: AppState.dailyRequirementsCast,
-        skills: AppState.skills, dailySkills: AppState.dailySkills,
-        staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
-        specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
-        genBase: AppState.genBase || null, editLog: AppState.editLog || [],
-      };
+      const data = exportPayload();
       const h = await window.showSaveFilePicker({ suggestedName: `シフト設定_${month}.json`,
         types: [{ description: 'シフト設定', accept: { 'application/json': ['.json'] } }] });
       const w = await h.createWritable();
@@ -140,8 +150,13 @@ async function exportAppDataSure() {
 // ヘッダーアクション
 function setupHeaderActions() {
   document.getElementById('btnSave').addEventListener('click', () => {
-    saveToStorage();
-    toast('設定を保存しました', 'success');
+    // C10: 読めなかった元のデータを守るため保存を止めているときは、上書きして消えることを確かめてから書く
+    if (typeof storageHeld === 'function' && storageHeld()) {
+      if (!confirm('前に読めなかった元のデータを守るため、保存を止めています。\nいま保存すると、元のデータは上書きされて消えます。保存しますか？')) return;
+      releaseStorageHold();
+    }
+    if (saveToStorage()) toast('設定を保存しました', 'success');
+    else toast('保存できませんでした（ブラウザの保存の容量が足りない可能性があります）。「データ」→「書き出し」で控えを残してください', 'error', 9000);
   });
 
   document.getElementById('btnLoad').addEventListener('click', () => {
@@ -152,9 +167,12 @@ function setupHeaderActions() {
       if (typeof resetShiftHistory === 'function') resetShiftHistory();
       AppState._needsRegen = false;   // 読み込む前のデータの「作り直してください」を残さない（A6）
       refreshAllUI();
-      toast('設定を読込みました', 'success');
+      if (_loadProblems.length) toast(loadProblemsText('設定を読込みました'), 'warning', 15000);
+      else toast('設定を読込みました', 'success');
     } else if (typeof _loadUnreadable !== 'undefined' && _loadUnreadable) {
-      toast('保存データを読めませんでした（いまのデータはそのままです。元のデータは「' + UNREADABLE_KEY + '」に残してあります）', 'error', 10000);
+      toast(_loadBackupKept
+        ? '保存データを読めませんでした（いまのデータはそのままです。元のデータは「' + UNREADABLE_KEY + '」に残してあります）'
+        : '保存データを読めませんでした（いまのデータはそのままです）。元のデータの控えを残せなかったので、元のデータを守るため保存を止めています', 'error', 12000);
     } else {
       toast('保存されたデータがありません', 'error');
     }
@@ -183,22 +201,29 @@ function setupHeaderActions() {
           const d = JSON.parse(rd.result);
           if (!d || typeof d !== 'object' || d._app !== 'shift-app') throw new Error('このアプリの書き出しファイルではありません');
           if (!Array.isArray(d.staff)) throw new Error('スタッフの一覧が入っていません');
+          if (!d.staff.length) throw new Error('スタッフが1人も入っていません');   // C10
           if (!d.settings || typeof d.settings !== 'object' || Array.isArray(d.settings)) throw new Error('設定が入っていません');
-          if (typeof validateImportIdsAndNumbers === 'function') validateImportIdsAndNumbers(d);   // A5
+          if (typeof validateImportIdsAndNumbers === 'function') validateImportIdsAndNumbers(d);   // A5・C10
           const n = normalizeAppData(d, defaultAppDataBase());
           if (!confirm('いまのデータを、読み込むファイルの内容で置き換えます。よろしいですか？')) return;
           // いまの状態を控える（失敗したら戻す）
           saved = { data: JSON.parse(JSON.stringify(APP_DATA_KEYS.reduce((o, k) => { o[k] = AppState[k]; return o; }, {}))),
                     counter: _staffIdCounter, needsRegen: AppState._needsRegen };
           applyAppData(n);
+          // C10: 通し番号は、ファイルのもの（無い・正しくなければ人数+1）と取り込む前のもののうち大きいほう
+          _staffIdCounter = Math.max(safeStaffIdCounter(saved.counter), n._staffIdCounter);
           AppState._needsRegen = false;   // 取り込んだ表に、前のデータの「作り直してください」を残さない（A6）
           try { AppState.violations = AppState.generated ? checkViolations(AppState.shifts) : []; }
           catch (e2) { AppState.violations = []; }
           refreshAllUI();
           if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 取り込む前の表には戻さない
-          saveToStorage();
+          if (typeof releaseStorageHold === 'function') releaseStorageHold();   // 取り込んだので、読めなかった元のデータを守る停止は解除（C10）
+          const okSave = saveToStorage();
           saved = null;
-          toast('設定を取り込みました', 'success');
+          // C10: 保存が容量不足などで失敗しても、取り込んだ中身のまま使えるようにして知らせる
+          if (okSave) toast('設定を取り込みました', 'success');
+          else toast('設定を取り込みましたが、保存できませんでした（ブラウザの保存の容量が足りない可能性があります）。このまま使えますが、'
+                   + 'ページを閉じると取り込んだ内容は消えます。「データ」→「書き出し」で控えを残してください', 'warning', 15000);
         } catch (e) {
           if (saved) {
             // 途中で失敗したら、取り込む前の状態に戻す（保存データは取り込みの最後でしか書かないので、そのまま）
@@ -444,7 +469,7 @@ function renderDayMarginsHtml() {
   const cell = (c) => {
     const bg = c.margin < 0 ? 'color-mix(in srgb, var(--danger) 22%, var(--surface))'
              : c.margin === 0 ? 'var(--lv-soft-bg)' : '';
-    return `<td style="text-align:center;padding:2px 10px;border:1px solid var(--border);${bg ? 'background:' + bg : ''}" title="出られる ${c.avail}人 ／ 必要 ${c.need}人">${c.margin > 0 ? '+' : ''}${c.margin}</td>`;
+    return `<td style="text-align:center;padding:2px 10px;border:1px solid var(--border);${bg ? 'background:' + bg : ''}" title="出られる ${c.avail}人 ／ 必要 ${escapeHtml(c.need)}人">${c.margin > 0 ? '+' : ''}${escapeHtml(c.margin)}</td>`;
   };
   const html = groups.map(g => {
     const skNames = [];
