@@ -4846,7 +4846,8 @@ function renderReqRules(hostId) {
     </div>`;
   }).join('');
 
-  const rerender = () => { autoSave(); renderReqRules(hostId); };
+  // C4: 順番に確認して生成するの1ページ目（wzRules）で変えたら、①の欄も描き直す（古い値のまま残っていた）
+  const rerender = () => { autoSave(); renderReqRules(hostId); if (hostId && hostId !== 'reqRuleList') renderReqRules(); };
   $list.querySelectorAll('[data-rr]').forEach(el => {
     const i = parseInt(el.dataset.i), kind = el.dataset.rr, r = rules[i];
     if (!r) return;
