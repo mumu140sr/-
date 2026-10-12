@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=257" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=257" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=257" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=257">
+<link rel="icon" href="favicon.svg?v=258" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=258" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=258" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=258">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=257" />
+<link rel="stylesheet" href="css/style.css?v=258" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -180,7 +180,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
   <header class="m-head">
     <div class="m-eyebrow">シフト自動生成アプリ</div>
     <h1>シフト作成の手引き</h1>
-    <p class="m-lede">毎月のシフトは、すぐ下の2つの枠だけで作れます。</p>
+    <p class="m-lede">毎月のシフトは、すぐ下の2つの枠だけで作れます。シフトの記号は、はじめの記号（早責など）で書いています。記号を変えたときは、読み替えてください。</p>
   </header>
 
   <div class="m-first">
@@ -323,18 +323,18 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <h3><span class="m-tab" data-n="2">シフト種別</span></h3>
       <dl class="m-three">
         <dt>ここでやること</dt><dd>シフトの種類と、1日に何人いるかを決めます。ふだんは触りません。</dd>
-        <dt>よく使うもの</dt><dd>「<span class="m-ui">名称</span>」「<span class="m-ui">カテゴリ</span>」「<span class="m-ui">必要人数/日</span>」 <span class="m-btn">詳細</span> <span class="m-btn out"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>シフト追加</span></dd>
+        <dt>よく使うもの</dt><dd>「<span class="m-ui">記号</span>」「<span class="m-ui">名称</span>」「<span class="m-ui">カテゴリ</span>」「<span class="m-ui">必要人数/日</span>」 <span class="m-btn">詳細</span> <span class="m-btn out"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>シフト追加</span></dd>
         <dt>気をつけること</dt><dd><ul>
-          <li><b>名称は自由に変えてよいです。記号（早責など）は変えないでください。</b></li>
+          <li><b>記号と名称は、自由に変えてよいです。</b>中の名前は変わらないので、決まりやデータは壊れません。</li>
           <li>「<span class="m-ui">日別必要人数（上書き設定）</span>」は、効きすぎることがあります。</li>
         </ul></dd>
       </dl>
       <details class="m-more"><summary>くわしく</summary>
         <ul>
-          <li>記号を変えると、次のことが起きます。
+          <li>「<span class="m-ui">記号</span>」は、画面と Excel・CSV に出す字です。4文字まで、自由に変えられます。
             <ul>
-              <li>早責・遅責・早総務・遅総務には、「1日1人」「責任者の順番」などの決まりが付いています。記号を変えると、この決まりが外れます（変える前に確認が出ます）。</li>
-              <li>スタッフの担当シフト・希望・固定・作った表は、古い記号のまま残り、食い違います。新しい記号を担当する人がいなくなり、人員不足になります。</li>
+              <li>中の名前は変わりません（<span class="m-btn">詳細</span> の中に「<span class="m-msg" data-pat="中の名前：◯（変わりません）">中の名前：早責（変わりません）</span>」と出ます）。決まり（1日1人・責任者の順番など）や、担当シフト・希望・固定・作った表は壊れません。</li>
+              <li>空・ほかのシフトや休みの記号と同じ字・「=」「+」「-」「@」で始まる字は使えません。</li>
             </ul>
           </li>
           <li>「<span class="m-ui">カテゴリ</span>」は「<span class="m-ui">A（早番）</span>」か「<span class="m-ui">B（遅番）</span>」です。遅→早などの決まりは、これで見分けます。</li>
@@ -535,7 +535,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <details><summary>計算している間、入力できない</summary>
         <p>計算中は、設定・希望・表の手直しを止めています。見ることはできます。終わるのを待つか、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>中止</span> が出ていれば押してください。</p></details>
       <details><summary>画面が前のままで、新しくならない</summary>
-        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v257 など）が出ています。知らされた番号と同じか確かめます。</p></details>
+        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v258 など）が出ています。知らされた番号と同じか確かめます。</p></details>
       <details><summary>データが消えた／別のパソコンで使いたい</summary>
         <p><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-export"/></svg>書き出し</span> で作ったファイルがあれば、「<span class="m-ui">データ</span>」の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg>取り込み</span> で戻せます。別のパソコンでも同じです。ファイルが無いと戻せません。</p></details>
       <details><summary>「人が足りない」と出る</summary>
@@ -549,7 +549,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <details><summary>ドラッグで入れ替えたマスが、作り直すと変わる</summary>
         <p>入れ替えただけのマスは、固定されません。残したいマスは、押して選び直すと固定されます。</p></details>
       <details><summary>シフトの記号や名前を変えたい</summary>
-        <p>名前は、<span class="m-tab" data-n="2">シフト種別</span> の「<span class="m-ui">名称</span>」で変えます。記号は変えないでください。決まりが外れ、担当シフトや希望が古い記号のまま残ります。</p></details>
+        <p><span class="m-tab" data-n="2">シフト種別</span> の「<span class="m-ui">記号</span>」と「<span class="m-ui">名称</span>」で、自由に変えられます。中の名前は変わらないので、決まりやデータは壊れません。</p></details>
       <details><summary>暗い画面にしたい／戻したい</summary>
         <p>「<span class="m-ui">データ</span>」の <span class="m-btn">ダーク表示に切り替え</span> を押します。戻すときは、同じ所の <span class="m-btn">ライト表示に切り替え</span> です。この手引きも、同じ明るさで出ます。</p></details>
     </div>

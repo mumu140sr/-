@@ -56,13 +56,18 @@ function buildAIExplanation() {
     const uniqueDays = [...new Set(days)].sort((a,b) => a-b);
     // どのシフト種別が足りないか
     const shiftCounts = {};
+    // v258: 文には表示用の記号が入るので、違反の role（key）で数える。role が無い（前の版の）違反は今までどおり文から読む。
+    // 数える種類は前の版と同じ7つ（前の版は文から次の7つだけを読んでいた）。出すときは表示用の記号
+    const LEGACY_KEYS = ['早責', '遅責', '早総務', '遅総務', '早', '遅', '研'];
     items.forEach(v => {
-      const m = (v.message || '').match(/(早責|遅責|早総務|遅総務|早|遅|研)/);
-      if (m) shiftCounts[m[1]] = (shiftCounts[m[1]] || 0) + 1;
+      let k = null;
+      if (v.role != null) k = LEGACY_KEYS.indexOf(v.role) >= 0 ? v.role : null;
+      else { const m = (v.message || '').match(/(早責|遅責|早総務|遅総務|早|遅|研)/); if (m) k = m[1]; }
+      if (k) shiftCounts[k] = (shiftCounts[k] || 0) + 1;
     });
     const shiftBreakdown = Object.entries(shiftCounts)
       .sort((a,b) => b[1] - a[1])
-      .map(([k,v]) => `${k}が${v}日`).join('、');
+      .map(([k,v]) => `${shiftSym(k)}が${v}日`).join('、');
 
     let body = `${items.length}日で必要人数が足りていません（${shiftBreakdown}）。`;
     body += `\n対象日: ${uniqueDays.join('日, ')}日`;
@@ -124,7 +129,10 @@ function buildAIExplanation() {
     const byStaff = {};
     items.forEach(v => {
       const name = staffName(v.staffId);
-      (byStaff[name] = byStaff[name] || []).push(`${v.day}日(${v.message.includes('研') ? '→研' : '→早'})`);
+      // v258: 研修かどうかは表のその日のシフトで見る（文には表示用の記号が入るため）。研修なら研修の記号（記号が無ければ「研」）
+      const sh = (AppState.shifts[v.staffId] || {})[v.day];
+      const tr = sh ? isTraining(sh) : (v.message || '').includes('研');
+      (byStaff[name] = byStaff[name] || []).push(`${v.day}日(${tr ? '→' + (sh ? _trainSym(sh) : '研') : '→早'})`);
     });
     const detail = Object.entries(byStaff)
       .map(([name, days]) => `${name}（${days.join(', ')}）`).join('\n• ');
@@ -136,7 +144,9 @@ function buildAIExplanation() {
     body += `\n・該当スタッフの翌日のシフトを別の遅番系に変更する`;
     body += `\n・または遅番を別の日に動かす`;
     body += `\n・月初の場合は前月末のシフトを「遅」に正しく設定`;
-    sections.push({ title: '遅→早(研)のインターバル不足', body, severity: 'critical' });
+    // 見出しの「研」は研修のシフト。研修の種類に表示用の記号が付いていればその記号（v258）
+    const trT = (AppState.shiftTypes || []).find(t => t.isTraining);
+    sections.push({ title: `遅→早(${trT && trT.sym ? trT.sym : '研'})のインターバル不足`, body, severity: 'critical' });
   }
 
   // === 4. 役割タイプ違反 ===

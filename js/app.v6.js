@@ -561,9 +561,9 @@ function forecastCandidates(shifts, vs) {
     const who = staff.filter(s => pri(s) <= 3 && forecastCanAdd(s, k, dept)).sort((a, b) => pri(a) - pri(b));
     if (!who.length) return;
     // 足せる人が1人だけでも、既定でチェックを付ける（まとめて足す案と同じ扱い）
-    if (who.length > 1) out.push({ label: `${who.map(s => s.name + 'さん').join('・')}の担当に「${k}」を足す（まとめて）`,
+    if (who.length > 1) out.push({ label: `${who.map(s => s.name + 'さん').join('・')}の担当に「${shiftSym(k)}」を足す（まとめて）`,
                                     patch: who.map(s => ({ id: s.id, add: [k] })), top: true });
-    who.slice(0, 2).forEach(s => out.push({ label: `${s.name}さんの担当に「${k}」を足す`, patch: [{ id: s.id, add: [k] }],
+    who.slice(0, 2).forEach(s => out.push({ label: `${s.name}さんの担当に「${shiftSym(k)}」を足す`, patch: [{ id: s.id, add: [k] }],
                                             top: who.length === 1 }));
     who.forEach(s => all.push({ id: s.id, add: [k] }));
   });
@@ -604,7 +604,7 @@ function showForecastModal() {
   const hasTable = !!(AppState.generated && AppState.shifts);
   const staffChecks = AppState.staff.map(s => `<label style="margin-right:10px;white-space:nowrap"><input type="checkbox" data-fcwho="${escapeHtml(s.id)}"> ${escapeHtml(s.name)}</label>`).join('');
   const keyChecks = (AppState.shiftTypes || []).filter(t => !t.isTraining && isWork(t.key))
-    .map(t => `<label style="margin-right:10px;white-space:nowrap"><input type="checkbox" data-fckey="${escapeHtml(t.key)}"> ${escapeHtml(t.key)}</label>`).join('');
+    .map(t => `<label style="margin-right:10px;white-space:nowrap"><input type="checkbox" data-fckey="${escapeHtml(t.key)}"> ${escapeHtml(shiftSymOf(t))}</label>`).join('');
   modal.innerHTML = `<div class="modal-content" style="max-width:980px;width:calc(100vw - 32px)">
       <div class="modal-header"><h3 style="margin:0">設定を変えたときの見込み</h3><button class="modal-close" id="fcClose">✕</button></div>
       <div class="modal-body">
@@ -770,7 +770,7 @@ function showForecastModal() {
     x.patch.forEach(c => {
       const s = AppState.staff.find(y => y.id === c.id); if (!s) return;
       s.allowedShifts = s.allowedShifts || [];
-      c.add.forEach(k => { if (!s.allowedShifts.includes(k)) { s.allowedShifts.push(k); names.push(`${s.name}さんに「${k}」`); } });
+      c.add.forEach(k => { if (!s.allowedShifts.includes(k)) { s.allowedShifts.push(k); names.push(`${s.name}さんに「${shiftSym(k)}」`); } });
     });
     saveToStorage();
     if (typeof refreshAllUI === 'function') refreshAllUI();
@@ -1366,7 +1366,7 @@ function showSurplusPopup() {
         const cand = b.surplusCandidates.length
           ? `<br><span style="color:var(--link)">→ 余っている <b>${escapeHtml(b.surplusCandidates.slice(0, 4).join('・'))}</b> に任せられると分散できます</span>`
           : '';
-        return `<li>「<b>${escapeHtml(b.key)}</b>」ができるのは <b>${b.capable.length}人</b>だけ（${escapeHtml(b.capable.slice(0, 5).join('・'))}）${cand}</li>`;
+        return `<li>「<b>${escapeHtml(shiftSym(b.key))}</b>」ができるのは <b>${b.capable.length}人</b>だけ（${escapeHtml(b.capable.slice(0, 5).join('・'))}）${cand}</li>`;
       }).join('');
       bottleneckHtml = `
         <div class="note-info" style="padding:10px 12px;border-radius:6px;margin-top:12px">
@@ -1462,7 +1462,19 @@ function showSurplusPopup() {
   modal.addEventListener('click', e => { if (e.target === modal) close(); });
 }
 
+// 表示用の記号を変えたあと（v258）: いま出ている⑤のレポートを、新しい記号の文で出し直す。
+// 表が変わって隠れているレポート（A6）は出し直さない（出し直すと、古い表のレポートが今の表の鍵で出てしまう）。
+let _lastReportResult = null;
+function rerenderReportIfCurrent() {
+  const rc = document.getElementById('reportCard');
+  if (!rc || !_lastReportResult || rc.style.display === 'none' || rc.dataset.genHid === '1') return;
+  if (typeof genResultKey === 'function' && rc.dataset.genKey && rc.dataset.genKey !== genResultKey()) return;
+  const vs = AppState.violations || [];
+  renderReport(Object.assign({}, _lastReportResult, { violations: vs, success: vs.length === 0, score: vs.length }));
+}
+
 function renderReport(result) {
+  _lastReportResult = result;
   const $c = document.getElementById('reportContent');
   // A6: レポートはいまの表で書いたもの
   const _rc = document.getElementById('reportCard');
@@ -1609,9 +1621,9 @@ function renderFixPlans(root) {
               style="display:flex;gap:8px;align-items:center;padding:3px 6px;border-radius:6px;cursor:pointer">
            <span style="min-width:4.5em">${day}日</span>
            <b style="min-width:6em">${escapeHtml(name)}</b>
-           <span style="opacity:.7">${escapeHtml(from || '—')}</span>
+           <span style="opacity:.7">${escapeHtml(from ? shiftSym(from) : '—')}</span>
            <span>→</span>
-           <b style="color:var(--link)">${escapeHtml(to || '—')}</b>
+           <b style="color:var(--link)">${escapeHtml(to ? shiftSym(to) : '—')}</b>
          </div>`;
       const line = (m) => cell(m.aName, m.aId, m.day, m.aVal, m.bVal)
                         + cell(m.bName, m.bId, m.day, m.bVal, m.aVal);
@@ -1933,6 +1945,7 @@ function exportToExcel() {
   }
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const data = [];
+  const keyAt = {};   // 「行,列」→ そのマスの key（色を key で決める。v258: マスには表示用の記号を書くため）
   const groups = getDepartmentGroups();
   const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
 
@@ -1954,7 +1967,8 @@ function exportToExcel() {
       let work = 0, publicOff = 0, otherOff = 0, surplus = 0, hours = 0;
       for (let d = 1; d <= days; d++) {
         const sh = (AppState.shifts[s.id] || {})[d] || '';
-        row.push(sh);
+        row.push(shiftSym(sh));
+        keyAt[data.length + ',' + d] = sh;
         if (isWork(sh)) { work++; hours += getShiftHours(sh); }
         else if (isPublicOff(sh)) publicOff++;
         else if (sh === '余') surplus++;
@@ -1969,7 +1983,7 @@ function exportToExcel() {
     workKeys.forEach(key => {
       const req = g.reqs[key] || 0;
       if (req === 0) return;
-      const row = [`${key}(${req})`];
+      const row = [`${shiftSym(key)}(${req})`];
       for (let d = 1; d <= days; d++) {
         let count = 0;
         g.staff.forEach(s => {
@@ -2005,8 +2019,9 @@ function exportToExcel() {
     for (let c = 1; c <= days; c++) {
       const cellAddr = XLSX.utils.encode_cell({ r, c });
       const cell = ws[cellAddr];
-      if (cell && colorMap[cell.v]) {
-        cell.s = { fill: { patternType: 'solid', fgColor: { rgb: colorMap[cell.v] } } };
+      const k = keyAt[r + ',' + c];
+      if (cell && k != null && colorMap[k]) {
+        cell.s = { fill: { patternType: 'solid', fgColor: { rgb: colorMap[k] } } };
       }
     }
   }
@@ -2015,7 +2030,7 @@ function exportToExcel() {
   XLSX.utils.book_append_sheet(wb, ws, 'シフト表');
 
   // 集計シート（動的・部門順）
-  const summaryHeader = ['部門', 'スタッフ', ...AppState.shiftTypes.map(t => t.key), '公休', '有給他', '余剰', '出勤日数', '差', '総労働時間'];
+  const summaryHeader = ['部門', 'スタッフ', ...AppState.shiftTypes.map(t => shiftSymOf(t)), '公休', '有給他', '余剰', '出勤日数', '差', '総労働時間'];
   const summary = [summaryHeader];
   groups.forEach(g => {
     g.staff.forEach(s => {
@@ -2064,7 +2079,7 @@ function exportToCSV() {
       let work = 0, publicOff = 0, otherOff = 0, surplus = 0, hours = 0;
       for (let d = 1; d <= days; d++) {
         const sh = (AppState.shifts[s.id] || {})[d] || '';
-        row.push(sh);
+        row.push(shiftSym(sh));   // 表示用の記号（v258）
         if (isWork(sh)) { work++; hours += getShiftHours(sh); }
         else if (isPublicOff(sh)) publicOff++;
         else if (sh === '余') surplus++;

@@ -119,7 +119,7 @@
         const tags = document.createElement('span'); tags.className = 'staff-item-tags';
         tr.querySelectorAll('input[data-allowed]:checked').forEach(cb => {
           const t = document.createElement('span'); t.className = 'staff-tag';
-          t.textContent = cb.dataset.allowed;
+          t.textContent = typeof shiftSym === 'function' ? shiftSym(cb.dataset.allowed) : cb.dataset.allowed;   // 表示用の記号（v258）
           const lab = cb.closest('.allowed-label');
           if (lab && lab.style.background) t.style.background = lab.style.background;
           tags.appendChild(t);

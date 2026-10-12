@@ -227,6 +227,58 @@ function isOff(shift) {
   return !!OFF_TYPES[shift];
 }
 
+// ===== 表示用の記号（v258） =====
+// シフト種別の「中の名前」（key）は変えない。画面・Excel・CSV に出す記号（sym）だけを、利用者が自由に変えられる。
+// 表・希望・🔒・担当シフト・必要人数・ルール・保存は、今までどおり key で持つ。
+// 文を作る所で key を入れる場所だけ shiftSym を通す（できた文をあとから置き換えない。「早番」「遅→早」の
+// 早・遅は時間帯の言葉で、シフトの key と見分けられないため）。計算・検査の判定・選び方は shiftSym を使わない。
+// sym が無い（前の版のデータ・変えていない）ときは key をそのまま返すので、文は前の版と1文字も同じ。
+function shiftSymOf(t) { return t && typeof t.sym === 'string' && t.sym ? t.sym : (t ? t.key : ''); }
+function shiftSym(k) {
+  const t = (AppState.shiftTypes || []).find(x => x.key === k);
+  return t ? shiftSymOf(t) : k;   // シフト種別でないもの（休・有 など）はそのまま
+}
+// 記号の書式の決まり（ほかの種類との重なりは見ない）。だめなら理由、よければ ''
+function shiftSymFormatProblem(sym) {
+  const s = typeof sym === 'string' ? sym : '';
+  if (!s.trim()) return '記号を空にはできません';
+  if (s !== s.trim()) return '記号の前後に空白は入れられません';
+  if (Array.from(s).length > 4) return '記号は4文字までです';
+  if (/^[=+\-@]/.test(s)) return '記号を「=」「+」「-」「@」で始めることはできません（Excel・CSV で式として読まれるため）';
+  if (OFF_TYPES[s] || s === '―') return `「${s}」は休みなどの記号と同じなので使えません`;
+  return '';
+}
+// 記号に使えるか（key の種類に付けるとき）。比べる相手は、ほかの種類がいま画面に出している字（sym か key）
+function shiftSymProblem(sym, key, types) {
+  const p = shiftSymFormatProblem(sym);
+  if (p) return p;
+  const other = (types || []).find(t => t && t.key !== key && shiftSymOf(t) === sym);
+  return other ? `「${sym}」は、ほかのシフト（名称：${other.label || ''}）がいま使っている記号と同じです` : '';
+}
+// 取り込み・読込のとき: だめな sym を捨てて key で出す。捨てた結果、ほかの種類と同じ字になったら、
+// それも捨てる（どの種類も別々の字になるまで。同じ字が2つなら、あとの種類の sym を捨てる）。
+function sanitizeShiftSyms(types) {
+  if (!Array.isArray(types)) return types;
+  types.forEach(t => {
+    if (!t || typeof t !== 'object' || !('sym' in t)) return;
+    if (typeof t.sym !== 'string' || !t.sym || t.sym === t.key || shiftSymFormatProblem(t.sym)) delete t.sym;
+  });
+  for (let guard = 0; guard <= types.length; guard++) {
+    const disp = types.map(shiftSymOf);
+    let bad = -1;
+    for (let i = 0; i < types.length && bad < 0; i++) {
+      if (!types[i] || !('sym' in types[i])) continue;
+      for (let j = 0; j < types.length; j++) {
+        if (j === i || disp[j] !== disp[i]) continue;
+        if (!types[j] || !('sym' in types[j]) || j < i) { bad = i; break; }   // 相手が key で出している・前の種類 → 自分を捨てる
+      }
+    }
+    if (bad < 0) break;
+    delete types[bad].sym;
+  }
+  return types;
+}
+
 // 公休数（maxOff目標）にカウントされる休みか（有給・季節休暇などは対象外）
 function isPublicOff(shift) {
   const t = OFF_TYPES[shift];
@@ -602,6 +654,7 @@ function normalizeAppData(data, base) {
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
     out.shiftTypes = (Array.isArray(data.shiftTypes) ? data.shiftTypes : getDefaultShiftTypes()).map(t =>
       Object.assign({ workHours: 8, isNight: false }, t));
+    sanitizeShiftSyms(out.shiftTypes);   // 表示用の記号（v258）: だめなものは捨てて key で出す
 
     // roleRequirements
     out.roleRequirements = Object.assign(b.roleRequirements, data.roleRequirements || {});

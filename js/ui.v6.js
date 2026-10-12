@@ -136,6 +136,9 @@ function refreshAllUI() {
   const rp = document.getElementById('ruleLevelsPanel');
   if (rp && rp.style.display !== 'none') renderRuleLevels();
 
+  // 画面の固定の文に入っているシフトの名前（data-sym-key）を、表示用の記号にする（v258）
+  document.querySelectorAll('[data-sym-key]').forEach(el => { el.textContent = shiftSym(el.dataset.symKey); });
+
   renderRoleTable();
   renderStaffTable();
   renderShiftChips();
@@ -633,11 +636,44 @@ function renderRuleLevels() {
 }
 
 // ===== ② シフト種別マスター =====
+// ── 表示用の記号（v258） ──
+// 新しいシフト種別の中の名前（key）。足したときに1回だけ決め、あとは変えない。
+// 「SH1」「SH2」…のうち、どこにも残っていない最初の番号にする（消した種類の key が、表・希望・🔒・担当・必要人数・
+// ルール・前月末・生成直後の控え・変えたマスの記録・元に戻すの履歴などに残っていると、新しい種類がそれを受け継ぐため）。
+// AppState のすべて（保存するもの全部）と、元に戻す・やり直すの履歴・エラー解消プランの「戻す」の控えを文字にして探す。
+function newShiftKey() {
+  const hay = JSON.stringify({ a: AppState, u: _undoStack, r: _redoStack, x: (typeof _relaxUndo !== 'undefined' ? _relaxUndo : null) });
+  const used = new Set((AppState.shiftTypes || []).flatMap(t => [t.key, shiftSymOf(t)]));
+  for (let n = 1; ; n++) {
+    const k = 'SH' + n;
+    if (!used.has(k) && !OFF_TYPES[k] && hay.indexOf(JSON.stringify(k)) < 0) return k;
+  }
+}
+// 新しいシフト種別の最初の記号（「新1」「新2」…のうち、ほかの種類がいま出している字と重ならないもの）
+function newShiftSym() {
+  for (let n = 1; ; n++) { const s = '新' + n; if (!shiftSymProblem(s, null, AppState.shiftTypes)) return s; }
+}
+// 記号を変えたあと: 計算・表・🔒・元に戻すの履歴・生成直後の控え・変えたマスの記録には触らず、
+// エラーの文を新しい記号で数え直して、画面を描き直す（⑤の結果も新しい記号で出し直す）。
+// 「古い表」の判定（genInputFp）と⑤の結果の鍵（genResultKey）にはシフト種別を入れていないので、古い表とは出ない。
+function afterShiftSymChange() {
+  if (AppState.generated && typeof checkViolations === 'function') {
+    try { AppState.violations = checkViolations(AppState.shifts); } catch (e) { console.warn('recheck', e); }
+  }
+  autoSave();
+  refreshAllUI();
+  const dp = document.getElementById('dailyReqPanel');
+  if (dp && dp.style.display !== 'none') renderDailyReqPanel();
+  if (typeof rerenderReportIfCurrent === 'function') rerenderReportIfCurrent();
+  try { window.dispatchEvent(new Event('shiftsymchange')); } catch (_) {}   // 開いている「余の解消」などが描き直す
+}
+
 function setupRolePanel() {
   document.getElementById('btnAddShiftType').addEventListener('click', () => {
-    const newKey = 'SH' + (AppState.shiftTypes.length + 1);
+    const newKey = newShiftKey();
     AppState.shiftTypes.push({
       key:          newKey,
+      sym:          newShiftSym(),
       label:        '新シフト',
       color:        '#e2e8f0',
       category:     'A',
@@ -670,9 +706,10 @@ function renderRoleTable() {
     // 「詳細」の開け閉めは js/ui-shell.v6.js。
     tr.innerHTML = `
       <td class="rc-key">
-        <input type="text" value="${escapeHtml(type.key)}"
-               data-idx="${idx}" data-field="key"
-               class="role-key-input" style="width:72px;font-weight:700" aria-label="記号"/>
+        <input type="text" value="${escapeHtml(shiftSymOf(type))}" maxlength="4"
+               data-idx="${idx}" data-field="sym"
+               class="role-key-input" style="width:72px;font-weight:700" aria-label="記号"
+               title="画面と Excel・CSV に出す記号です（4文字まで）。中の名前は変わらないので、決まりやデータは壊れません"/>
       </td>
       <td class="rc-label">
         <input type="text" value="${escapeHtml(type.label)}"
@@ -721,9 +758,10 @@ function renderRoleTable() {
           <input type="color" value="${safeColor(type.color, '#e2e8f0')}" data-idx="${idx}" data-field="color"
                  style="width:46px;height:28px;border:none;cursor:pointer;border-radius:4px;vertical-align:middle" aria-label="Excel出力の色"/>
           <span class="shift-preview" style="background-color:${safeColor(type.color, '#e2e8f0')}">
-            ${escapeHtml(type.key)}
+            ${escapeHtml(shiftSymOf(type))}
           </span>
         </span>
+        <span class="rm-item rm-key hint" title="計算・保存で使う名前です。記号を変えても、この名前は変わりません">中の名前：${escapeHtml(type.key)}（変わりません）</span>
         <span class="grow"></span>
         <button class="btn btn-ghost rm-del" data-del-idx="${idx}" title="削除">${uiIcon('trash')}削除</button>
       </td>
@@ -739,39 +777,17 @@ function renderRoleTable() {
       const type  = AppState.shiftTypes[idx];
       if (!type) return;
 
-      if (field === 'key') {
-        const oldKey = type.key;
-        const newKey = e.target.value.trim();
-        if (newKey && newKey !== oldKey) {
-          // 特別ルールが紐づくキー（責任者・総務）の改名はルールを無効化するため警告
-          const SPECIAL_RULE_KEYS = ['早責', '遅責', '早総務', '遅総務'];
-          if (SPECIAL_RULE_KEYS.includes(oldKey)) {
-            const ok = confirm(
-              `「${oldKey}」には責任者ヒエラルキー・重複禁止などの特別ルールが紐づいています。\n` +
-              `キー名を変更するとこれらのルールが無効になります。本当に変更しますか？`);
-            if (!ok) { e.target.value = oldKey; return; }
-          }
-          if (AppState.roleRequirements[oldKey] !== undefined) {
-            AppState.roleRequirements[newKey] = AppState.roleRequirements[oldKey];
-            delete AppState.roleRequirements[oldKey];
-          }
-          if (AppState.roleRequirementsCast && AppState.roleRequirementsCast[oldKey] !== undefined) {
-            AppState.roleRequirementsCast[newKey] = AppState.roleRequirementsCast[oldKey];
-            delete AppState.roleRequirementsCast[oldKey];
-          }
-          if (AppState.dailyRequirements && AppState.dailyRequirements[oldKey] !== undefined) {
-            AppState.dailyRequirements[newKey] = AppState.dailyRequirements[oldKey];
-            delete AppState.dailyRequirements[oldKey];
-          }
-          if (AppState.dailyRequirementsCast && AppState.dailyRequirementsCast[oldKey] !== undefined) {
-            AppState.dailyRequirementsCast[newKey] = AppState.dailyRequirementsCast[oldKey];
-            delete AppState.dailyRequirementsCast[oldKey];
-          }
-          type.key = newKey;
-          // プレビューセルのテキスト更新
-          const prev = e.target.closest('tr').querySelector('.shift-preview');
-          if (prev) prev.textContent = newKey;
-        }
+      if (field === 'sym') {
+        // 表示用の記号（v258）。中の名前（key）は変えない。だめなら理由を出して元に戻す
+        const sym = String(e.target.value || '').trim();
+        const prob = shiftSymProblem(sym, type.key, AppState.shiftTypes);
+        if (prob) { toast(prob, 'error', 6000); e.target.value = shiftSymOf(type); return; }
+        if (sym === shiftSymOf(type)) { e.target.value = sym; return; }
+        if (sym === type.key) delete type.sym; else type.sym = sym;
+        e.target.value = sym;
+        afterShiftSymChange();
+        toast(`記号を「${sym}」にしました（中の名前は変わりません）`, 'success', 3000);
+        return;
       } else if (field === 'countForStaff' || field === 'isTraining' || field === 'isNight') {
         type[field] = e.target.checked;
       } else if (field === 'color') {
@@ -840,7 +856,7 @@ function renderRoleTable() {
       const idx  = parseInt(b.dataset.delIdx);
       const type = AppState.shiftTypes[idx];
       if (!type) return;
-      if (confirm(`シフト「${type.key}」を削除しますか？`)) {
+      if (confirm(`シフト「${shiftSymOf(type)}」を削除しますか？`)) {
         delete AppState.roleRequirements[type.key];
         if (AppState.roleRequirementsCast) delete AppState.roleRequirementsCast[type.key];
         if (AppState.dailyRequirements) delete AppState.dailyRequirements[type.key];
@@ -848,7 +864,7 @@ function renderRoleTable() {
         AppState.shiftTypes.splice(idx, 1);
         renderRoleTable();
         autoSave();
-        toast(`「${type.key}」を削除しました`, 'info');
+        toast(`「${shiftSymOf(type)}」を削除しました`, 'info');
       }
     });
   });
@@ -908,7 +924,7 @@ function renderDailyReqPanel() {
     countableTypes.forEach(type => {
       const defaultVal = baseReqs[type.key] || 0;
       if (!defaultVal && dept === 'cast') return;
-      html += `<tr><td style="padding:4px 6px;border:1px solid var(--border);white-space:nowrap;position:sticky;left:0;background:var(--surface);z-index:1">${escapeHtml(type.key)}（${deptLabel}・通常: ${defaultVal}）</td>`;
+      html += `<tr><td style="padding:4px 6px;border:1px solid var(--border);white-space:nowrap;position:sticky;left:0;background:var(--surface);z-index:1">${escapeHtml(shiftSymOf(type))}（${deptLabel}・通常: ${defaultVal}）</td>`;
       for (let d = 1; d <= days; d++) {
         const w = getWeekday(AppState.settings.targetMonth, d);
         const override = (dailyMap[type.key] || {})[d];
@@ -1247,7 +1263,7 @@ function renderStaffTable() {
                      data-id="${s.id}" data-key="${escapeHtml(t.key)}">
         <input type="checkbox" data-allowed="${escapeHtml(t.key)}" data-id="${s.id}"
                ${checked ? 'checked' : ''} style="margin:0 2px 0 0"/>
-        ${escapeHtml(t.key)}
+        ${escapeHtml(shiftSymOf(t))}
       </label>`;
     }).join('');
 
@@ -1501,7 +1517,7 @@ function renderShiftChips() {
     const btn = document.createElement('button');
     btn.className = 'chip-btn';
     btn.dataset.mark = t.key;
-    btn.textContent  = t.key;
+    btn.textContent  = shiftSymOf(t);   // 表示用の記号（data-mark は key のまま）
     btn.style.background = shiftToneVar(t.key);
     // 現在選択中なら outline でアクティブを表現（inline bg が CSS .active を上書きするため）
     if (t.key === selectedMark) {
@@ -1576,7 +1592,7 @@ function renderCalendar() {
         const cur   = (AppState.requests[s.id] || {})[d] || '';
         const shCls = getShiftClass(cur) + (isWork(cur) ? ' ' + shiftToneClass(cur) + ' c-lock' : '');
         html += `<td class="${cls}" data-sid="${s.id}" data-day="${d}">
-          <span class="shift-cell ${shCls}">${escapeHtml(cur)}</span>
+          <span class="shift-cell ${shCls}">${escapeHtml(shiftSym(cur))}</span>
         </td>`;
       }
       tr.innerHTML = html;
@@ -1600,7 +1616,7 @@ function renderCalendar() {
         AppState.requests[sid][d] = selectedMark;
       }
       const span = td.querySelector('.shift-cell');
-      span.textContent   = selectedMark;
+      span.textContent   = shiftSym(selectedMark);   // 表示用の記号（v258。requests は key のまま）
       span.className     = 'shift-cell ' + getShiftClass(selectedMark) + (isWork(selectedMark) ? ' ' + shiftToneClass(selectedMark) + ' c-lock' : '');
       span.style.cssText = '';
       autoSave();
@@ -1696,7 +1712,7 @@ function requestFixOptions(reason, lb0) {
     if (_tryRequestChange(ch, lb0, reason)) out.push(ch);
   }
   return out.map(ch => ({ changes: ch,
-    text: ch.map(c => `${name(c.id)}さん ${c.day}日「${c.from}」→ ${c.to ? '「' + c.to + '」' : '希望なし'}`).join('、') }));
+    text: ch.map(c => `${name(c.id)}さん ${c.day}日「${shiftSym(c.from)}」→ ${c.to ? '「' + shiftSym(c.to) + '」' : '希望なし'}`).join('、') }));
 }
 /** 希望だけで必ず🚨になるものの一覧（理由だけ。直し方の案はあとから1件ずつ足す） */
 function requestCertainMusts() {
@@ -1764,7 +1780,7 @@ function renderShiftLegend() {
   let html = AppState.shiftTypes.map(t =>
     `<div class="legend-item">
       <span class="legend-color" style="background-color:${shiftToneVar(t.key)}"></span>
-      <span>${escapeHtml(t.key)}: ${escapeHtml(t.label)}</span>
+      <span>${escapeHtml(shiftSymOf(t))}: ${escapeHtml(t.label)}</span>
     </div>`
   ).join('');
   html += `<div class="legend-item">
@@ -1875,7 +1891,7 @@ function _renderResultTableInner() {
         else if (shift === '余') surplusCount++;
         else if (isOff(shift)) otherOffCount++;
         cells += `<td class="${wcls}${fixCls}" data-sid="${s.id}" data-day="${d}">
-          <span class="shift-cell ${cls}${vio}" draggable="true" ${titleAttr}>${escapeHtml(shift)}</span>
+          <span class="shift-cell ${cls}${vio}" draggable="true" ${titleAttr}>${escapeHtml(shiftSym(shift))}</span>
         </td>`;
       }
       // 差 = 公休 - 目標公休（+は余剰、-は不足）
@@ -1899,7 +1915,7 @@ function _renderResultTableInner() {
       if (defaultReq === 0) return;
       const tr = document.createElement('tr');
       tr.className = 'summary-row';
-      let cells = `<td>${escapeHtml(key)} (必要${defaultReq})</td>`;
+      let cells = `<td>${escapeHtml(shiftSym(key))} (必要${defaultReq})</td>`;
       for (let d = 1; d <= days; d++) {
         let count = 0;
         g.staff.forEach(s => {
@@ -1942,7 +1958,7 @@ function _renderResultTableInner() {
       if (typeof saveToStorage === 'function') saveToStorage();
       AppState.violations = checkViolations(AppState.shifts);
       renderResultTable(); // 色（過不足）を更新
-      toast(`${key} ${day}日 の必要人数を ${isNaN(num) ? def : num} に設定`, 'info', 1500);
+      toast(`${shiftSym(key)} ${day}日 の必要人数を ${isNaN(num) ? def : num} に設定`, 'info', 1500);
     });
   });
 
@@ -1961,7 +1977,7 @@ function renderSummary() {
   groups.forEach(g => {
     if (groups.length > 1) html += `<h4 style="margin:8px 0 4px">${g.label}</h4>`;
     html += '<table style="width:auto"><thead><tr><th>スタッフ</th>';
-    AppState.shiftTypes.forEach(t => html += `<th>${escapeHtml(t.key)}</th>`);
+    AppState.shiftTypes.forEach(t => html += `<th>${escapeHtml(shiftSymOf(t))}</th>`);
     html += '<th>公休</th><th>有給他</th><th>出勤日数</th><th>差</th><th>総労働時間</th></tr></thead><tbody>';
 
     g.staff.forEach(s => {
@@ -2063,7 +2079,7 @@ function renderModalOptions() {
     const btn = document.createElement('button');
     btn.className = 'shift-option';
     btn.dataset.shift = t.key;
-    btn.textContent   = t.key;
+    btn.textContent   = shiftSymOf(t);   // 表示用の記号（data-shift は key のまま）
     btn.title         = t.label;
     btn.style.cssText = `background:${shiftToneVar(t.key)};border-color:${shiftToneVar(t.key)};color:var(--text)${String(t.key).indexOf('責') >= 0 ? ';text-decoration:underline 2px' : ''}`;
     container.appendChild(btn);
@@ -2143,7 +2159,7 @@ function setupManualEdit() {
     modal.classList.remove('show');
     editingCell = null;
     const fixedMark = newShift ? '（固定）' : '';
-    refreshAfterManualEdit(`${staffName} ${d}日 →「${newShift || '空'}」に変更${fixedMark}`, beforeEdit);
+    refreshAfterManualEdit(`${staffName} ${d}日 →「${newShift ? shiftSym(newShift) : '空'}」に変更${fixedMark}`, beforeEdit);
   });
 
   // キャンセル
@@ -2659,7 +2675,7 @@ function candMustText(st) {
 }
 function candCellsText(cells, max) {
   const n = max || 12;
-  const t = cells.slice(0, n).map(c => `${escapeHtml(c.name)} ${c.day}日 ${escapeHtml(c.from || '空')}→${escapeHtml(c.to || '空')}`).join('、');
+  const t = cells.slice(0, n).map(c => `${escapeHtml(c.name)} ${c.day}日 ${escapeHtml(c.from ? shiftSym(c.from) : '空')}→${escapeHtml(c.to ? shiftSym(c.to) : '空')}`).join('、');
   return t + (cells.length > n ? ` ほか${cells.length - n}件` : '');
 }
 /** 案の1行（表の行）。btnHtml: 反映などのボタン */
@@ -2776,7 +2792,7 @@ function showEditList() {
       <div class="modal-header"><h3 style="margin:0">生成から変えたマス（${diff.length}件）</h3><button class="modal-close" id="elClose">✕</button></div>
       <div class="modal-body" style="max-height:60vh;overflow:auto">
         <table class="calendar-table" style="width:100%"><thead><tr><th>日</th><th>人</th><th>生成したとき</th><th>今</th><th>何で変えたか</th></tr></thead>
-        <tbody>${diff.map(x => `<tr><td>${x.day}日</td><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.from || '（空）')}</td><td>${escapeHtml(x.to || '（空）')}</td><td>${escapeHtml(x.src)}</td></tr>`).join('')}</tbody></table>
+        <tbody>${diff.map(x => `<tr><td>${x.day}日</td><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.from ? shiftSym(x.from) : '（空）')}</td><td>${escapeHtml(x.to ? shiftSym(x.to) : '（空）')}</td><td>${escapeHtml(x.src)}</td></tr>`).join('')}</tbody></table>
       </div></div>`;
   document.body.appendChild(modal);
   const close = () => modal.remove();
@@ -2892,7 +2908,7 @@ function applyRelaxPlan(plan) {
       Object.keys(daily).forEach(k => {
         const base = req[k] || 0;
         Object.keys(daily[k]).forEach(d => {
-          if (daily[k][d] > base) { changes.push(`${k} ${d}日: ${daily[k][d]}人 → ${base}人`); delete daily[k][d]; }
+          if (daily[k][d] > base) { changes.push(`${shiftSym(k)} ${d}日: ${daily[k][d]}人 → ${base}人`); delete daily[k][d]; }
         });
       });
     });
@@ -2918,7 +2934,7 @@ function applyRelaxPlan(plan) {
     const st = _reqStoreFor(p.dept);
     const before = st.req[p.key] || 0;
     st.req[p.key] = Math.max(0, before - 1);
-    changes.push(`${p.key}: ${before}人 → ${st.req[p.key]}人`);
+    changes.push(`${shiftSym(p.key)}: ${before}人 → ${st.req[p.key]}人`);
   } else if (plan.id === 'rule-soften') {
     if (!AppState.settings.ruleLevels) AppState.settings.ruleLevels = {};
     const before = getRuleLevel(p.type);
@@ -3337,6 +3353,13 @@ function showSurplusResolveModal() {
     const blocked = recoBlocked();
     modal.querySelectorAll('[data-reco]').forEach(b => { b.disabled = blocked; });
   }, 500);
+  // 表示用の記号を変えたら（v258）、パネルの文を新しい記号で描き直す（おすすめの中身は変えない）。
+  // 確認待ち・計算中は②の入力が止まるので、ここに来るのはそれ以外のとき
+  const onSymChange = () => {
+    if (!modal.isConnected) { window.removeEventListener('shiftsymchange', onSymChange); return; }
+    render(); if (pairRows) renderPairRows();
+  };
+  window.addEventListener('shiftsymchange', onSymChange);
   // パネルを閉じる（✕・開き直し）。答えていない確認は「やめる」にする。確認があれば true
   modal._closePanel = () => {
     panelClosed = true;
@@ -3440,7 +3463,7 @@ function showSurplusResolveModal() {
     let out = '';
     for (let d = 1; d <= days; d++) {
       const cur = cellOf(id, d);
-      const tag = cur === '余' ? '・余' : cur === '公' ? '・公休' : cur === '有' ? '・有給' : cur ? '・' + cur : '';
+      const tag = cur === '余' ? '・余' : cur === '公' ? '・公休' : cur === '有' ? '・有給' : cur ? '・' + escapeHtml(shiftSym(cur)) : '';
       out += `<option value="${d}" ${String(selDay) === String(d) ? 'selected' : ''}>${dayLabel(d)}${tag}｜出勤${workersOn(d)}人</option>`;
     }
     return out;
@@ -3552,8 +3575,8 @@ function showSurplusResolveModal() {
     const line = (x, i) => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0${i ? ';border-top:1px solid var(--border)' : ''}">
         <span style="flex:1;min-width:230px">${i === 0 ? '<span class="tag-reco">おすすめ</span> ' : ''}<b>${escapeHtml(x.name)}さん ${x.day}日</b> を
           ${x.kind === 'paid' ? '<b>有給</b>にする'
-            : x.kind === 'train' ? `<b>${escapeHtml(x.key)}</b> で ${escapeHtml(x.tutor)}さんのそばに入れる（人数は増えません）`
-            : `<b>${escapeHtml(x.key)}</b> で出勤にする（その日の必要人数+1）`}
+            : x.kind === 'train' ? `<b>${escapeHtml(shiftSym(x.key))}</b> で ${escapeHtml(x.tutor)}さんのそばに入れる（人数は増えません）`
+            : `<b>${escapeHtml(shiftSym(x.key))}</b> で出勤にする（その日の必要人数+1）`}
           　→ ${tag(x)}<span class="hint">（${x.before}件 → ${x.after}件）</span></span>
         <button class="btn ${i === 0 ? 'btn-primary' : ''}" data-reco="${i}"
           data-rid="${escapeHtml(x.id)}" data-rday="${x.day}" data-rkind="${x.kind}" data-rkey="${escapeHtml(x.key || '')}"
@@ -3599,7 +3622,7 @@ function showSurplusResolveModal() {
         何も足さずに組み直すと <b>${b.n}件・余${b.sur}コマ</b> です。</p>
       ${rows.map((x, i) => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0${i ? ';border-top:1px solid var(--border)' : ''}">
         <span style="flex:1;min-width:230px">${i === 0 ? '<span class="tag-reco">おすすめ</span> ' : ''}<b>${escapeHtml(x.name)}さん ${x.day}日</b> を
-          <b>${escapeHtml(x.key)}</b> で ${escapeHtml(x.tutor)}さんのそばに
+          <b>${escapeHtml(shiftSym(x.key))}</b> で ${escapeHtml(x.tutor)}さんのそばに
           <span class="hint">（${x.kind === 'work' ? 'その日の必要人数+1' : '人数は増やさない'}）</span>　→ ${tag(x)}
           <span class="hint">・余 ${x.sur}コマ</span></span>
         ${(x.compUp || (x.sc && b.sc && x.sc.comp > b.sc.comp))
@@ -3713,7 +3736,7 @@ function showSurplusResolveModal() {
           <select id="workStaff" style="min-width:150px">${staffOptions(selWork.id)}</select>
           <select id="workDay" style="min-width:130px">${dayOptions(selWork.id, selWork.day)}</select>
           ${cands.length
-            ? `<select id="workKey" style="min-width:100px">${cands.map(k => `<option value="${escapeHtml(k)}" ${selWork.key === k ? 'selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>
+            ? `<select id="workKey" style="min-width:100px">${cands.map(k => `<option value="${escapeHtml(k)}" ${selWork.key === k ? 'selected' : ''}>${escapeHtml(shiftSym(k))}</option>`).join('')}</select>
                <button id="workGo" class="btn btn-primary">出勤にする（定数+1）</button>`
             : '<span class="hint">この人が入れるシフトがありません（責任者・総務は1日1人のため増やせません）</span>'}
         </div>
@@ -3936,8 +3959,8 @@ function showSurplusResolveModal() {
           const tag = previewLine(r);
           const note = isTrainKey(r.lk) ? '<span class="hint">（研修なので人員にはカウントされず、定数も増えません）</span>' : '';
           const how = r.mode === 'already'
-            ? `指導役 <b>${escapeHtml(r.tutorName)}</b> が<b>${escapeHtml(r.tk)}</b>で出勤済 ／ ${escapeHtml(L.name)}を<b>${escapeHtml(r.lk)}</b>で追加${note}`
-            : `指導役 <b>${escapeHtml(r.tutorName)}</b> を<b>${escapeHtml(r.tk)}</b>・${escapeHtml(L.name)}を<b>${escapeHtml(r.lk)}</b>で2人とも追加${note}`;
+            ? `指導役 <b>${escapeHtml(r.tutorName)}</b> が<b>${escapeHtml(shiftSym(r.tk))}</b>で出勤済 ／ ${escapeHtml(L.name)}を<b>${escapeHtml(shiftSym(r.lk))}</b>で追加${note}`
+            : `指導役 <b>${escapeHtml(r.tutorName)}</b> を<b>${escapeHtml(shiftSym(r.tk))}</b>・${escapeHtml(L.name)}を<b>${escapeHtml(shiftSym(r.lk))}</b>で2人とも追加${note}`;
           return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px dashed var(--border)">
             <b style="min-width:78px">${dayLabel(r.d)}</b>
             <span style="flex:1;min-width:260px">${tag}
@@ -3991,7 +4014,7 @@ function showSurplusResolveModal() {
       }
     }, { adjust: true, k: 32, confirm: askWorsen, chooseAdjust: askAdjust, onAdjustTick: adjustTick });
     busy(false);
-    say(r.ok ? `${uiIcon(r.hadCritical ? 'must' : r.worsened ? 'soft' : 'ok')} ${d}日 ${escapeHtml(T.name)}（${escapeHtml(row.tk)}）のそばに ${escapeHtml(L.name)}（${escapeHtml(row.lk)}）を入れました（${r.message}）。${diffText(r)}`
+    say(r.ok ? `${uiIcon(r.hadCritical ? 'must' : r.worsened ? 'soft' : 'ok')} ${d}日 ${escapeHtml(T.name)}（${escapeHtml(shiftSym(row.tk))}）のそばに ${escapeHtml(L.name)}（${escapeHtml(shiftSym(row.lk))}）を入れました（${r.message}）。${diffText(r)}`
              : `${uiIcon('undo')} ${d}日の指定を取り消しました。${r.message}`, r.ok && !r.worsened);
     pairRows = null; recoDirty = true;
     renderResultTable(); render();
@@ -4197,7 +4220,7 @@ function showSurplusResolveModal() {
       AppState.shifts[x.id][x.day] = x.key;
     }, { adjust: false, confirm: askWorsen });
     busy(false);
-    say(r.ok ? `${uiIcon(r.worsened ? 'soft' : 'ok')} ${escapeHtml(st.name)} ${x.day}日 を「${escapeHtml(x.key)}」で ${escapeHtml(x.tutor)}さんのそばに入れました（${r.message}）。${diffText(r)}`
+    say(r.ok ? `${uiIcon(r.worsened ? 'soft' : 'ok')} ${escapeHtml(st.name)} ${x.day}日 を「${escapeHtml(shiftSym(x.key))}」で ${escapeHtml(x.tutor)}さんのそばに入れました（${r.message}）。${diffText(r)}`
              : `${uiIcon('undo')} ${escapeHtml(st.name)} ${x.day}日 の指定を取り消しました。${r.message}`, r.ok && !r.worsened);
     recoDirty = true; renderResultTable(); render();
   };
@@ -4214,7 +4237,7 @@ function showSurplusResolveModal() {
       if (!calcBegin('余の使い道の作り直し')) return;
       const histBase = captureChangeBase();   // 作り直しで変えた所を、元に戻すの履歴に積むため
       busy(true);
-      say(`${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(x.key)} に固定して作り直しています…`, true, true);
+      say(`${escapeHtml(x.name)}さん ${x.day}日 を ${escapeHtml(shiftSym(x.key))} に固定して作り直しています…`, true, true);
       const bV0 = checkViolations(AppState.shifts);
       const bSc = scoreViolations(bV0);
       AppState.fixedShifts[x.id] = AppState.fixedShifts[x.id] || {};
@@ -4378,8 +4401,8 @@ function showSurplusResolveModal() {
         AppState.shifts[id][d] = key;
       }, { adjust: true, k: 24, confirm: askWorsen, chooseAdjust: askAdjust, onAdjustTick: adjustTick });
       busy(false);
-      say(r.ok ? `${uiIcon(r.hadCritical ? 'must' : r.worsened ? 'soft' : 'ok')} ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(key)}」で出勤にしました（${r.message}）。その日の「${escapeHtml(key)}」の必要人数を1人増やしています。${diffText(r)}`
-               : `${uiIcon('undo')} ${escapeHtml(s.name)} ${d}日 の「${escapeHtml(key)}」を取り消しました。${r.message}`, r.ok && !r.worsened);
+      say(r.ok ? `${uiIcon(r.hadCritical ? 'must' : r.worsened ? 'soft' : 'ok')} ${escapeHtml(s.name)} ${d}日 を「${escapeHtml(shiftSym(key))}」で出勤にしました（${r.message}）。その日の「${escapeHtml(shiftSym(key))}」の必要人数を1人増やしています。${diffText(r)}`
+               : `${uiIcon('undo')} ${escapeHtml(s.name)} ${d}日 の「${escapeHtml(shiftSym(key))}」を取り消しました。${r.message}`, r.ok && !r.worsened);
       recoDirty = true; renderResultTable(); render();
     });
   };
@@ -4764,7 +4787,7 @@ function renderReqRules(hostId) {
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;margin-top:8px">
         <span><b>その日の</b></span>
         <select data-rr="key" data-i="${i}">
-          ${keys.map(k => `<option value="${escapeHtml(k)}" ${r.key === k ? 'selected' : ''}>${escapeHtml(k)}</option>`).join('')}
+          ${keys.map(k => `<option value="${escapeHtml(k)}" ${r.key === k ? 'selected' : ''}>${escapeHtml(shiftSym(k))}</option>`).join('')}
         </select>
         <span>を</span>
         <input type="number" data-rr="to" data-i="${i}" value="${r.to != null ? r.to : 1}" min="0" max="20" style="width:70px"/>
@@ -4923,7 +4946,7 @@ function _trainingCandidates(learnerId, band, tutorIds) {
         keys = normKeys.filter(x => sameCat(x, cur));
         if (!keys.length) keys = normKeys.slice();
         k = keys[0] || '';
-        if (!k) blocked = `いまは「${cur}」（1日1人の役）です。同じ時間帯のふつうのシフトを担当していないので、この日には足せません`;
+        if (!k) blocked = `いまは「${shiftSym(cur)}」（1日1人の役）です。同じ時間帯のふつうのシフトを担当していないので、この日には足せません`;
       }
     } else {
       keys = normKeys.slice();
@@ -4956,7 +4979,7 @@ function _trainingCandidates(learnerId, band, tutorIds) {
     const okKeys = keys.filter(kk => neighborWarn(kk).length === 0);
     const need = k ? getDayReq(g.reqs, g.dailyReqs || {}, k, d) : 0;
     if (kind === 'work' && k && k !== cur)
-      roleNote = `いまは「${cur}」（1日1人の役）なので、「${k}」にして「${k}」を${need}→${need + 1}人にします。「${cur}」には生成し直すと別の人が入ります`;
+      roleNote = `いまは「${shiftSym(cur)}」（1日1人の役）なので、「${shiftSym(k)}」にして「${shiftSym(k)}」を${need}→${need + 1}人にします。「${shiftSym(cur)}」には生成し直すと別の人が入ります`;
     out.push({
       d, k, keys, okKeys, from: need, to: need + 1, cast, kind, cur, roleNote, blocked,
       learnerId: L.id, learnerName: L.name, band: k ? bandOf(k) : bandOf(cur),
@@ -5054,8 +5077,11 @@ function _spDeltaTag(r) {
 function _spDropOwnSlot(r, list) {
   if (r.kind !== 'work') return list;
   const esc = (k) => String(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pats = [r.k, r.cur].filter(Boolean).map(k => new RegExp(`日 (キャスト )?${esc(k)} が`));
-  return list.filter(v => !(v.type === 'understaff' && v.day === r.d && pats.some(p => p.test(v.message || ''))));
+  const own = [r.k, r.cur].filter(Boolean);
+  const pats = own.map(k => new RegExp(`日 (キャスト )?${esc(k)} が`));
+  // v258: 文には表示用の記号が入るので、違反の role（key）で見分ける。role が無い（前の版の）違反だけ文で見る
+  return list.filter(v => !(v.type === 'understaff' && v.day === r.d &&
+    (v.role != null ? own.indexOf(v.role) >= 0 : pats.some(p => p.test(v.message || '')))));
 }
 function _measureSurplusPick(r) {
   if (typeof checkViolations !== 'function' || !AppState.shifts) return null;
@@ -5198,7 +5224,7 @@ function showSurplusPlanModal() {
   const rowHtml = (r, i) => {
     const tu = r.tutorsHere || [];
     const pinT = sel.pinTutor ? _pinTutorOf(r) : null;
-    const curTxt = r.kind === 'work' ? `いま「${escapeHtml(r.cur)}」` : r.kind === 'yo' ? 'いま「余」' : `いま「${escapeHtml(r.cur || '空き')}」`;
+    const curTxt = r.kind === 'work' ? `いま「${escapeHtml(shiftSym(r.cur))}」` : r.kind === 'yo' ? 'いま「余」' : `いま「${escapeHtml(r.cur ? shiftSym(r.cur) : '空き')}」`;
     return `
       <div style="border-bottom:1px solid var(--border);padding:8px 10px;${r.checked && !r.blocked ? 'background:color-mix(in srgb, var(--accent) 8%, transparent)' : ''}" data-sprow="${i}">
         <label style="display:flex;gap:10px;align-items:flex-start;cursor:${r.blocked ? 'not-allowed' : 'pointer'}">
@@ -5208,17 +5234,17 @@ function showSurplusPlanModal() {
             <span class="hint" style="margin-left:6px">${curTxt}</span>
             ${r.blocked ? '' : kindTag(r)}
             ${r.blocked ? '' : `<div style="margin-top:2px">${r.keys && r.keys.length > 1
-                ? `<select data-spk="${i}">${r.keys.map(k => `<option value="${escapeHtml(k)}" ${r.k === k ? 'selected' : ''}>${escapeHtml(k)}${(r.okKeys && r.okKeys.indexOf(k) >= 0) ? ' ◯' : ''}</option>`).join('')}</select>`
-                : `<b>${escapeHtml(r.k)}</b>`}
-              <span style="margin-left:6px">で入れ、「${escapeHtml(r.k)}」を ${r.from}人 → ${r.to}人</span>
+                ? `<select data-spk="${i}">${r.keys.map(k => `<option value="${escapeHtml(k)}" ${r.k === k ? 'selected' : ''}>${escapeHtml(shiftSym(k))}${(r.okKeys && r.okKeys.indexOf(k) >= 0) ? ' ◯' : ''}</option>`).join('')}</select>`
+                : `<b>${escapeHtml(shiftSym(r.k))}</b>`}
+              <span style="margin-left:6px">で入れ、「${escapeHtml(shiftSym(r.k))}」を ${r.from}人 → ${r.to}人</span>
               ${r.already ? '<span class="hint" style="margin-left:6px">（設定済み）</span>' : ''}</div>`}
             <div class="hint" style="margin-top:2px">
               ${r.blocked ? `<span style="color:var(--danger)">${escapeHtml(r.blocked)}</span><br>` : ''}
               ${r.roleNote ? `${escapeHtml(r.roleNote)}<br>` : ''}
               ${tu.length
-                ? '指導役（いまの表で同じ時間帯）: ' + tu.map(t => `${escapeHtml(t.s.name)}（${escapeHtml(t.v)}）`).join('・')
+                ? '指導役（いまの表で同じ時間帯）: ' + tu.map(t => `${escapeHtml(t.s.name)}（${escapeHtml(shiftSym(t.v))}）`).join('・')
                 : '<span style="color:var(--danger)">' + uiIcon('soft') + ' この時間帯に指導役がいません（いまの表）</span>'}
-              ${pinT ? `<br>${uiIcon('lock')} ${escapeHtml(pinT.s.name)}さんを「${escapeHtml(pinT.v)}」で固定します` : ''}
+              ${pinT ? `<br>${uiIcon('lock')} ${escapeHtml(pinT.s.name)}さんを「${escapeHtml(shiftSym(pinT.v))}」で固定します` : ''}
               ${(r.warn || []).map(w => `<br><span style="color:var(--danger)">${uiIcon('soft')} ${escapeHtml(w)}</span>`).join('')}
             </div>
           </span>
@@ -5334,7 +5360,7 @@ function showSurplusPlanModal() {
               <span style="flex:1">
                 <b>${_spMark(r)} ${r.d}日(${wdOf(r.d)})</b>${_spDeltaTag(r)}
                 <span style="margin-left:8px">${r.from}人 → ${r.to}人</span>
-                <span style="margin-left:8px"><b>${escapeHtml(r.k)}</b></span>
+                <span style="margin-left:8px"><b>${escapeHtml(shiftSym(r.k))}</b></span>
                 <div class="hint" style="margin-top:2px">
                   ${(r.tutors && r.tutors.length) ? '指導役: ' + r.tutors.map(t => escapeHtml(t.s.name)).join('・') : ''}
                 </div>
@@ -5445,7 +5471,7 @@ function showSurplusPlanModal() {
       const g2 = getDepartmentGroups(AppState.staff).find(x => x.staff.some(y => y.id === r.learnerId));
       const need = getDayReq((g2 || {}).reqs || AppState.roleRequirements, (g2 || {}).dailyReqs || AppState.dailyRequirements, r.k, r.d);
       r.from = need; r.to = need + 1;
-      if (r.kind === 'work' && r.roleNote) r.roleNote = `いまは「${r.cur}」（1日1人の役）なので、「${r.k}」にして「${r.k}」を${need}→${need + 1}人にします。「${r.cur}」には生成し直すと別の人が入ります`;
+      if (r.kind === 'work' && r.roleNote) r.roleNote = `いまは「${shiftSym(r.cur)}」（1日1人の役）なので、「${shiftSym(r.k)}」にして「${shiftSym(r.k)}」を${need}→${need + 1}人にします。「${shiftSym(r.cur)}」には生成し直すと別の人が入ります`;
       r.band = isEarlyCategory(r.k) ? 'e' : 'l';
       r.tutorsHere = _tutorsHere(r);
       r.delta = _measureSurplusPick(r);
@@ -5842,7 +5868,7 @@ function showGenerateWizard() {
         const manual = ((AppState.dailyRequirements || {})[k] || {})[d];
         const src = manual != null ? '手入力' : 'ルール';
         diff.push(`<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px">
-          ${escapeHtml(k)} ${base}→
+          ${escapeHtml(shiftSym(k))} ${base}→
           <input type="number" data-wzq="${escapeHtml(k)}|${d}" value="${now}" min="0" max="20" style="width:58px"/>人
           <span class="hint">(${src})</span>
           ${manual != null ? `<button class="btn" data-wzdel="${escapeHtml(k)}|${d}" style="padding:1px 7px;font-size:11px">手入力を消す</button>` : ''}
@@ -5862,7 +5888,7 @@ function showGenerateWizard() {
         ${notes}
         <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px">
           <span>別の日を足す:</span>
-          <select id="wzAddKey">${keys.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('')}</select>
+          <select id="wzAddKey">${keys.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(shiftSym(k))}</option>`).join('')}</select>
           <input type="number" id="wzAddDay" placeholder="日" min="1" max="31" style="width:64px"/>
           <input type="number" id="wzAddNum" placeholder="人数" min="0" max="20" style="width:74px"/>
           <button id="wzAddReq" class="btn">追加</button>

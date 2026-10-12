@@ -2793,6 +2793,12 @@ function calculateScore(shifts, allowedShifts, days, P) {
 
 // ===== 違反チェック =====
 
+// 研修のシフトを文に書くときの字（v258）。研修の種類に表示用の記号が付いていればその記号、
+// 無ければ前の版と同じ「研」（前の版は、研修の key にかかわらず「研」と書いていた）
+// 文の中で key を略して書いていた所（早総務→早総）: 表示用の記号が付いていればその記号、無ければ前の版と同じ略し方
+function _abbrSym(k, abbr) { const t = getShiftType(k); return t && t.sym ? t.sym : abbr; }
+function _trainSym(k) { const t = getShiftType(k); return t && t.sym ? t.sym : '研'; }
+
 function checkViolations(shifts) {
   _shiftKeysCache = null; // キャッシュを毎回リセットして最新の shiftTypes を使う
   const violations = [];
@@ -2909,7 +2915,7 @@ function checkViolations(shifts) {
         if (!isCast && settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
           violations.push({
             staffId: s.id, day: d, type: 'late-early',
-            message: `🚨 ${isTraining(cur) ? '遅→研' : '遅→早'}（インターバル不足）`,
+            message: `🚨 ${isTraining(cur) ? '遅→' + _trainSym(cur) : '遅→早'}（インターバル不足）`,
             action:  '順序を入れ替えてください',
           });
         }
@@ -2928,7 +2934,7 @@ function checkViolations(shifts) {
           if (pc && cc && pc !== cc) {
             violations.push({
               staffId: s.id, day: d, type: 'category-switch',
-              message: `⚠️ 連勤中の時間帯切替（${prevShift}→${cur}）`,
+              message: `⚠️ 連勤中の時間帯切替（${shiftSym(prevShift)}→${shiftSym(cur)}）`,
               action:  '連続勤務は同じ時間帯で揃えてください',
             });
           }
@@ -2937,7 +2943,7 @@ function checkViolations(shifts) {
         if (!effectiveAllowed.includes(cur)) {
           violations.push({
             staffId: s.id, day: d, type: 'role-mismatch',
-            message: `🚨 担当外のシフト（${cur}）`,
+            message: `🚨 担当外のシフト（${shiftSym(cur)}）`,
             action:  '担当シフトに変更するかスタッフを変えてください',
           });
         }
@@ -2946,11 +2952,11 @@ function checkViolations(shifts) {
         if (s.prefs && s.prefs.length > 0) {
           if (isEarly(cur) && !s.prefs.includes('早可')) {
             violations.push({ staffId: s.id, day: d, type: 'pref-mismatch',
-              message: `⚠️ 早番不可なのに早番（${cur}）`, action: '希望に合うシフトに変更してください' });
+              message: `⚠️ 早番不可なのに早番（${shiftSym(cur)}）`, action: '希望に合うシフトに変更してください' });
           }
           if (isLate(cur) && !s.prefs.includes('遅可')) {
             violations.push({ staffId: s.id, day: d, type: 'pref-mismatch',
-              message: `⚠️ 遅番不可なのに遅番（${cur}）`, action: '希望に合うシフトに変更してください' });
+              message: `⚠️ 遅番不可なのに遅番（${shiftSym(cur)}）`, action: '希望に合うシフトに変更してください' });
           }
         }
 
@@ -2962,7 +2968,7 @@ function checkViolations(shifts) {
           if (!prevIsWork && !workedOn(nx)) {
             violations.push({
               staffId: s.id, day: d, type: 'single-work',
-              message: `⚠️ 単発出勤（${cur}）`,
+              message: `⚠️ 単発出勤（${shiftSym(cur)}）`,
               action:  '前後の休みをずらして出勤日を連続させてください',
             });
           }
@@ -3032,7 +3038,7 @@ function checkViolations(shifts) {
           if (isLate(pv) && earlySide(nx)) {
             violations.push({
               staffId: s.id, day: d, type: 'bad-rest',
-              message: `⚠️ ${isHalfWork(nx) ? '遅→休→半休' : isTraining(nx) ? '遅→休→研' : '遅→休→早'}（リズムが悪い）${d === 1 ? '・前月末から継続' : ''}`,
+              message: `⚠️ ${isHalfWork(nx) ? '遅→休→半休' : isTraining(nx) ? '遅→休→' + _trainSym(nx) : '遅→休→早'}（リズムが悪い）${d === 1 ? '・前月末から継続' : ''}`,
               action:  '時間帯を揃えてください',
             });
           }
@@ -3175,8 +3181,8 @@ function checkViolations(shifts) {
       if (!ok && vmsAll.length) {
         violations.push({
           staffId: (vmsAll[0] || {}).id || '', day: d, type: 'special-day',
-          message: `⚠️ ${kind === 'replacement' ? '入れ替え日' : '新装日'}に副店長が「${role}」に入っていません`,
-          action:  `副店長のいずれかをこの日の${role}にしてください`,
+          message: `⚠️ ${kind === 'replacement' ? '入れ替え日' : '新装日'}に副店長が「${shiftSym(role)}」に入っていません`,
+          action:  `副店長のいずれかをこの日の${shiftSym(role)}にしてください`,
         });
       }
     });
@@ -3197,8 +3203,8 @@ function checkViolations(shifts) {
       if (!working && !chiefCovered) {
         violations.push({
           staffId: null, day: d, type: 'vicemanager-absent',
-          message: `🚨 ${d}日 副店長が不在で、早責・遅責もチーフ以上で揃っていない`,
-          action:  '副店長を出勤させるか、早責・遅責の両方をチーフ以上にしてください',
+          message: `🚨 ${d}日 副店長が不在で、${shiftSym('早責')}・${shiftSym('遅責')}もチーフ以上で揃っていない`,
+          action:  `副店長を出勤させるか、${shiftSym('早責')}・${shiftSym('遅責')}の両方をチーフ以上にしてください`,
         });
       }
     }
@@ -3270,7 +3276,7 @@ function checkViolations(shifts) {
         if (req && counts[k] < req) {
           violations.push({
             staffId: null, day: d, type: 'understaff',
-            message: `🚨 ${d}日 ${gLabel}${k} が${counts[k]}人（必要${req}人）`,
+            message: `🚨 ${d}日 ${gLabel}${shiftSym(k)} が${counts[k]}人（必要${req}人）`, role: k,
             action:  '他の日のシフトを移動してください',
           });
         }
@@ -3278,8 +3284,8 @@ function checkViolations(shifts) {
         if (SOLO_SHIFT_KEYS.includes(k) && req && counts[k] > req) {
           violations.push({
             staffId: null, day: d, type: 'resp-duplicate',
-            message: `🚨 ${d}日 ${gLabel}${k} が${counts[k]}人（同じ時間帯に${k}は${req}人まで）`,
-            action:  'どちらかを通常シフト（早/遅など）に変更してください',
+            message: `🚨 ${d}日 ${gLabel}${shiftSym(k)} が${counts[k]}人（同じ時間帯に${shiftSym(k)}は${req}人まで）`, role: k,
+            action:  `どちらかを通常シフト（${shiftSym('早')}/${shiftSym('遅')}など）に変更してください`,
           });
         }
         // 必要人数より多く配置されている（定数オーバー）。
@@ -3288,7 +3294,7 @@ function checkViolations(shifts) {
         if (!SOLO_SHIFT_KEYS.includes(k) && counts[k] > req && ruleOn('overstaff')) {
           violations.push({
             staffId: null, day: d, type: 'overstaff',
-            message: `⚠️ ${d}日 ${gLabel}${k} が${counts[k]}人（必要${req}人・${counts[k] - req}人多い）`,
+            message: `⚠️ ${d}日 ${gLabel}${shiftSym(k)} が${counts[k]}人（必要${req}人・${counts[k] - req}人多い）`, role: k,
             action:  req === 0
               ? 'この日は0人の設定です。余った人は休み・有給に回すか、必要人数を見直してください'
               : '余った人は他の日へ移すか、この日の必要人数を見直してください',
@@ -3311,7 +3317,7 @@ function checkViolations(shifts) {
           const shouldBe = moreCapable[0];
           violations.push({
             staffId: respEarlyPerson.id, day: d, type: 'hierarchy',
-            message: `👑 ${d}日 早責ヒエラルキー違反: ${shouldBe.name}が早責であるべき`,
+            message: `👑 ${d}日 ${shiftSym('早責')}ヒエラルキー違反: ${shouldBe.name}が${shiftSym('早責')}であるべき`,
             action:  `${shouldBe.name}（${POSITION_TYPES[shouldBe.positionType]?.label || shouldBe.positionType}）と${respEarlyPerson.name}のシフトを入れ替えてください`,
           });
         }
@@ -3330,7 +3336,7 @@ function checkViolations(shifts) {
           const shouldBe = moreCapable[0];
           violations.push({
             staffId: respLatePerson.id, day: d, type: 'hierarchy',
-            message: `👑 ${d}日 遅責ヒエラルキー違反: ${shouldBe.name}が遅責であるべき`,
+            message: `👑 ${d}日 ${shiftSym('遅責')}ヒエラルキー違反: ${shouldBe.name}が${shiftSym('遅責')}であるべき`,
             action:  `${shouldBe.name}（${POSITION_TYPES[shouldBe.positionType]?.label || shouldBe.positionType}）と${respLatePerson.name}のシフトを入れ替えてください`,
           });
         }
@@ -3792,7 +3798,7 @@ function analyzeRootCauses() {
   const relatedTypes = ['off-count', 'understaff', 'hierarchy', 'category-switch', 'skill-late', 'resp-duplicate'];
   const relatedCount = vios.filter(v => relatedTypes.includes(v.type)).length;
   if (bn.length > 0 && (relatedCount > 0 || bn.some(b => b.surplusCandidates.length))) {
-    const keys  = [...new Set(bn.map(b => b.key))].join('・');
+    const keys  = [...new Set(bn.map(b => b.key))].map(shiftSym).join('・');   // 文に出すだけ（v258: 表示用の記号）
     const cands = [...new Set(bn.flatMap(b => b.surplusCandidates))].slice(0, 5);
     causes.push({
       weight: relatedCount + 10,
@@ -4026,16 +4032,16 @@ function runAIDiagnosis() {
       if (capable.length < req) {
         results.push({
           level: 'error',
-          title: `${pfx}「${k}」担当者が不足（${capable.length}人 / 必要${req}人）`,
+          title: `${pfx}「${shiftSym(k)}」担当者が不足（${capable.length}人 / 必要${req}人）`,
           detail: `担当できるスタッフ: ${capable.map(s => s.name).join('、') || 'なし'}\n1日${req}人必要ですが担当者が足りません。`,
-          suggestion: `「${k}」を担当できるスタッフを ${req - capable.length} 人以上増やしてください。`,
+          suggestion: `「${shiftSym(k)}」を担当できるスタッフを ${req - capable.length} 人以上増やしてください。`,
         });
       } else if (capable.length === req) {
         results.push({
           level: 'warning',
-          title: `${pfx}「${k}」カバレッジが最小限（${capable.length}人 = 必要人数ちょうど）`,
+          title: `${pfx}「${shiftSym(k)}」カバレッジが最小限（${capable.length}人 = 必要人数ちょうど）`,
           detail: `担当: ${capable.map(s => s.name).join('、')}\n誰か1人でも休むと必ず人員不足になります。`,
-          suggestion: `「${k}」担当者をあと1人以上追加することを強く推奨します。`,
+          suggestion: `「${shiftSym(k)}」担当者をあと1人以上追加することを強く推奨します。`,
         });
       }
     });
@@ -4063,10 +4069,10 @@ function runAIDiagnosis() {
           level: 'warning',
           title: `${pfx}${s.name}（${posLabel}）の公休が理論上 0〜${maxFeasibleOff}日に制限`,
           detail:
-            `シフト「${criticalShifts.join('・')}」の担当者が ${s.name} のみです。\n` +
+            `シフト「${criticalShifts.map(shiftSym).join('・')}」の担当者が ${s.name} のみです。\n` +
             `代替者がいないため、これらのシフトが必要な日は必ず出勤が必要です。`,
           suggestion:
-            `「${criticalShifts.join('・')}」を担当できるスタッフを追加するか、` +
+            `「${criticalShifts.map(shiftSym).join('・')}」を担当できるスタッフを追加するか、` +
             `${s.name} の最大公休を ${maxFeasibleOff} 日以下に変更してください。`,
         });
       }
@@ -4125,7 +4131,7 @@ function runAIDiagnosis() {
         level: 'ok',
         title: `✅ ${sk.name} は人員的には毎日 目標${need}人を出せます`,
         detail: `全${days}日で、${bandLabel}に出られる「${sk.name}」保有者は常に${need}人以上います（＝${sk.name}だけを見れば可能）。\n` +
-          `→ それでもスキル不足が出る場合は、保有者が同じ日に他の役割（早責など）や公休と取り合いになるのが原因で、\n` +
+          `→ それでもスキル不足が出る場合は、保有者が同じ日に他の役割（${shiftSym('早責')}など）や公休と取り合いになるのが原因で、\n` +
           `　“避けられる”タイプです。案数を増やす・再生成・🛠自動修正で減らせる可能性が高いです。`,
         suggestion: null,
       });
@@ -4250,9 +4256,9 @@ function runAIDiagnosis() {
       const days   = vmVios.map(v => `${v.day}日`).join('、');
       results.push({
         level: 'error',
-        title: `副店長不在で早責・遅責もチーフ以上で揃っていない日 ${cnt['vicemanager-absent']} 件`,
-        detail: `次の日が該当します: ${days}\n毎日、副店長が出勤しているか、早責・遅責の両方がチーフ以上（チーフ or 副店長）で埋まっている必要があります。`,
-        suggestion: '副店長を出勤させるか、早責・遅責の両方をチーフ以上に配置してください。「シフト作成」の再実行でも改善します。',
+        title: `副店長不在で${shiftSym('早責')}・${shiftSym('遅責')}もチーフ以上で揃っていない日 ${cnt['vicemanager-absent']} 件`,
+        detail: `次の日が該当します: ${days}\n毎日、副店長が出勤しているか、${shiftSym('早責')}・${shiftSym('遅責')}の両方がチーフ以上（チーフ or 副店長）で埋まっている必要があります。`,
+        suggestion: `副店長を出勤させるか、${shiftSym('早責')}・${shiftSym('遅責')}の両方をチーフ以上に配置してください。「シフト作成」の再実行でも改善します。`,
       });
     }
 
@@ -4278,8 +4284,8 @@ function runAIDiagnosis() {
       results.push({
         level: 'error',
         title: `責任者・総務の重複 ${cnt['resp-duplicate']} 件`,
-        detail: `同じ時間帯に責任者・総務（早責/遅責/早総/遅総）が必要人数を超えて配置されています。\n${detail}`,
-        suggestion: '「シフト作成」を再実行してください。どちらか一方を通常シフト（早/遅）に変更するのも有効です。',
+        detail: `同じ時間帯に責任者・総務（${shiftSym('早責')}/${shiftSym('遅責')}/${_abbrSym('早総務', '早総')}/${_abbrSym('遅総務', '遅総')}）が必要人数を超えて配置されています。\n${detail}`,
+        suggestion: `「シフト作成」を再実行してください。どちらか一方を通常シフト（${shiftSym('早')}/${shiftSym('遅')}）に変更するのも有効です。`,
       });
     }
 
@@ -4375,9 +4381,9 @@ function runAIDiagnosis() {
   if (bottlenecks.length > 0) {
     const lines = bottlenecks.map(b => {
       const cand = b.surplusCandidates.length
-        ? `　→ 余っている ${b.surplusCandidates.slice(0, 4).join('・')} に「${b.key}」を任せられると分散できます`
+        ? `　→ 余っている ${b.surplusCandidates.slice(0, 4).join('・')} に「${shiftSym(b.key)}」を任せられると分散できます`
         : '';
-      return `・「${b.key}」ができるのは ${b.capable.length}人だけ（${b.capable.slice(0, 5).join('・')}）${cand}`;
+      return `・「${shiftSym(b.key)}」ができるのは ${b.capable.length}人だけ（${b.capable.slice(0, 5).join('・')}）${cand}`;
     }).join('\n');
     results.push({
       level: 'warning',
@@ -4386,7 +4392,7 @@ function runAIDiagnosis() {
         '次の担当は「できる人」が少なく、その人に負担が集中して公休不足になりやすく、\n' +
         '一方でその担当ができない人は「余」になりがちです。\n\n' + lines,
       suggestion:
-        '③スタッフ管理で、余っている人に上記シフト（早責・遅責など）の担当チェックを追加して再生成すると、' +
+        `③スタッフ管理で、余っている人に上記シフト（${shiftSym('早責')}・${shiftSym('遅責')}など）の担当チェックを追加して再生成すると、` +
         '公休不足と余の両方が減ります。',
     });
   }
@@ -4544,7 +4550,7 @@ function buildRelaxPlans(violations) {
     if (target) {
       plans.push({
         id: 'req-reduce', group: 'capacity', pain: 'large', gain: days, shortage, dept: g.key,
-        title: `${pfx}「${target}」の必要人数を1人減らす（${g.reqs[target]}人 → ${g.reqs[target] - 1}人）`,
+        title: `${pfx}「${shiftSym(target)}」の必要人数を1人減らす（${g.reqs[target]}人 → ${g.reqs[target] - 1}人）`,
         effect: `＋${days}人日`,
         detail: `毎日1人ずつ減るので ${days}人日 ぶん余裕ができます。営業に直結するため、他の案で足りないときの最後の手段です。`,
         after: '不足は解消しますが、日々の配置人数が減ります。',
@@ -4926,7 +4932,7 @@ function analyzeLowerBound() {
           roleShort += (need - cap[k]);
           res.reasons.push({
             kind: 'role', day: d, role: k, need, have: cap[k],
-            text: `${pfx}${d}日: 「${k}」が ${need}人 必要ですが、その日入れる人は ${cap[k]}人 しかいません（不足 ${need - cap[k]}人）`,
+            text: `${pfx}${d}日: 「${shiftSym(k)}」が ${need}人 必要ですが、その日入れる人は ${cap[k]}人 しかいません（不足 ${need - cap[k]}人）`,
           });
         }
       });
@@ -4985,8 +4991,8 @@ function analyzeLowerBound() {
         if (r.blocker) {
           const alt = r.blocker.alt;
           fix = alt
-            ? `${r.blocker.name}さんの${d}日の希望を「${r.blocker.key}」から「${alt}」に変えると収まります`
-            : `${r.blocker.name}さんは「${sk.name}」を持っていないため、${d}日の希望「${r.blocker.key}」がこの枠を塞いでいます`;
+            ? `${r.blocker.name}さんの${d}日の希望を「${shiftSym(r.blocker.key)}」から「${shiftSym(alt)}」に変えると収まります`
+            : `${r.blocker.name}さんは「${sk.name}」を持っていないため、${d}日の希望「${shiftSym(r.blocker.key)}」がこの枠を塞いでいます`;
         } else {
           fix = `「${sk.name}」を持つ人を増やすか、${early ? '早番' : '遅番'}帯の必要人数を見直してください`;
         }
@@ -4996,7 +5002,7 @@ function analyzeLowerBound() {
           // ボタン1つで直せる操作。null なら手で直してもらう
           act: (r.blocker && r.blocker.alt)
             ? { type: 'request', staffId: r.blocker.id, day: d, to: r.blocker.alt,
-                label: `${r.blocker.name}さんの${d}日を「${r.blocker.alt}」に変える` } : null,
+                label: `${r.blocker.name}さんの${d}日を「${shiftSym(r.blocker.alt)}」に変える` } : null,
           text: `${pfx}${d}日: スキル「${sk.name}」は最低 ${min}人 必要ですが、`
               + `${early ? '早番' : '遅番'}の枠に置けるのは最大 ${r.max}人 です。${fix}`,
         });
@@ -5029,10 +5035,10 @@ function analyzeLowerBound() {
             const manual = (store[r.key] || {})[d];
             if (manual == null || manual === parseInt(r.to)) return;
             res.reasons.push({
-              kind: 'rule-conflict', day: d, fix: `日別必要人数の ${d}日「${r.key}」を ${manual}人 → ${r.to}人 に戻すか、ルールの方を直してください`,
+              kind: 'rule-conflict', day: d, fix: `日別必要人数の ${d}日「${shiftSym(r.key)}」を ${manual}人 → ${r.to}人 に戻すか、ルールの方を直してください`,
               act: { type: 'dailyReq', key: r.key, day: d, to: parseInt(r.to),
-                     label: `${d}日「${r.key}」を ${r.to}人 に直す` },
-              text: `${d}日: ルール「${r.name || r.key + ' ' + r.to + '人'}」では「${r.key}」が ${r.to}人 のはずですが、`
+                     label: `${d}日「${shiftSym(r.key)}」を ${r.to}人 に直す` },
+              text: `${d}日: ルール「${r.name || shiftSym(r.key) + ' ' + r.to + '人'}」では「${shiftSym(r.key)}」が ${r.to}人 のはずですが、`
                   + `日別必要人数に ${manual}人 と直接入っていて、そちらが優先されています`,
             });
           });
@@ -5050,7 +5056,7 @@ function analyzeLowerBound() {
             const sameKeyRules = rules.filter(r => r.key === k);
             if (!sameKeyRules.length) return;              // その役割にルールが無ければ対象外
             if (sameKeyRules.some(r => dayMatchesRule(r, d))) return;  // ルール通りの日ならOK
-            extra.push(`${d}日「${k}」${val}人`);
+            extra.push(`${d}日「${shiftSym(k)}」${val}人`);
             extraAct.push({ key: k, day: d });
           });
         });
@@ -5082,8 +5088,8 @@ function analyzeLowerBound() {
           if ((s.allowedShifts || []).includes(v)) continue;
           res.reasons.push({
             kind: 'req-role', day: d, staffId: s.id,
-            fix: `${s.name}さんの担当シフトに「${v}」を足すか、${d}日の希望を別のシフトに変えてください`,
-            text: `${pfx}${d}日: ${s.name}さんに「${v}」の希望が入っていますが、この方の担当シフトに「${v}」がありません`,
+            fix: `${s.name}さんの担当シフトに「${shiftSym(v)}」を足すか、${d}日の希望を別のシフトに変えてください`,
+            text: `${pfx}${d}日: ${s.name}さんに「${shiftSym(v)}」の希望が入っていますが、この方の担当シフトに「${shiftSym(v)}」がありません`,
           });
         }
       });
@@ -5100,9 +5106,9 @@ function analyzeLowerBound() {
           res.reasons.push({
             kind: 'req-over', day: d,
             fix: need === 0
-              ? `${d}日の「${k}」は0人の設定です。希望を別のシフトに変えるか、必要人数を ${who.length}人 にしてください`
-              : `${d}日の「${k}」の必要人数を ${who.length}人 にするか、${over}人ぶんの希望を別のシフトに変えてください`,
-            text: `${pfx}${d}日: 「${k}」は ${need}人 の設定ですが、${who.map(x => x.name).join('・')} の ${who.length}人 に希望が入っています（${over}人 多い）`,
+              ? `${d}日の「${shiftSym(k)}」は0人の設定です。希望を別のシフトに変えるか、必要人数を ${who.length}人 にしてください`
+              : `${d}日の「${shiftSym(k)}」の必要人数を ${who.length}人 にするか、${over}人ぶんの希望を別のシフトに変えてください`,
+            text: `${pfx}${d}日: 「${shiftSym(k)}」は ${need}人 の設定ですが、${who.map(x => x.name).join('・')} の ${who.length}人 に希望が入っています（${over}人 多い）`,
           });
         });
       }
@@ -5116,7 +5122,7 @@ function analyzeLowerBound() {
           res.reasons.push({
             kind: 'req-solo', day: d,
             fix: `${who.slice(1).map(x => x.name).join('・')} さんの ${d}日 を別のシフトに変えてください`,
-            text: `${pfx}${d}日: 「${k}」は1人だけの役割ですが、${who.map(x => x.name).join('・')} の ${who.length}人 に希望が入っています`,
+            text: `${pfx}${d}日: 「${shiftSym(k)}」は1人だけの役割ですが、${who.map(x => x.name).join('・')} の ${who.length}人 に希望が入っています`,
           });
         });
       }
@@ -5134,7 +5140,7 @@ function analyzeLowerBound() {
             res.reasons.push({
               kind: 'req-le', day: 0, staffId: s.id, cells: [1],
               fix: `1日を休みにするか、遅番に変えてください`,
-              text: `${pfx}${s.name}さん: 前月末が遅番で、1日「${b1}」なので、休みを挟まずに遅番→早番になります`,
+              text: `${pfx}${s.name}さん: 前月末が遅番で、1日「${shiftSym(b1)}」なので、休みを挟まずに遅番→早番になります`,
             });
           }
           for (let d = 1; d < days; d++) {
@@ -5144,7 +5150,7 @@ function analyzeLowerBound() {
               res.reasons.push({
                 kind: 'req-le', day: d, staffId: s.id, cells: [d, d + 1],
                 fix: `${d}日か${d + 1}日のどちらかを休みにするか、時間帯を揃えてください`,
-                text: `${pfx}${s.name}さん: ${d}日「${a}」の翌日 ${d + 1}日「${b}」で、休みを挟まずに遅番→${isTraining(b) ? '研修' : '早番'}になります`,
+                text: `${pfx}${s.name}さん: ${d}日「${shiftSym(a)}」の翌日 ${d + 1}日「${shiftSym(b)}」で、休みを挟まずに遅番→${isTraining(b) ? '研修' : '早番'}になります`,
               });
             }
           }
@@ -5162,7 +5168,7 @@ function analyzeLowerBound() {
             res.reasons.push({
               kind: 'event-req', day: ev.day, staffId: s.id,
               fix: `${s.name}さんの${ev.day}日の希望休を外すか、行事の対象から外してください`,
-              text: `${pfx}${s.name}さん: ${ev.day}日は行事${ev.name ? `「${ev.name}」` : ''}の対象ですが、希望休（${v}）が入っています`,
+              text: `${pfx}${s.name}さん: ${ev.day}日は行事${ev.name ? `「${ev.name}」` : ''}の対象ですが、希望休（${shiftSym(v)}）が入っています`,
             });
           }
         });
@@ -5177,7 +5183,7 @@ function analyzeLowerBound() {
             res.reasons.push({
               kind: 'req-night', day: d, staffId: s.id,
               fix: `${d + 1}日の希望を休みに変えてください（夜勤明けは休みが必須です）`,
-              text: `${pfx}${s.name}さん: ${d}日「${a}」は夜勤で、翌日 ${d + 1}日 に出勤の希望「${b}」が入っています`,
+              text: `${pfx}${s.name}さん: ${d}日「${shiftSym(a)}」は夜勤で、翌日 ${d + 1}日 に出勤の希望「${shiftSym(b)}」が入っています`,
             });
           }
         }
@@ -5193,7 +5199,7 @@ function analyzeLowerBound() {
             res.reasons.push({
               kind: 'req-pair', day: d, staffId: s.id,
               fix: `${d - 1}日か${d + 1}日の希望を変えるか、${d}日の前後どちらかも休みにしてください`,
-              text: `${pfx}${s.name}さん: ${d - 1}日「${a}」→${d}日 休み→${d + 1}日「${b}」が希望で確定しています。`
+              text: `${pfx}${s.name}さん: ${d - 1}日「${shiftSym(a)}」→${d}日 休み→${d + 1}日「${shiftSym(b)}」が希望で確定しています。`
                   + `この方は「遅→早の切替時は2連休以上」の設定です`,
             });
           }
@@ -5212,7 +5218,7 @@ function analyzeLowerBound() {
             res.reasons.push({
               kind: 'req-weekend', day: d, staffId: s.id,
               fix: `${d}日の希望を休みに変えるか、この方の「土日休み」を『なるべく』に下げてください`,
-              text: `${pfx}${s.name}さん: ${d}日（${w === 0 ? '日' : '土'}曜）に出勤の希望「${v}」がありますが、土日休みが『絶対』の設定です`,
+              text: `${pfx}${s.name}さん: ${d}日（${w === 0 ? '日' : '土'}曜）に出勤の希望「${shiftSym(v)}」がありますが、土日休みが『絶対』の設定です`,
             });
           }
         }
@@ -5276,7 +5282,7 @@ function analyzeLowerBound() {
                   res.reasons.push({
                     kind: 'req-switch', day: d, staffId: s.id, soft: getRuleLevel('category-switch') !== 'must',
                     fix: `${d}日か${d + 1}日の希望の時間帯を揃えるか、間に休みを入れてください`,
-                    text: `${pfx}${s.name}さん: ${d}日「${a}」→${d + 1}日「${b}」が希望で確定しており、`
+                    text: `${pfx}${s.name}さん: ${d}日「${shiftSym(a)}」→${d + 1}日「${shiftSym(b)}」が希望で確定しており、`
                         + `連勤の途中で時間帯が変わります（ルール「連勤中の時間帯切替」が有効）`,
                   });
                 }
@@ -5289,7 +5295,7 @@ function analyzeLowerBound() {
                 res.reasons.push({
                   kind: 'req-badrest', day: d, staffId: s.id, soft: true,
                   fix: `${d}日の前後どちらかも休みにするか、${d - 1}日か${d + 1}日の時間帯を揃えてください`,
-                  text: `${pfx}${s.name}さん: ${d - 1}日「${a}」→${d}日 休み→${d + 1}日「${b}」が希望で確定しており、`
+                  text: `${pfx}${s.name}さん: ${d - 1}日「${shiftSym(a)}」→${d}日 休み→${d + 1}日「${shiftSym(b)}」が希望で確定しており、`
                       + `遅→休→早になります`,
                 });
               }
@@ -5341,9 +5347,9 @@ function analyzeLowerBound() {
         if (ok) return;
         res.reasons.push({
           kind: 'special-req', day: d,
-          fix: `副店長のどなたかの ${d}日 を「${want}」にするか、空けてください`,
+          fix: `副店長のどなたかの ${d}日 を「${shiftSym(want)}」にするか、空けてください`,
           text: `${pfx}${d}日(${kind === 'replacement' ? '入れ替え日' : '新装日'}): 副店長が全員、別の予定になっています`
-              + `（${vms.map(s => s.name + 'さん=' + (confirmOf(s, d) || '未定')).join('・')}）。この日は副店長が「${want}」に入る決まりです`,
+              + `（${vms.map(s => s.name + 'さん=' + (shiftSym(confirmOf(s, d)) || '未定')).join('・')}）。この日は副店長が「${shiftSym(want)}」に入る決まりです`,
         });
       });
     }
@@ -5642,7 +5648,7 @@ function analyzeLowerBound() {
               if (one && keys.length === 1 && res.reasons.some(x => x.kind === 'role' && x.day === f.a && x.role === k)) return;
               res.reasons.push({
                 kind: 'comp-days', from: f.a, to: f.b, role: k, need: f.need, have: f.have,
-                text: `${pfx}${one ? f.a + '日' : f.a + '日〜' + f.b + '日'}の「${k}」: 合計 ${f.need}人日 必要ですが、${keys.length > 1 ? 'これらを' : '「' + k + '」を'}担当できる人が`
+                text: `${pfx}${one ? f.a + '日' : f.a + '日〜' + f.b + '日'}の「${keys.map(shiftSym).join('・')}」: 合計 ${f.need}人日 必要ですが、${keys.length > 1 ? 'これらを' : '「' + shiftSym(k) + '」を'}担当できる人が`
                     + `6連勤（コンプラ違反）を作らずに出せるのは最大 ${f.have}人日 です（不足 ${f.sh}人）`
                     + (() => { const w = whoOf(keys, f.a, f.b); return w.length ? `。連勤のため出られない日がある人: ${w.slice(0, 8).join('・')}${w.length > 8 ? ` ほか${w.length - 8}人` : ''}` : ''; })(),
               });
