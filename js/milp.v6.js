@@ -91,33 +91,70 @@ function calcBegin(label) {
   if (_calcOwner) { calcBusyToast(); return false; }
   _calcOwner = label || '計算';
   _calcButtons(true);
+  // C3: 計算を始めたときに入っていた欄の値も控える（そのまま打ち続けても、元の値に戻せるように）
+  if (typeof document !== 'undefined' && document.activeElement && document.activeElement.closest &&
+      document.activeElement.closest(CALC_INPUT_AREAS) && document.activeElement.matches(CALC_FIELDS)) _calcHoldField(document.activeElement);
   return true;
 }
-function calcEnd() { _calcOwner = null; _calcButtons(false); }
+function calcEnd() { _calcOwner = null; _calcButtons(false); _calcFieldVals = new WeakMap(); }
 /** 鍵を持ったまま名前を替える（計算中 ⇄ 確認待ち）。鍵を持っていないときは何もしない */
 function calcRelabel(label) { if (_calcOwner) _calcOwner = label; }
 function calcOwner() { return _calcOwner; }
 // A2: 計算中は ①〜④（設定・必要人数・スタッフ・希望）と、計算を伴う画面の入力を受け付けない。
 // 計算が終わった答えが、計算中に変わったスタッフや希望の表に入ってしまうため。閉じる操作は通す。
 const CALC_INPUT_AREAS = '#panel-settings, #panel-roles, #panel-staff, #panel-calendar, .summary-req-input, .calc-lock-area';
+// C3: 止めるのは「押すもの」だけ。それ以外（文字の選択など）は通す。
+// 見るだけの部品（折りたたみ・②の「詳細」・日別必要人数の開け閉め・列幅・④の入れる記号・③の左の一覧の行）は、
+// 印 .calc-view-only を付けたものだけ通す（v255 の印。開け閉めで中の入力欄が見えても、入力は今までどおり止まる）
+const CALC_CONTROLS = 'input, select, textarea, button, a, label, summary, td[data-sid], [onclick], [contenteditable], .col-resizer';
+const CALC_FIELDS = 'input, select, textarea';
+// 文字を変えるイベント（押す場所に関係なく、入力欄なら止める）
+const CALC_EDIT_EVENTS = ['keydown', 'input', 'change', 'paste', 'drop', 'beforeinput', 'cut', 'compositionend'];
+// C3: 止めた欄は、計算の間だけ控えた元の値に戻す（ホイール・日本語入力の確定・右クリックの切り取りでは、
+// データには入らないのに欄の表示だけ変わっていた）。控えは計算が終わったら捨てる
+let _calcFieldVals = new WeakMap();
+const _fieldVal = (f) => (f.type === 'checkbox' || f.type === 'radio') ? f.checked : f.value;
+function _calcHoldField(f) { if (f && !_calcFieldVals.has(f)) _calcFieldVals.set(f, _fieldVal(f)); }
+function _calcRestoreField(f) {
+  if (!f || !_calcFieldVals.has(f)) return false;
+  const v = _calcFieldVals.get(f);
+  if (f.type === 'checkbox' || f.type === 'radio') { if (f.checked === v) return false; f.checked = v; }
+  else { if (f.value === v) return false; f.value = v; }
+  return true;
+}
 let _calcGuardToastAt = 0;
 function _calcInputGuard(e) {
   if (!_calcOwner) return;
   const t = e.target;
   if (!t || !t.closest || !t.closest(CALC_INPUT_AREAS)) return;
-  if (t.closest('.calc-view-only')) return;   // 見るだけの部品（③の左の一覧の行）は計算中も押せる（v255）
+  if (t.closest('.calc-view-only')) return;   // 見るだけの部品は計算中も押せる（v255・C3）
+  const field = t.closest(CALC_FIELDS);
+  // 欄に入ったとき・日本語入力を始めたとき・書き換わる直前は、元の値を控える（止めはしない）
+  if (e.type === 'focusin' || e.type === 'compositionstart') { if (field) _calcHoldField(field); return; }
   if (e.type === 'keydown' && ['Tab', 'Shift', 'Escape'].includes(e.key)) return;
   const b = t.closest('button');
   if (b && /^(×|✕|閉じる)$/.test((b.textContent || '').trim())) return;
   if (t.classList && t.classList.contains('calc-lock-area')) return;   // 暗幕そのもの（閉じる）
-  e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+  // 押すもの・入力欄でなければ通す（文字の選択・スクロールなど）
+  if (!t.closest(CALC_CONTROLS) && !(field && CALC_EDIT_EVENTS.includes(e.type))) return;
+  // 書き換わる前に来るイベント（押す・キー・貼り付け・切り取り・beforeinput）なら、ここでも元の値を控える
+  if (field && !['input', 'change', 'compositionend'].includes(e.type)) _calcHoldField(field);
+  if (e.cancelable) e.preventDefault();
+  e.stopPropagation(); e.stopImmediatePropagation();
+  // 書き換わってしまった欄（取り消せない input・日本語入力の確定・ホイール）は、控えた値に戻して知らせる
+  const restored = field ? _calcRestoreField(field) : false;
   if (e.type !== 'dblclick') {
     const now = Date.now();
-    if (now - _calcGuardToastAt > 1500) { _calcGuardToastAt = now; calcBusyToast(); }
+    if (now - _calcGuardToastAt > 1500) {
+      _calcGuardToastAt = now;
+      if (restored && typeof toast === 'function') toast(`いまは「${_calcOwner}」の計算中なので、入れた文字を消しました。終わってから入れてください`, 'warning', 6000);
+      else calcBusyToast();
+    }
   }
 }
 if (typeof document !== 'undefined') {
-  ['mousedown', 'click', 'dblclick', 'keydown', 'input', 'change', 'paste', 'drop'].forEach(ev =>
+  ['mousedown', 'click', 'dblclick', 'keydown', 'input', 'change', 'paste', 'drop',
+   'beforeinput', 'cut', 'focusin', 'compositionstart', 'compositionend'].forEach(ev =>
     document.addEventListener(ev, _calcInputGuard, true));
 }
 function _calcButtons(on) {

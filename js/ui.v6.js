@@ -789,7 +789,7 @@ function renderRoleTable() {
                ${isCombinedShift(type.key) ? 'disabled title="合算モードでは社員側の数を合計値として使います"' : ''}/>
       </td>
       <td class="rc-more">
-        <button type="button" class="btn btn-ghost role-more-btn" data-more="${idx}" aria-expanded="false">詳細${uiIcon('down')}</button>
+        <button type="button" class="btn btn-ghost role-more-btn calc-view-only" data-more="${idx}" aria-expanded="false">詳細${uiIcon('down')}</button>
       </td>
       <td class="role-more">
         <label class="rm-item"><span class="switch">
@@ -1597,7 +1597,7 @@ function renderShiftChips() {
   container.innerHTML = '';
   AppState.shiftTypes.forEach(t => {
     const btn = document.createElement('button');
-    btn.className = 'chip-btn';
+    btn.className = 'chip-btn calc-view-only';   // 入れる記号の選び替えは見るだけの操作（C3）
     btn.dataset.mark = t.key;
     btn.textContent  = shiftSymOf(t);   // 表示用の記号（data-mark は key のまま）
     btn.style.background = shiftToneVar(t.key);
@@ -2654,7 +2654,7 @@ function enableColumnResize(table, key) {
   ths.forEach((th, idx) => {
     if (th.querySelector('.col-resizer')) return;
     const grip = document.createElement('span');
-    grip.className = 'col-resizer';
+    grip.className = 'col-resizer calc-view-only';   // 列幅は見るだけの操作（計算中も変えられる。C3）
     grip.title = 'ドラッグで列幅を変更（ダブルクリックで既定に戻す）';
     th.appendChild(grip);
 

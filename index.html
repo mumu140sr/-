@@ -153,7 +153,7 @@
 
     <!-- 詳しい設定（ふだんは閉じておく。中の入力欄・ボタンは今のまま） -->
     <details class="card fold-card" id="settingsMore">
-      <summary class="fold-sum"><span class="grow">詳しい設定</span><span class="fold-sub">ルールの強弱・計算のしかた・必要人数のルール（通常は変更不要）</span></summary>
+      <summary class="fold-sum calc-view-only"><span class="grow">詳しい設定</span><span class="fold-sub">ルールの強弱・計算のしかた・必要人数のルール（通常は変更不要）</span></summary>
 
       <div class="fold-body">
         <h4 class="fold-h">計算のしかた</h4>
@@ -168,7 +168,7 @@
 
         <!-- ルールごとの強弱（ON/OFF） -->
         <div class="fold-sub-card">
-          <h4 class="fold-h" style="cursor:pointer" onclick="toggleRuleLevelsPanel()">ルールごとの強弱（ON/OFF） <span id="ruleLevelsToggle">▶ 展開</span></h4>
+          <h4 class="fold-h calc-view-only" style="cursor:pointer" onclick="toggleRuleLevelsPanel()">ルールごとの強弱（ON/OFF） <span id="ruleLevelsToggle">▶ 展開</span></h4>
           <div id="ruleLevelsPanel" style="display:none">
             <p class="hint">
               各ルールを <b class="lv-word lv-must"><svg class="ic" aria-hidden="true"><use href="#i-must"/></svg>絶対</b>（必ず守る）／<b class="lv-word lv-soft"><svg class="ic" aria-hidden="true"><use href="#i-soft"/></svg>できれば</b>（なるべく守る・残ってもOK）／<b>OFF</b>（使わない）で切り替えられます。
@@ -196,7 +196,7 @@
     </details>
 
     <details class="card fold-card">
-      <summary class="fold-sum"><span class="grow">使い方</span></summary>
+      <summary class="fold-sum calc-view-only"><span class="grow">使い方</span></summary>
       <div class="fold-body">
         <ol class="usage">
           <li><b>① 基本設定</b>で対象月・連勤上限などを決めます</li>
@@ -239,7 +239,7 @@
     <div class="band band-info"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg><div class="grow">シフトの種類を自由に追加・編集・削除できます。カテゴリ A = 早番系、B = 遅番系（連勤内の時間帯統一ルールで使用）。集計対象・研修扱い・夜勤・合算・Excel出力の色・削除は、各行の「詳細」にあります。</div></div>
 
     <div class="card">
-      <h3 style="cursor:pointer" onclick="toggleDailyReqPanel()">日別必要人数（上書き設定） <span id="dailyReqToggle">▶ 展開</span></h3>
+      <h3 class="calc-view-only" style="cursor:pointer" onclick="toggleDailyReqPanel()">日別必要人数（上書き設定） <span id="dailyReqToggle">▶ 展開</span></h3>
       <div id="dailyReqPanel" style="display:none">
         <p class="hint">特定の日だけ必要人数を変えたい場合に入力してください。空欄または「-」の日はデフォルト値を使用します。</p>
         <div id="dailyReqContent"></div>
@@ -301,7 +301,7 @@
     </div>
 
     <details class="card fold-card">
-      <summary class="fold-sum"><span class="grow">スキル設定</span><span class="fold-sub">「営業できる人」などのスキルと、早番／遅番の必要人数</span></summary>
+      <summary class="fold-sum calc-view-only"><span class="grow">スキル設定</span><span class="fold-sub">「営業できる人」などのスキルと、早番／遅番の必要人数</span></summary>
       <div class="fold-body adv-body">
         <p class="hint" style="margin-top:0">「営業できる人」などのスキルを登録し、早番／遅番に最低何人必要かを設定できます。登録すると、スタッフの設定の「スキル」に各スキルのチェック欄が表示されます。</p>
         <div class="toolbar" style="margin-bottom:8px">
@@ -312,7 +312,7 @@
     </details>
 
     <details class="card fold-card">
-      <summary class="fold-sum"><span class="grow">役職タイプ説明</span></summary>
+      <summary class="fold-sum calc-view-only"><span class="grow">役職タイプ説明</span></summary>
       <div class="fold-body adv-body">
         <ul class="hint-list" style="margin:0">
           <li><b>副店長</b>: 毎日少なくとも1人が出勤します（全員が同じ日に休むことを禁止）。特別日は<span data-sym-key="早責">早責</span>/<span data-sym-key="遅責">遅責</span>に固定</li>
@@ -333,14 +333,14 @@
           <span class="mark-title">入れる記号</span>
           <div class="mark-row" role="group" aria-label="入れる記号">
             <span class="mark-grp">休み</span>
-            <button class="chip-btn" data-mark="休">休</button>
-            <button class="chip-btn" data-mark="有">有給</button>
-            <button class="chip-btn" data-mark="半">半休</button>
+            <button class="chip-btn calc-view-only" data-mark="休">休</button>
+            <button class="chip-btn calc-view-only" data-mark="有">有給</button>
+            <button class="chip-btn calc-view-only" data-mark="半">半休</button>
             <span class="mark-sep" aria-hidden="true"></span>
             <span class="mark-grp">出勤を固定</span>
             <span id="shiftChipContainer" class="mark-shifts"></span>
             <span class="mark-sep" aria-hidden="true"></span>
-            <button class="chip-btn" data-mark=""><svg class="ic" aria-hidden="true"><use href="#i-eraser"/></svg>クリア</button>
+            <button class="chip-btn calc-view-only" data-mark=""><svg class="ic" aria-hidden="true"><use href="#i-eraser"/></svg>クリア</button>
           </div>
         </div>
         <p class="hint" style="margin:8px 0 0">クリックで選択中の記号を入力、ダブルクリックで削除。出勤シフト指定は最適化でロックされます。</p>
@@ -396,7 +396,7 @@
 
     <!-- 詳しい機能（ふだんは閉じる。中のボタンは今のまま） -->
     <details class="card fold-card" id="advGenerate">
-      <summary class="fold-sum"><span class="grow">詳しい機能</span><span class="fold-sub">実現性チェック・エラー解消プラン・余の使い道・設定を変えたときの見込み・生成のボタン</span></summary>
+      <summary class="fold-sum calc-view-only"><span class="grow">詳しい機能</span><span class="fold-sub">実現性チェック・エラー解消プラン・余の使い道・設定を変えたときの見込み・生成のボタン</span></summary>
       <div class="fold-body adv-body">
         <div class="adv-btns">
           <button id="btnFeasibility" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</button>
