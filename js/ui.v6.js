@@ -4640,8 +4640,12 @@ function showPartialRegenModal() {
       render();
     });
     const run = (opts) => {
-      // ほかの計算中なら、固定をかける前に止める（固定だけ残って作り直されないのを防ぐ）
-      if (calcBusy()) { calcBusyToast(); return; }
+      // 生成の入口と同じ条件（ここで止めないと、🔒をかけたあと生成が始まらずに戻すだけになる）
+      if (!AppState.staff.length) { toast('スタッフを登録してください', 'error'); return; }
+      if (!AppState.settings.targetMonth) { toast('対象年月を設定してください', 'error'); return; }
+      // C11: 🔒をかける前に計算の鍵を取る。鍵を持たずに🔒と「◯日以前は数えない」を書いていたため、
+      // 下の 300ms の間に1分生成・じっくり生成を押すと、前半の違反を隠したまま別の生成が走った。
+      if (!calcBegin('生成')) return;
       // 中止・失敗したときは、前半の固定と「◯日以前は数えない」を元に戻す（固定だけ残っていた）
       const bkFixed = JSON.parse(JSON.stringify(AppState.fixedShifts || {}));
       const bkCut = AppState.settings.ignoreVioBeforeDay || 0;
@@ -4654,16 +4658,28 @@ function showPartialRegenModal() {
         saveToStorage(); refreshAllUI();
         toast('作り直しをやめたので、前半の固定と「◯日以前は数えない」を元に戻しました', 'info', 6000);
       } });
-      const n = applyPartialLock(cut);
-      close();
-      toast(`1〜${cut - 1}日の ${n}マス を固定しました。${cut}日以降を作り直します…`, 'info', 4000);
-      // 自動生成タブへ移動してから実行（進捗バーが見えるように）
-      const gt = document.querySelector('.tab[data-tab="generate"]');
-      if (gt) gt.click();
-      setTimeout(() => {
-        if (typeof window._runGenerate === 'function') window._runGenerate(opts);
-        else toast('生成処理が見つかりません。ページを再読み込みしてください', 'error');
-      }, 300);
+      let handed = false;   // 生成へ渡せたか（渡せなければ鍵を返して元に戻す）
+      try {
+        const n = applyPartialLock(cut);
+        close();
+        toast(`1〜${cut - 1}日の ${n}マス を固定しました。${cut}日以降を作り直します…`, 'info', 4000);
+        // 自動生成タブへ移動してから実行（進捗バーが見えるように）
+        const gt = document.querySelector('.tab[data-tab="generate"]');
+        if (gt) gt.click();
+        setTimeout(() => {
+          // 鍵を返してすぐに生成を呼ぶ（間に await を入れない）。runGenerate は最初の await より前で
+          // calcBegin するので、鍵の空く間にほかの操作が入ることはない。
+          calcEnd();
+          if (typeof window._runGenerate === 'function') window._runGenerate(opts);
+          else {
+            toast('生成処理が見つかりません。ページを再読み込みしてください', 'error');
+            try { opts.onAbort(); } catch (_) {}
+          }
+        }, 300);
+        handed = true;
+      } finally {
+        if (!handed) { calcEnd(); try { opts.onAbort(); } catch (_) {} }
+      }
     };
     $('prGoDeep').addEventListener('click', () => run({}));
     $('prGoFast').addEventListener('click', () => run({ fastMode: true }));

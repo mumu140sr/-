@@ -1080,12 +1080,15 @@ function setupGeneratePanel() {
   // opts.deepMode = true でじっくり最適化（時間上限を大幅に延長）
   const runGenerate = async (opts) => {
     opts = opts || {};
+    // 途中から作り直すなど、生成の前に🔒などを変えてから呼ぶ所は、始めずに戻るときも onAbort で元に戻す
     if (AppState.staff.length === 0) {
       toast('スタッフを登録してください', 'error');
+      if (typeof opts.onAbort === 'function') opts.onAbort();
       return;
     }
     if (!AppState.settings.targetMonth) {
       toast('対象年月を設定してください', 'error');
+      if (typeof opts.onAbort === 'function') opts.onAbort();
       return;
     }
 
@@ -1094,6 +1097,8 @@ function setupGeneratePanel() {
     const $text = document.getElementById('progressText');
     const $report = document.getElementById('reportCard');
 
+    // C11: ここより前に await を入れない。途中から作り直すは、鍵を返してすぐこの関数を呼び、
+    // ここで鍵を取り直す（間に await があると、その間にほかの計算が鍵を取れてしまう）。
     if (!calcBegin('生成')) { if (typeof opts.onAbort === 'function') opts.onAbort(); return; }
     setBusy(true);
     if (btnCancel) btnCancel.style.display = 'inline-block';
