@@ -3312,6 +3312,23 @@ async function _trySurplusChange(apply, opts) {
   return { ok: true, before, after, sd, message: words };
 }
 
+/**
+ * 余の解消の「有給にする」の変更（C5）。おすすめの見積もり・プレビュー・実行の3か所で同じものを使う。
+ * 希望と表を「有」にし、有給日数を+1する。その日に🔒があるときだけ、🔒も「有」に置き換える
+ * （🔒が無いマスには🔒を足さない）。B1 で生成・検査は🔒を先に読むので、🔒余のままだと
+ * 次の生成でその日は余に戻り、有給が別の日へ移っていた。
+ */
+function applyPaidSurplusChange(st, d) {
+  const id = st.id;
+  AppState.requests[id] = AppState.requests[id] || {};
+  AppState.requests[id][d] = '有';
+  AppState.shifts[id] = AppState.shifts[id] || {};
+  AppState.shifts[id][d] = '有';
+  const fx = (AppState.fixedShifts || {})[id];
+  if (fx && fx[d]) fx[d] = '有';
+  st.paidLeave = (parseInt(st.paidLeave) || 0) + 1;
+}
+
 function showSurplusResolveModal() {
   // 暗幕を張らない「動かせるパネル」にする。裏のシフト表を見ながら、
   // どこをどう直すか考えられるようにするため。
@@ -3544,12 +3561,7 @@ function showSurplusResolveModal() {
       const st = AppState.staff.find(x => x.id === c.id); if (!st) return;
       // ㋐ その人のその日を有給にする
       {
-        const n = measure(() => {   // 「有給にする」を押したときと同じ変更
-          AppState.requests[c.id] = AppState.requests[c.id] || {};
-          AppState.requests[c.id][c.day] = '有';
-          AppState.shifts[c.id][c.day] = '有';
-          st.paidLeave = (parseInt(st.paidLeave) || 0) + 1;
-        });
+        const n = measure(() => applyPaidSurplusChange(st, c.day));   // 「有給にする」を押したときと同じ変更
         if (n != null) out.push(entry({ kind: 'paid', id: c.id, name: c.name, day: c.day }, n));
       }
       // ㋐' 指導役のそばで研修に入れる（研修は人員にカウントしないので定数を動かさない）
@@ -3846,13 +3858,7 @@ function showSurplusResolveModal() {
       const id = selPaid.id, d = parseInt(selPaid.day);
       const st = AppState.staff.find(x => x.id === id);
       $p.innerHTML = (st && d)
-        ? previewLine(preview(() => {   // 「有給にする」を押したときと同じ変更（👑の見積もりと同じ数え方）
-            AppState.requests[id] = AppState.requests[id] || {};
-            AppState.requests[id][d] = '有';
-            AppState.shifts[id] = AppState.shifts[id] || {};
-            AppState.shifts[id][d] = '有';
-            st.paidLeave = (parseInt(st.paidLeave) || 0) + 1;
-          }))
+        ? previewLine(preview(() => applyPaidSurplusChange(st, d)))   // 「有給にする」を押したときと同じ変更（👑の見積もりと同じ数え方）
         : '';
     }
     const $w = modal.querySelector('#previewWork');
@@ -4400,13 +4406,8 @@ function showSurplusResolveModal() {
       const cur = cellOf(id, d);
       if (cur === '有') { say(`${uiIcon('soft')} ${escapeHtml(s.name)} ${d}日 はすでに有給です。`, false); return; }
       busy(true);
-      const r = await trySurplusChange(() => {
-        AppState.requests[id] = AppState.requests[id] || {};
-        AppState.requests[id][d] = '有';
-        AppState.shifts[id] = AppState.shifts[id] || {};
-        AppState.shifts[id][d] = '有';
-        s.paidLeave = (parseInt(s.paidLeave) || 0) + 1;   // 有給の消化日数を1日増やす
-      }, { adjust: false, confirm: askWorsen });
+      const r = await trySurplusChange(() => applyPaidSurplusChange(s, d),   // 有給の消化日数も1日増やす
+        { adjust: false, confirm: askWorsen });
       busy(false);
       say(r.ok ? `${uiIcon(r.hadCritical ? 'must' : r.worsened ? 'soft' : 'ok')} ${escapeHtml(s.name)} ${d}日 を有給にしました（${r.message}）。有給日数は ${s.paidLeave}日 になりました。${diffText(r)}`
                : `${uiIcon('undo')} ${escapeHtml(s.name)} ${d}日 の有給を取り消しました。${r.message}`, r.ok && !r.worsened);
@@ -5667,6 +5668,13 @@ let _nextStepAcked = false;
 function applyNextAct(act) {
   if (!act) return false;
   if (act.type === 'request') {
+    // C6: 固定（🔒）のあるマスは、④の希望を書いても生成・検査は🔒を先に読むので何も直らない（B1）
+    if (((AppState.fixedShifts || {})[act.staffId] || {})[act.day]) {
+      const hasTable = !!(AppState.generated && Object.keys(AppState.shifts || {}).length);
+      toast('この日は固定されているので、ボタンでは直せません。' + (hasTable ? '「シフト表」でこのマスを直してください'
+            : '「シフト表」の「その他の操作」にある「固定をすべて解除」で固定を外してから直してください'), 'warning', 7000);
+      return false;
+    }
     AppState.requests[act.staffId] = AppState.requests[act.staffId] || {};
     AppState.requests[act.staffId][act.day] = act.to;
     return true;

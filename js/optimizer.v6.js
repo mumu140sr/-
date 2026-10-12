@@ -4992,7 +4992,17 @@ function analyzeLowerBound() {
         const r = maxSkillInBand(g, sk, bandKeys, d);
         if (r.max >= min) return;
         let fix = '';
-        if (r.blocker) {
+        // C6: 塞いでいる人のその日が固定（🔒）なら、④の希望を書いても効かない（B1 で🔒を先に読む）。
+        // ボタンは出さず、手で直してもらう（表があれば⑥の表で、無ければ固定を外してから）
+        const locked = !!(r.blocker && ((AppState.fixedShifts || {})[r.blocker.id] || {})[d]);
+        const hasTable = !!(AppState.generated && Object.keys(AppState.shifts || {}).length);
+        if (r.blocker && locked) {
+          const alt = r.blocker.alt;
+          fix = `${r.blocker.name}さんの${d}日は「${shiftSym(r.blocker.key)}」に固定されているため、ボタンでは直せません。`
+              + (hasTable
+                  ? `「シフト表」でこのマスを${alt ? `「${shiftSym(alt)}」に` : ''}直してください`
+                  : `「シフト表」の「その他の操作」にある「固定をすべて解除」で固定を外してから、${alt ? `希望を「${shiftSym(alt)}」に変えてください` : '直してください'}`);
+        } else if (r.blocker) {
           const alt = r.blocker.alt;
           fix = alt
             ? `${r.blocker.name}さんの${d}日の希望を「${shiftSym(r.blocker.key)}」から「${shiftSym(alt)}」に変えると収まります`
@@ -5004,7 +5014,7 @@ function analyzeLowerBound() {
         res.reasons.push({
           kind: 'skill-slot', day: d, skill: sk.name, need: min, have: r.max, fix,
           // ボタン1つで直せる操作。null なら手で直してもらう
-          act: (r.blocker && r.blocker.alt)
+          act: (r.blocker && r.blocker.alt && !locked)
             ? { type: 'request', staffId: r.blocker.id, day: d, to: r.blocker.alt,
                 label: `${r.blocker.name}さんの${d}日を「${shiftSym(r.blocker.alt)}」に変える` } : null,
           text: `${pfx}${d}日: スキル「${sk.name}」は最低 ${min}人 必要ですが、`
