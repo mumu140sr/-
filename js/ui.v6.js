@@ -1786,6 +1786,17 @@ function requestFixOptions(reason, lb0) {
   } else if ((reason.kind === 'day' || reason.kind === 'role') && reason.day) {
     // その日に休み希望を出している人の、希望休を外す
     (AppState.staff || []).forEach(x => { if (req(x.id, reason.day) === '休') add([{ id: x.id, day: reason.day, from: '休', to: '' }]); });
+  } else if (reason.kind === 'comp-days' && reason.from) {
+    // C9: 6連勤を避けると出られない日の不足（区間）。区間の中で休み希望を出している人（その役割を担当できる人）の
+    // 希望休を外す（希望を1つ外せば消える不足にも「直せません」と出ていた）。外して理由が消え、最低件数が減る案だけを出す
+    const keys = reason.role ? String(reason.role).split('・') : null;
+    for (let d = reason.from; d <= (reason.to || reason.from); d++) {
+      (AppState.staff || []).forEach(x => {
+        if (req(x.id, d) !== '休' || fixed(x.id, d)) return;
+        if (keys && !(x.allowedShifts || []).some(k => keys.includes(k))) return;
+        add([{ id: x.id, day: d, from: '休', to: '' }]);
+      });
+    }
   }
   const out = [];
   for (const ch of cands) {
