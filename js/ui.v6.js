@@ -2396,10 +2396,82 @@ function genTableState() {
 // A3: 🧭・🩹が開いている間に積まれた「変えた所だけ」の変更を、その画面の「戻す」の控えにも当てる
 // （控えを丸ごと戻すと、その間に⚖️余の解消などで入れた変更まで消えていた）
 const _snapRebasers = new Set();
+// 組は写さない: 控えに当てるときも履歴に積むときも、変更の一覧（[種類, 行, 列, 前, 後] の組）は同じ配列のまま渡す。
+// 控えを丸ごと戻したあとに、履歴の組そのものを書き換えて付け替えるため（C12）
 function _rebaseSnaps(list, dir) {
   _snapRebasers.forEach(f => { try { f(list, dir); } catch (e) { console.warn('rebase', e); } });
 }
-/** 変えた所だけの履歴を積む（余の解消が実行されたとき） */
+/** C12: 控えに当てた記録（組 → 控えの元の値と当てた値）。画面の控えごとに1つ持つ */
+function _newSnapRec() { return { m: new Map(), lists: new Set() }; }
+/**
+ * C12: 「変えた所だけ」の変更を、🧭・🩹の「戻す」の控え（T）に当てる（控え専用。AppState には _applyChangeList）。
+ * その画面が同じ項目を先に変えていて、控えの値が変更の前の値と違うときも飛ばさない:
+ * 数（日ごとの必要人数・有給日数）は「控えの値＋変更で増えた分」、希望・🔒は「変更の後の値」を控えに入れる。
+ * 当てた値と控えの元の値を rec に覚え、元に戻す（'undo'）では控えを元の値に戻す。
+ */
+function _rebaseSnapWith(list, dir, T, kinds, rec) {
+  if (!list || !T) return;
+  const num = (k) => k === 'paid' || k === 'dailyRequirements' || k === 'dailyRequirementsCast';
+  (list || []).forEach(c => {
+    const [k, id, d, from, to] = c;
+    if (kinds && !kinds.includes(k)) return;
+    let get, put;
+    if (k === 'paid') {
+      const s = (T.staff || []).find(x => x.id === id);
+      if (!s) return;
+      get = () => s.paidLeave; put = (v) => { s.paidLeave = v; };
+    } else {
+      const M = T[k] || (T[k] = {});
+      get = () => (M[id] || {})[d];
+      put = (v) => {
+        if (v === undefined) { if (M[id]) { delete M[id][d]; if (!Object.keys(M[id]).length) delete M[id]; } }
+        else { M[id] = M[id] || {}; M[id][d] = v; }
+      };
+    }
+    // 数の欄が空（日ごとの必要人数が既定のまま）のときは、画面に出ている人数として数える
+    const eff = (v) => {
+      if (v != null && v !== '') return Number(v) || 0;
+      if (k === 'paid') return 0;
+      const reqs = k === 'dailyRequirementsCast' ? (T.roleRequirementsCast || AppState.roleRequirementsCast || {})
+                                                 : (T.roleRequirements || AppState.roleRequirements || {});
+      return Number(getDayReq(reqs, null, id, parseInt(d))) || 0;
+    };
+    const sv = get();
+    if (dir === 'undo') {
+      const r = rec && rec.m.get(c);
+      if (r) { if (sv === r.val) put(r.orig); return; }     // 当てたままなら、控えの元の値に戻す
+      if (sv === to) put(from);                             // 控えを取る前の変更は、いつもの決まりで戻す
+      return;
+    }
+    let v;
+    if (sv === from) v = to;
+    else if (num(k)) v = Math.max(0, eff(sv) + (eff(to) - eff(from)));
+    else v = to;
+    if (rec) rec.m.set(c, { orig: sv, val: v });
+    put(v);
+  });
+  if (rec) { if (dir === 'undo') rec.lists.delete(list); else rec.lists.add(list); }
+}
+/**
+ * C12: 控えで丸ごと戻したあと、その控え（rec）に当てた変更の履歴の組を、戻したあとの値に付け替える
+ * （組は写さず、その配列をそのまま書き換える）。付け替えないと、あとの元に戻す・やり直すが、
+ * 「いまもその値のままの所だけ」の決まりで飛ばされるか、その画面が変えた途中の値へ戻していた。
+ * 返り値: 余の解消・余の使い道の変更を控えに残したか（知らせるため）
+ */
+function _retargetSnapHistory(kinds, rec) {
+  if (!rec) return false;
+  const kept = rec.lists.size > 0;
+  // 記録はどれも「控えに当てる前の値 → 当てた値」の順につながっている（元に戻す・やり直すは後ろから順に
+  // 当たるため）ので、控えの値を見ずに全部付け替える（同じ項目に、取り消したあとの別の変更が重なっていても
+  // つながりが切れない）
+  rec.m.forEach((r, c) => {
+    if (kinds && !kinds.includes(c[0])) return;
+    c[3] = r.orig; c[4] = r.val;
+  });
+  return kept;
+}
+const SNAP_KEPT_MSG = '余の解消・余の使い道で入れた変更は残しています。戻すときは「元に戻す」を押してください';
+/** 変えた所だけの履歴を積む（余の解消が実行されたとき）。組は写さない（上の _rebaseSnaps の注意） */
 function recordDeltaHistory(list) {
   if (!list || !list.length) return;
   _rebaseSnaps(list, 'redo');
@@ -3137,11 +3209,12 @@ function showRelaxModal() {
   document.body.appendChild(modal);
 
   const RELAX_KINDS = ['dailyRequirements', 'dailyRequirementsCast', 'paid'];
+  let relaxRec = _newSnapRec();   // C12: 控えに当てた変更の記録（「変更を元に戻す」で履歴の組を付け替える）
   const relaxRebase = (list, dir) => {
     if (!modal.isConnected) { _snapRebasers.delete(relaxRebase); return; }
     if (!_relaxUndo) return;
     const d = JSON.parse(_relaxUndo);
-    _applyChangeList(list, dir, d, RELAX_KINDS);
+    _rebaseSnapWith(list, dir, d, RELAX_KINDS, relaxRec);
     _relaxUndo = JSON.stringify(d);
   };
   _snapRebasers.add(relaxRebase);
@@ -3157,6 +3230,7 @@ function showRelaxModal() {
       const pl = plans[parseInt(btn.dataset.relax)];
       if (!pl) return;
       _relaxUndo = snapshotForRelax();
+      relaxRec = _newSnapRec();
       const changes = applyRelaxPlan(pl);
       autoSave();
       refreshAllUI();
@@ -3175,14 +3249,15 @@ function showRelaxModal() {
 
   $undo.addEventListener('click', () => {
     if (!_relaxUndo) return;
+    const kept = _retargetSnapHistory(RELAX_KINDS, relaxRec);
     restoreFromRelax(_relaxUndo);
-    _relaxUndo = null;
+    _relaxUndo = null; relaxRec = _newSnapRec();
     if (AppState.shifts && Object.keys(AppState.shifts).length) AppState.violations = checkViolations(AppState.shifts);
     autoSave();
     refreshAllUI();
-    $done.innerHTML = uiIcon('undo') + ' <b>変更を元に戻しました。</b>';
+    $done.innerHTML = uiIcon('undo') + ' <b>変更を元に戻しました。</b>' + (kept ? `<br>${escapeHtml(SNAP_KEPT_MSG)}` : '');
     $undo.style.display = 'none';
-    toast('元に戻しました', 'info');
+    toast(kept ? `元に戻しました。${SNAP_KEPT_MSG}` : '元に戻しました', 'info', kept ? 8000 : undefined);
   });
 }
 
@@ -5896,16 +5971,29 @@ function showGenerateWizard() {
   const SNAP_KEYS = ['settings', 'dailyRequirements', 'dailyRequirementsCast',
                      'specialDays', 'requests', 'fixedShifts', 'staff', 'skills'];
   const snap = () => { const o = {}; SNAP_KEYS.forEach(k => { o[k] = JSON.parse(JSON.stringify(AppState[k] || (Array.isArray(AppState[k]) ? [] : {}))); }); return o; };
-  const restore = (o) => { if (!o) return; SNAP_KEYS.forEach(k => { AppState[k] = JSON.parse(JSON.stringify(o[k])); }); autoSave(); refreshAllUI(); };
-  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  const openSnap = snap();          // 開いた時点
-  let stepSnap = snap();            // いまのページに入った時点
   // A3: 開いている間に⚖️余の解消などで入れた「変えた所だけ」の変更は、戻すの控えにも当てる（戻しても消さない）
   const WZ_KINDS = ['requests', 'fixedShifts', 'dailyRequirements', 'dailyRequirementsCast', 'paid'];
+  // 控えで丸ごと戻す。C12: 控えに当てた変更の履歴の組を戻したあとの値に付け替え、表があれば違反を数え直す。
+  // 返り値: 余の解消・余の使い道の変更を残したか
+  const restore = (o, rec) => {
+    if (!o) return false;
+    SNAP_KEYS.forEach(k => { AppState[k] = JSON.parse(JSON.stringify(o[k])); });
+    const kept = _retargetSnapHistory(WZ_KINDS, rec);
+    if (AppState.shifts && Object.keys(AppState.shifts).length) AppState.violations = checkViolations(AppState.shifts);
+    autoSave(); refreshAllUI();
+    return kept;
+  };
+  const restoredMsg = (msg, kept) => toast(kept ? `${msg}。${SNAP_KEPT_MSG}` : msg, 'info', kept ? 8000 : 5000);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const openSnap = snap();          // 開いた時点
+  const openRec = _newSnapRec();
+  let stepSnap = snap();            // いまのページに入った時点
+  let stepRec = _newSnapRec();
+  const newStepSnap = () => { stepSnap = snap(); stepRec = _newSnapRec(); };
   const wzRebase = (list, dir) => {
     if (!modal.isConnected) { _snapRebasers.delete(wzRebase); return; }
-    _applyChangeList(list, dir, openSnap, WZ_KINDS);
-    _applyChangeList(list, dir, stepSnap, WZ_KINDS);
+    _rebaseSnapWith(list, dir, openSnap, WZ_KINDS, openRec);
+    _rebaseSnapWith(list, dir, stepSnap, WZ_KINDS, stepRec);
   };
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;z-index:9980;padding:16px';
@@ -6136,7 +6224,7 @@ function showGenerateWizard() {
           e.preventDefault(); e.stopPropagation();
           const it = items.find(x => x.id === btn.dataset.ckgo);
           if (!it) return;
-          if (it.step) { step = it.step; stepSnap = snap(); render(); return; }
+          if (it.step) { step = it.step; newStepSnap(); render(); return; }
           if (it.go) gotoTab(it.go);
         }));
         const g = modal.querySelector('#wzNext');
@@ -6181,15 +6269,15 @@ function showGenerateWizard() {
     const $ = (id) => modal.querySelector('#' + id);
     if ($('wzPrev')) $('wzPrev').addEventListener('click', () => {
       // このページでやったことは取り消してから戻る
-      if (!same(stepSnap, snap())) { restore(stepSnap); toast('このページでの変更を取り消しました', 'info'); }
-      step--; stepSnap = snap(); render();
+      if (!same(stepSnap, snap())) restoredMsg('このページでの変更を取り消しました', restore(stepSnap, stepRec));
+      step--; newStepSnap(); render();
     });
     if ($('wzUndo')) $('wzUndo').addEventListener('click', () => {
-      restore(stepSnap); toast('このページでの変更を取り消しました', 'info'); render();
+      restoredMsg('このページでの変更を取り消しました', restore(stepSnap, stepRec)); render();
     });
     if ($('wzReset')) $('wzReset').addEventListener('click', () => {
-      restore(openSnap); stepSnap = snap();
-      toast('ウィザードを開く前の状態に戻しました', 'info', 5000); render();
+      const kept = restore(openSnap, openRec); newStepSnap();
+      restoredMsg('ウィザードを開く前の状態に戻しました', kept); render();
     });
     if ($('wzClose')) $('wzClose').addEventListener('click', () => {
       if (!same(openSnap, snap())) {
@@ -6198,7 +6286,7 @@ function showGenerateWizard() {
       modal.remove();
     });
     if ($('wzNext')) $('wzNext').addEventListener('click', () => {
-      if (step < 5) { step++; stepSnap = snap(); render(); return; }
+      if (step < 5) { step++; newStepSnap(); render(); return; }
       modal.remove();
       const g = document.getElementById('btnGenerate'); if (g) g.click();
     });
