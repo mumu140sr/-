@@ -272,6 +272,17 @@ function setupTabs() {
   });
 }
 
+// 検査の決まり（①の設定・ルールの強弱・必要人数・スキル・シフト種別）を変えたあと、いまの表のエラーを数え直して
+// 描き直す。表そのものは作り直さない（変えた決まりで表を作るには、生成し直す）。
+// 以前は保存するだけで、⑥の帯・マスの印・⑤の一覧が前の決まりの文のまま残っていた（スキルを「早番」に
+// 変えても「遅番に「営業」…」と出たまま。ルールチェックを押すまで直らなかった）。
+function recheckAfterRuleChange() {
+  if (AppState.generated && AppState.shifts && Object.keys(AppState.shifts).length && typeof checkViolations === 'function') {
+    try { AppState.violations = checkViolations(AppState.shifts); } catch (e) { console.warn('recheck', e); }
+  }
+  if (typeof renderResultTable === 'function') renderResultTable();
+}
+
 // ===== ① 基本設定 =====
 function setupSettingsPanel() {
   const $month     = document.getElementById('targetMonth');
@@ -299,7 +310,7 @@ function setupSettingsPanel() {
     $pairRest.value = AppState.settings.pairRestTarget || 0;
     $pairRest.addEventListener('change', () => {
       AppState.settings.pairRestTarget = parseInt($pairRest.value) || 0;
-      autoSave();
+      autoSave(); recheckAfterRuleChange();
     });
   }
 
@@ -421,15 +432,15 @@ function setupSettingsPanel() {
   $maxCons.addEventListener('change', () => {
     AppState.settings.maxConsecutive = parseInt($maxCons.value) || 4;
     warnComplianceLimit(AppState.settings.maxConsecutive, '全体');
-    autoSave();
+    autoSave(); recheckAfterRuleChange();
   });
   $forbidLE.addEventListener('change', () => {
     AppState.settings.forbidLateEarly = $forbidLE.checked;
-    autoSave();
+    autoSave(); recheckAfterRuleChange();
   });
   $penaltySO.addEventListener('change', () => {
     AppState.settings.penaltySingleOff = $penaltySO.checked;
-    autoSave();
+    autoSave(); recheckAfterRuleChange();
   });
   const $par = document.getElementById('parallelSolve');
   if ($par) {
@@ -458,7 +469,7 @@ function setupSettingsPanel() {
     $replDays.value.split(',')
       .map(d => parseInt(d.trim())).filter(d => d > 0 && d <= 31)
       .forEach(d => { AppState.specialDays[d] = 'replacement'; });
-    autoSave();
+    autoSave(); recheckAfterRuleChange();
   });
   $renwDays.addEventListener('change', () => {
     for (const d in AppState.specialDays) {
@@ -467,7 +478,7 @@ function setupSettingsPanel() {
     $renwDays.value.split(',')
       .map(d => parseInt(d.trim())).filter(d => d > 0 && d <= 31)
       .forEach(d => { AppState.specialDays[d] = 'renewal'; });
-    autoSave();
+    autoSave(); recheckAfterRuleChange();
   });
   if ($delvDays) $delvDays.addEventListener('change', () => {
     for (const d in AppState.specialDays) {
@@ -478,6 +489,7 @@ function setupSettingsPanel() {
       .forEach(d => { AppState.specialDays[d] = 'delivery'; });
     autoSave();
     if (typeof renderReqRules === 'function') renderReqRules();
+    recheckAfterRuleChange();
   });
 }
 
@@ -664,7 +676,7 @@ function renderRuleLevels() {
       if (v === def) delete AppState.settings.ruleLevels[t]; // 既定と同じなら未設定に戻す（空=従来）
       else AppState.settings.ruleLevels[t] = v;
       autoSave();
-      renderResultTable(); // 表示中の🔴/🟡分類を即反映
+      recheckAfterRuleChange(); // OFF にしたルールは検査で数えないので数え直す（表示中の分類も即反映）
       showBsNote();
       if ((t === 'balance-diff' || t === 'band-switch') && v === 'must' && bsBoth())
         toast('「早遅バランス」と「早遅の切り替え」が両方「絶対」です。ぶつかることがあるので、どちらか一方を「できれば」にしてください。', 'warning', 8000);
@@ -852,6 +864,7 @@ function renderRoleTable() {
         type[field] = e.target.value;
       }
       autoSave();
+      if (field !== 'color') recheckAfterRuleChange();   // 集計対象・研修・夜勤・カテゴリは検査に効く（色は Excel だけ）
     });
   });
 
@@ -862,7 +875,7 @@ function renderRoleTable() {
       const type = AppState.shiftTypes[idx];
       if (!type) return;
       AppState.roleRequirements[type.key] = parseInt(e.target.value) || 0;
-      autoSave();
+      autoSave(); recheckAfterRuleChange();
     });
   });
 
@@ -874,7 +887,7 @@ function renderRoleTable() {
       if (!type) return;
       if (!AppState.roleRequirementsCast) AppState.roleRequirementsCast = {};
       AppState.roleRequirementsCast[type.key] = parseInt(e.target.value) || 0;
-      autoSave();
+      autoSave(); recheckAfterRuleChange();
     });
   });
 
@@ -888,7 +901,7 @@ function renderRoleTable() {
       if (e.target.checked) AppState.settings.combinedShifts[type.key] = true;
       else delete AppState.settings.combinedShifts[type.key];
       renderRoleTable(); // キャスト欄の有効/無効表示を更新
-      autoSave();
+      autoSave(); recheckAfterRuleChange();
     });
   });
 
@@ -917,7 +930,7 @@ function renderRoleTable() {
         if (AppState.dailyRequirementsCast) delete AppState.dailyRequirementsCast[type.key];
         AppState.shiftTypes.splice(idx, 1);
         renderRoleTable();
-        autoSave();
+        autoSave(); recheckAfterRuleChange();
         toast(`「${shiftSymOf(type)}」を削除しました`, 'info');
       }
     });
@@ -1054,7 +1067,7 @@ function renderDailyReqPanel() {
       const cell = e.target.closest('td');
       if (cell) cell.style.background = hasOverride ? 'var(--accent-soft)'
         : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
-      autoSave();
+      autoSave(); recheckAfterRuleChange();
     });
   });
 
@@ -1072,6 +1085,7 @@ function renderDailyReqPanel() {
       AppState.dailySkills           = {};
       autoSave();
       renderDailyReqPanel();
+      recheckAfterRuleChange();
       toast('日別上書き設定をクリアしました', 'success');
     });
   }
@@ -1101,7 +1115,7 @@ function renderDailyReqPanel() {
       const cell = e.target.closest('td');
       if (cell) cell.style.background = hasOverride ? 'var(--accent-soft)'
         : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
-      autoSave();
+      autoSave(); recheckAfterRuleChange();
     });
   });
 }
@@ -1122,6 +1136,7 @@ function setupStaffPanel() {
     if (!confirm(`表示中のシフト表の末尾から「前月末連勤日数／前月末シフト」を取り込みます。\n（${n}人が月末に連勤中）\n\n現在の入力値は上書きされます。よろしいですか？`)) return;
     applyPrevMonthEnd(info);
     renderStaffTable();
+    recheckAfterRuleChange();   // 前月末の連勤は、月初の連勤の数え方に効く
     toast(`前月末情報を取り込みました（${n}人が連勤中）`, 'success', 4000);
   });
 
@@ -1181,7 +1196,7 @@ function setupSkillsPanel() {
       AppState.skills.push({ name, target: 'late', req: 0 });
       renderSkillsPanel();
       renderStaffTable();
-      autoSave();
+      autoSave(); recheckAfterRuleChange();
     });
   }
   renderSkillsPanel();
@@ -1299,6 +1314,7 @@ function renderSkillsPanel() {
         if (typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
       }
       autoSave();
+      recheckAfterRuleChange();   // 時間帯・目標人数・最低ライン・名前で、スキルのエラーの文と件数が変わる
     });
   });
 
@@ -1319,7 +1335,7 @@ function renderSkillsPanel() {
       renderSkillsPanel();
       renderStaffTable();
       if (typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
-      autoSave();
+      autoSave(); recheckAfterRuleChange();
     });
   });
 }
@@ -1486,6 +1502,7 @@ function renderStaffTable() {
         renderStaffTable();                       // 選択欄の有効／無効を反映
       }
       autoSave();
+      recheckAfterRuleChange();   // 公休数・個人の連勤上限・前月末・早遅バランス・名前などで、エラーの文と件数が変わる
     });
   });
 
@@ -1502,7 +1519,7 @@ function renderStaffTable() {
       } else {
         staff.prefs = staff.prefs.filter(p => p !== pref);
       }
-      autoSave();
+      autoSave(); recheckAfterRuleChange();
     });
   });
 
@@ -1539,7 +1556,7 @@ function renderStaffTable() {
       const staff = AppState.staff.find(s => s.id === id);
       if (!staff) return;
       staff[rule] = e.target.checked;
-      autoSave();
+      autoSave(); recheckAfterRuleChange();
     });
   });
 
@@ -1556,7 +1573,7 @@ function renderStaffTable() {
       } else {
         staff.skills = staff.skills.filter(n => n !== skill);
       }
-      autoSave();
+      autoSave(); recheckAfterRuleChange();   // スキルのある人の数が変わる
     });
   });
 
@@ -4968,7 +4985,7 @@ function renderReqRules(hostId) {
   }).join('');
 
   // C4: 順番に確認して生成するの1ページ目（wzRules）で変えたら、①の欄も描き直す（古い値のまま残っていた）
-  const rerender = () => { autoSave(); renderReqRules(hostId); if (hostId && hostId !== 'reqRuleList') renderReqRules(); };
+  const rerender = () => { autoSave(); renderReqRules(hostId); if (hostId && hostId !== 'reqRuleList') renderReqRules(); recheckAfterRuleChange(); };
   $list.querySelectorAll('[data-rr]').forEach(el => {
     const i = parseInt(el.dataset.i), kind = el.dataset.rr, r = rules[i];
     if (!r) return;
@@ -4998,7 +5015,7 @@ function setupReqRules() {
   if ($add) $add.addEventListener('click', () => {
     const keys = (typeof getWorkShiftKeys === 'function') ? getWorkShiftKeys() : ['早'];
     _reqRules().push({ id: 'r' + Date.now(), name: '', key: keys[0], to: 2, enabled: true, when: {} });
-    autoSave(); renderReqRules();
+    autoSave(); renderReqRules(); recheckAfterRuleChange();
   });
   if ($pre) $pre.addEventListener('click', () => {
     const keys = (typeof getWorkShiftKeys === 'function') ? getWorkShiftKeys() : [];
@@ -5012,7 +5029,7 @@ function setupReqRules() {
     add('入れ替え日は遅番を2人', late, 2, { special: 'replacement' });
     add('搬入日は遅番を2人',     late, 2, { special: 'delivery' });
     add('土日かつ2・8のつく日は早番を2人', early, 2, { weekday: [0, 6], dayEnds: [2, 8] });
-    autoSave(); renderReqRules();
+    autoSave(); renderReqRules(); recheckAfterRuleChange();
     toast('よく使うルールを3つ追加しました。中身は自由に変えられます', 'info', 5000);
   });
   renderReqRules();
@@ -6035,7 +6052,7 @@ function showGenerateWizard() {
             for (const d in AppState.specialDays) if (AppState.specialDays[d] === kind) delete AppState.specialDays[d];
             el.value.split(',').map(x => parseInt(x.trim())).filter(x => x > 0 && x <= 31)
               .forEach(x => { AppState.specialDays[x] = kind; });
-            autoSave(); reRender();
+            autoSave(); recheckAfterRuleChange(); reRender();
           });
         };
         bindSp('wzRepl', 'replacement'); bindSp('wzRenw', 'renewal'); bindSp('wzDelv', 'delivery');
@@ -6090,12 +6107,12 @@ function showGenerateWizard() {
           AppState.dailyRequirements = AppState.dailyRequirements || {};
           AppState.dailyRequirements[k] = AppState.dailyRequirements[k] || {};
           AppState.dailyRequirements[k][d] = Math.max(0, parseInt(el.value) || 0);
-          autoSave(); reRender();
+          autoSave(); recheckAfterRuleChange(); reRender();
         }));
         modal.querySelectorAll('[data-wzdel]').forEach(el => el.addEventListener('click', () => {
           const [k, d] = el.dataset.wzdel.split('|');
           if ((AppState.dailyRequirements || {})[k]) delete AppState.dailyRequirements[k][d];
-          autoSave(); reRender();
+          autoSave(); recheckAfterRuleChange(); reRender();
         }));
         const ad = modal.querySelector('#wzAddReq');
         if (ad) ad.addEventListener('click', () => {
@@ -6106,7 +6123,7 @@ function showGenerateWizard() {
           AppState.dailyRequirements = AppState.dailyRequirements || {};
           AppState.dailyRequirements[k] = AppState.dailyRequirements[k] || {};
           AppState.dailyRequirements[k][d] = Math.max(0, n);
-          autoSave(); reRender();
+          autoSave(); recheckAfterRuleChange(); reRender();
         });
       },
     };

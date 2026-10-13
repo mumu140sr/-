@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=260" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=260" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=260" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=260">
+<link rel="icon" href="favicon.svg?v=261" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=261" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=261" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=261">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=260" />
+<link rel="stylesheet" href="css/style.css?v=261" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -299,6 +299,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
         <dt>気をつけること</dt><dd><ul>
           <li>「<span class="m-ui">詳しい設定</span>」は、ふだんはそのままでよいです。</li>
           <li>6連勤以上は、連勤上限をいくつにしても、いちばん重いエラーです。</li>
+          <li>ここの設定を変えると、いまの <span class="m-tab" data-n="6">シフト表</span> のエラーをその場で数え直します。表そのものは変わらないので、新しい設定で作るには生成し直します。</li>
         </ul></dd>
       </dl>
       <details class="m-more"><summary>くわしく</summary>
@@ -327,6 +328,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
         <dt>気をつけること</dt><dd><ul>
           <li><b>記号と名称は、自由に変えてよいです。</b>中の名前は変わらないので、決まりやデータは壊れません。</li>
           <li>「<span class="m-ui">日別必要人数（上書き設定）</span>」は、効きすぎることがあります。</li>
+          <li>ここの設定を変えると、いまの <span class="m-tab" data-n="6">シフト表</span> のエラーをその場で数え直します。表そのものは変わらないので、新しい設定で作るには生成し直します。</li>
         </ul></dd>
       </dl>
       <details class="m-more"><summary>くわしく</summary>
@@ -354,6 +356,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
         <dt>気をつけること</dt><dd><ul>
           <li><b>「<span class="m-ui">担当シフト</span>」がいちばん大事です。</b>チェックの無いシフトには入りません。</li>
           <li>有給は、公休に数えません。公休9日・有給3日なら、休みは合わせて12日です。</li>
+          <li>ここの設定を変えると、いまの <span class="m-tab" data-n="6">シフト表</span> のエラーをその場で数え直します。表そのものは変わらないので、新しい設定で作るには生成し直します。</li>
         </ul></dd>
       </dl>
       <details class="m-more"><summary>くわしく</summary>
@@ -537,7 +540,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <details><summary>計算している間、入力できない</summary>
         <p>計算中は、設定・希望・表の手直しを止めています。見ることはできます（折りたたみや「<span class="m-ui">詳細</span>」を開く、列の幅を変える、文字を選ぶ、<span class="m-tab" data-n="4">希望休入力</span> の「<span class="m-ui">入れる記号</span>」を選び替える、もできます）。計算中に入れた文字は消えるので、終わってから入れ直してください。終わるのを待つか、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>中止</span> が出ていれば押してください。</p></details>
       <details><summary>画面が前のままで、新しくならない</summary>
-        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v260 など）が出ています。知らされた番号と同じか確かめます。</p></details>
+        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v261 など）が出ています。知らされた番号と同じか確かめます。</p></details>
       <details><summary>データが消えた／別のパソコンで使いたい</summary>
         <p><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-export"/></svg>書き出し</span> で作ったファイルがあれば、「<span class="m-ui">データ</span>」の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg>取り込み</span> で戻せます。別のパソコンでも同じです。ファイルが無いと戻せません。</p></details>
       <details><summary>「人が足りない」と出る</summary>
