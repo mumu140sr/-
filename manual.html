@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=261" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=261" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=261" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=261">
+<link rel="icon" href="favicon.svg?v=262" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=262" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=262" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=262">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=261" />
+<link rel="stylesheet" href="css/style.css?v=262" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -343,6 +343,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>画面のマスの色は、カテゴリで決まります（早番系は青、遅番系は橙、研修は紫）。<span class="m-btn">詳細</span> の中の「<span class="m-ui">Excel出力の色</span>」は、Excel に出すときの色です。</li>
           <li>「<span class="m-ui">必要人数/日</span>」は、社員とキャストで別々に入れます。人が余った日は、多く入れずに「余」（休み）にします。</li>
           <li>「<span class="m-ui">日別必要人数（上書き設定）</span>」で、特定の日だけ人数を変えられます。土日だけのつもりでも、月に何日もあると大きな人数になります。人員不足の大きな原因です。</li>
+          <li>「<span class="m-ui">必要人数のルール</span>」が当たる日は、ルールの人数が出ます（数字に点線の下線。マウスを置くと、どのルールかが出ます）。その日もふだんの人数を入れられます。ルールの人数と同じ数を入れると、その日の上書きは消えます。<span class="m-tab" data-n="6">シフト表</span> の下の必要人数の行でも同じです。</li>
           <li>「研」（研修）は、必要人数に数えません。</li>
         </ul>
       </details>
@@ -540,7 +541,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <details><summary>計算している間、入力できない</summary>
         <p>計算中は、設定・希望・表の手直しを止めています。見ることはできます（折りたたみや「<span class="m-ui">詳細</span>」を開く、列の幅を変える、文字を選ぶ、<span class="m-tab" data-n="4">希望休入力</span> の「<span class="m-ui">入れる記号</span>」を選び替える、もできます）。計算中に入れた文字は消えるので、終わってから入れ直してください。終わるのを待つか、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>中止</span> が出ていれば押してください。</p></details>
       <details><summary>画面が前のままで、新しくならない</summary>
-        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v261 など）が出ています。知らされた番号と同じか確かめます。</p></details>
+        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v262 など）が出ています。知らされた番号と同じか確かめます。</p></details>
       <details><summary>データが消えた／別のパソコンで使いたい</summary>
         <p><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-export"/></svg>書き出し</span> で作ったファイルがあれば、「<span class="m-ui">データ</span>」の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg>取り込み</span> で戻せます。別のパソコンでも同じです。ファイルが無いと戻せません。</p></details>
       <details><summary>「人が足りない」と出る</summary>

@@ -276,11 +276,18 @@ function setupTabs() {
 // 描き直す。表そのものは作り直さない（変えた決まりで表を作るには、生成し直す）。
 // 以前は保存するだけで、⑥の帯・マスの印・⑤の一覧が前の決まりの文のまま残っていた（スキルを「早番」に
 // 変えても「遅番に「営業」…」と出たまま。ルールチェックを押すまで直らなかった）。
-function recheckAfterRuleChange() {
+function recheckAfterRuleChange(opts) {
   if (AppState.generated && AppState.shifts && Object.keys(AppState.shifts).length && typeof checkViolations === 'function') {
     try { AppState.violations = checkViolations(AppState.shifts); } catch (e) { console.warn('recheck', e); }
   }
   if (typeof renderResultTable === 'function') renderResultTable();
+  // 開いている②の日別必要人数の表も描き直す（ルール・既定の人数で、出す数が変わるため）。
+  // その表の欄から呼ばれたときは描き直さない（入力中の欄が作り直されて、次の欄へ移れなくなる）
+  if (!(opts && opts.fromDailyPanel)) refreshDailyReqPanelIfOpen();
+}
+function refreshDailyReqPanelIfOpen() {
+  const $dp = document.getElementById('dailyReqPanel');
+  if ($dp && $dp.style.display !== 'none' && typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
 }
 
 // ===== ① 基本設定 =====
@@ -949,6 +956,36 @@ function toggleDailyReqPanel() {
   if (open) renderDailyReqPanel();
 }
 
+// その日の必要人数の「上書きが無いときの数」（必要人数のルールが当たればルールの数、無ければ既定）と、当たったルール。
+// ⑥のシフト表の必要人数の行と②の日別必要人数の表は、入れた数がこの数と同じときだけ上書きを消す。
+// 以前は既定と比べていたため、ルールが当たる日に既定と同じ数を入れると上書きが消えて、ルールの数に戻っていた。
+// getDayReq（その日の手入力 → ルール → 既定）はそのまま使う。
+function dayReqBase(reqs, key, day) {
+  const base = Number(getDayReq(reqs || {}, null, key, day)) || 0;
+  const ruleTo = (typeof getRuleReq === 'function') ? getRuleReq(key, day) : null;
+  if (ruleTo == null) return { base, rule: null };
+  const names = ((typeof rulesForDay === 'function') ? rulesForDay(key, day) : [])
+    .filter(r => parseInt(r.to) === ruleTo).map(r => String(r.name || '').trim() || '名前なし');
+  return { base, rule: { to: ruleTo, names } };
+}
+/** ルールで決まっている日の説明（title に出す）。def はふだん（既定）の人数 */
+function dayReqRuleText(info, def) {
+  if (!info || !info.rule) return '';
+  return `必要人数のルール${info.rule.names.map(n => `「${n}」`).join('')}で${info.rule.to}人（ふだんは${def}人）`;
+}
+
+// ②の日別必要人数の欄の見た目と説明（上書き=黒太字＋黄背景 / ルールの日=点線の下線 / ふだん=薄字）
+function _dailyReqStyle(isOv, isRule) {
+  return 'width:42px;text-align:center;border:none;background:transparent;font-size:13px;' +
+    (isOv ? 'font-weight:700;color:var(--text)'
+          : isRule ? 'font-weight:700;color:var(--text-soft);text-decoration:underline dotted'
+                   : 'font-weight:400;color:var(--text-muted)');
+}
+function _dailyReqTitle(isOv, override, base, ruleText) {
+  if (isOv) return `この日だけ ${override}人（上書きを消すと ${base}人${ruleText ? '・ルールの数' : ''}）`;
+  return ruleText || `ふだんの数（${base}人）`;
+}
+
 function renderDailyReqPanel() {
   const container = document.getElementById('dailyReqContent');
   if (!container) return;
@@ -962,7 +999,7 @@ function renderDailyReqPanel() {
   // クリアボタン
   html += `<div style="margin-bottom:8px">
     <button id="btnClearDailyReq" class="btn" style="font-size:13px">${uiIcon('trash')}上書き設定を全てクリア</button>
-    <span class="hint" style="margin-left:8px">上書きしたセルだけ削除し、デフォルト値に戻します</span>
+    <span class="hint" style="margin-left:8px">上書きしたセルだけ削除し、ルールか通常の人数に戻します（点線の下線は、必要人数のルールで決まっている日）</span>
   </div>`;
   html += '<table class="dailyreq-table" style="border-collapse:collapse;font-size:12px">';
   // ヘッダー1段目: 日付（曜日で色分け）
@@ -996,13 +1033,18 @@ function renderDailyReqPanel() {
         const w = getWeekday(AppState.settings.targetMonth, d);
         const override = (dailyMap[type.key] || {})[d];
         const isOv = override != null;
-        // 全セルに数字を表示（通常=グレー / 上書き=黒太字＋黄背景）
+        // 上書きが無いときの数（ルールが当たればルールの数。⑥の数と同じ）
+        const bInfo = dayReqBase(baseReqs, type.key, d);
+        const ruleText = dayReqRuleText(bInfo, defaultVal);
+        // 全セルに数字を表示（通常=グレー / ルールの日=点線の下線 / 上書き=黒太字＋黄背景）
         const cellBg = isOv ? 'var(--accent-soft)' : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
         html += `<td style="padding:1px;border:1px solid var(--border);background:${cellBg}">
           <input type="number" min="0" max="99"
-            value="${escapeHtml(isOv ? override : defaultVal)}"
+            value="${escapeHtml(isOv ? override : bInfo.base)}"
             data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}" data-default="${escapeHtml(defaultVal)}"
-            class="daily-req-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${isOv ? '700' : '400'};color:${isOv ? 'var(--text)' : 'var(--text-muted)'}"/>
+            data-base="${escapeHtml(bInfo.base)}" data-rule-text="${escapeHtml(ruleText)}"
+            title="${escapeHtml(_dailyReqTitle(isOv, override, bInfo.base, ruleText))}"
+            class="daily-req-input" style="${_dailyReqStyle(isOv, !!ruleText)}"/>
         </td>`;
       }
       html += '</tr>';
@@ -1067,7 +1109,7 @@ function renderDailyReqPanel() {
       const cell = e.target.closest('td');
       if (cell) cell.style.background = hasOverride ? 'var(--accent-soft)'
         : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
-      autoSave(); recheckAfterRuleChange();
+      autoSave(); recheckAfterRuleChange({ fromDailyPanel: true });
     });
   });
 
@@ -1096,26 +1138,30 @@ function renderDailyReqPanel() {
       const day  = parseInt(e.target.dataset.day);
       const dept = e.target.dataset.dept;
       const def  = parseInt(e.target.dataset.default) || 0;
+      const b0   = parseInt(e.target.dataset.base);
+      const base = isNaN(b0) ? def : b0;   // 上書きが無いときの数（ルールが当たればルールの数）
+      const ruleText = e.target.dataset.ruleText || '';
       const val  = e.target.value.trim();
       const map  = dept === 'employee' ? AppState.dailyRequirements : AppState.dailyRequirementsCast;
       if (!map[sh]) map[sh] = {};
-      // 空欄・「-」・デフォルト値と同じ → 上書き解除。それ以外 → 上書き保存
+      // 空欄・「-」・上書きが無いときの数と同じ → 上書き解除。それ以外 → 上書き保存
+      // （既定と比べると、ルールの日に既定の数を入れられなかった。⑥の行と同じ決め方）
       const num = parseInt(val);
-      const hasOverride = !(val === '' || val === '-' || isNaN(num) || num === def);
+      const hasOverride = !(val === '' || val === '-' || isNaN(num) || num === base);
       if (!hasOverride) {
         delete map[sh][day];
-        if (val === '' || val === '-') e.target.value = def; // 空なら通常値を表示に戻す
+        if (val === '' || val === '-' || isNaN(num)) e.target.value = base; // 空なら上書きが無いときの数を表示に戻す
       } else {
         map[sh][day] = num;
       }
-      // 見た目を即反映（上書きあり=黒太字＋黄背景 / なし=薄字）
+      // 見た目を即反映（上書きあり=黒太字＋黄背景 / ルールの日=点線の下線 / ふだん=薄字）
       const w = getWeekday(AppState.settings.targetMonth, day);
-      e.target.style.fontWeight = hasOverride ? '700' : '400';
-      e.target.style.color      = hasOverride ? 'var(--text)' : 'var(--text-muted)';
+      e.target.style.cssText = _dailyReqStyle(hasOverride, !!ruleText);
+      e.target.title = _dailyReqTitle(hasOverride, num, base, ruleText);
       const cell = e.target.closest('td');
       if (cell) cell.style.background = hasOverride ? 'var(--accent-soft)'
         : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
-      autoSave(); recheckAfterRuleChange();
+      autoSave(); recheckAfterRuleChange({ fromDailyPanel: true });
     });
   });
 }
@@ -2033,13 +2079,17 @@ function _renderResultTableInner() {
         });
         const dayReq = getDayReq(g.reqs, g.dailyReqs || {}, key, d);
         const cls = count < dayReq ? 'under' : (count > dayReq ? 'over' : '');
+        // 上書きが無いときの数（ルールが当たればルールの数）。入れた数がこれと同じときだけ上書きを消す
+        const bInfo = dayReqBase(g.reqs, key, d);
+        const ovr = ((g.dailyReqs || {})[key] || {})[d];
+        const ruleNote = (ovr == null && bInfo.rule) ? ` / ${dayReqRuleText(bInfo, defaultReq)}` : '';
         // 配置人数(count)を上に小さく、その下に編集できる定数(必要人数)入力
         cells += `<td class="${cls}" style="padding:0">
           <div style="font-size:10px;color:var(--text-muted);line-height:1">${count}</div>
           <input type="number" min="0" max="99" value="${escapeHtml(dayReq)}"
             class="summary-req-input" data-key="${escapeHtml(key)}" data-day="${d}"
-            data-dept="${deptKey}" data-default="${escapeHtml(defaultReq)}"
-            title="配置 ${count}人 / 必要 ${escapeHtml(dayReq)}人（この数字が定数。変更できます）"
+            data-dept="${deptKey}" data-gkey="${escapeHtml(g.key)}" data-default="${escapeHtml(defaultReq)}" data-base="${escapeHtml(bInfo.base)}"
+            title="配置 ${count}人 / 必要 ${escapeHtml(dayReq)}人（この数字が定数。変更できます）${escapeHtml(ruleNote)}"
             style="width:100%;height:20px;border:none;background:transparent;text-align:center;font-size:11px;font-weight:700"/>
         </td>`;
       }
@@ -2060,15 +2110,25 @@ function _renderResultTableInner() {
       const day  = parseInt(e.target.dataset.day);
       const dept = e.target.dataset.dept;
       const def  = parseInt(e.target.dataset.default) || 0;
+      const base = parseInt(e.target.dataset.base);
+      const noOv = isNaN(base) ? def : base;   // 上書きが無いときの数（ルールが当たればルールの数）
       const map  = dept === 'cast' ? AppState.dailyRequirementsCast : AppState.dailyRequirements;
       if (!map[key]) map[key] = {};
       const num = parseInt(e.target.value);
-      if (isNaN(num) || num === def) delete map[key][day]; // デフォルトと同じなら上書き解除
+      // 上書きが無いときの数と同じなら上書き解除（既定と比べると、ルールの日に既定の数を入れられなかった）
+      const cleared = isNaN(num) || num === noOv;
+      if (cleared) delete map[key][day];
       else map[key][day] = num;
       if (typeof saveToStorage === 'function') saveToStorage();
       AppState.violations = checkViolations(AppState.shifts);
       renderResultTable(); // 色（過不足）を更新
-      toast(`${shiftSym(key)} ${day}日 の必要人数を ${isNaN(num) ? def : num} に設定`, 'info', 1500);
+      refreshDailyReqPanelIfOpen();   // ②の日別必要人数の表にも同じ数を出す
+      // 知らせには、実際に決まった数を出す
+      const g2 = getDepartmentGroups(AppState.staff).find(x => x.key === e.target.dataset.gkey);
+      const now = g2 ? getDayReq(g2.reqs, g2.dailyReqs || {}, key, day) : (cleared ? noOv : num);
+      const bInfo = g2 ? dayReqBase(g2.reqs, key, day) : null;
+      const why = (cleared && bInfo && bInfo.rule) ? `（必要人数のルール${bInfo.rule.names.map(n => `「${n}」`).join('')}の数です）` : '';
+      toast(`${shiftSym(key)} ${day}日 の必要人数を ${now} に設定${why}`, 'info', why ? 3000 : 1500);
     });
   });
 
@@ -6072,8 +6132,9 @@ function showGenerateWizard() {
       keys.forEach(k => {
         const base = (g.reqs || {})[k] || 0;
         const now = getDayReq(g.reqs, g.dailyReqs || {}, k, d);
-        if (now === base) return;
         const manual = ((AppState.dailyRequirements || {})[k] || {})[d];
+        // 既定と同じ数でも、手入力がある日は出す（ルールの日に既定の数を入れると、一覧から消えて「手入力を消す」が押せなかった）
+        if (now === base && manual == null) return;
         const src = manual != null ? '手入力' : 'ルール';
         diff.push(`<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px">
           ${escapeHtml(shiftSym(k))} ${base}→
