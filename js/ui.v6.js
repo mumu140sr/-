@@ -26,6 +26,7 @@ function toast(message, type = 'info', duration = 3000) {
 // ===== 自動保存（デバウンス付き） =====
 let _autoSaveTimer = null;
 function autoSave() {
+  if (typeof scheduleShortageRefresh === 'function') scheduleShortageRefresh();   // 帯の下の文・理由の枠を数え直す（v265）
   if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
   _autoSaveTimer = setTimeout(() => {
     if (typeof saveToStorage === 'function') saveToStorage();
@@ -63,6 +64,8 @@ function renderResultBand() {
   if (!el) return;
   if (!AppState.generated) {
     el.innerHTML = '<span class="hint">シフトを生成すると、ここにエラーの件数が出ます。</span>';
+    renderShortageNote();
+    if (_shortPanel) closeShortPanel();
     return;
   }
   const n = { crit: 0, must: 0, soft: 0 };
@@ -79,6 +82,8 @@ function renderResultBand() {
   el.innerHTML = chip('crit', '6連勤以上', n.crit) + chip('must', '絶対', n.must) + chip('soft', 'できれば', n.soft)
     + `<span class="lv-chip lv-chip-sur${sur ? '' : ' is-zero'}"><span class="sur-sw" aria-hidden="true"></span>余<b>${sur}</b><span class="lv-unit">コマ</span></span>`
     + shortChip;
+  renderShortageNote();                 // 帯の下の文（v265）
+  if (_shortPanel) scheduleShortageRefresh();   // 開いている理由の枠も数え直す
 }
 /** 違反の一覧から、人手の不足（人員不足の人数・公休を削った日数・有給を削った日数）を数える（v263。⑥の帯） */
 function shortageOfViolations(vios) {
@@ -91,6 +96,279 @@ function shortageOfViolations(vios) {
   });
   r.total = r.under + r.off + r.paid;
   return r;
+}
+
+// ===== 人手が足りない理由（v265） =====
+// 帯の下の文（#shortageNote）と、⑥の足りないマスを押すと出る「理由の枠」（#shortPanel。画面の下・暗幕なし）。
+// 数は帯の「不足」と同じ違反の short から出し、画面で数え直さない。理由は、その日のマス（表・固定・希望）と、
+// 写しの表にその人を入れて検査（checkViolations）にかけた結果から決める（検査と同じ決まり）。表・データは書き換えない。
+/** 文に出すシフトの名前:「記号」（名称）。名称が無い・記号と同じなら「記号」だけ */
+function shiftNameText(k) {
+  const t = (typeof getShiftType === 'function') ? getShiftType(k) : null;
+  const sym = shiftSym(k);
+  const label = t && t.label ? String(t.label).trim() : '';
+  return label && label !== sym ? `「${sym}」（${label}）` : `「${sym}」`;
+}
+/** 帯の「不足」の中身を1件ずつ（人員不足＝日・シフト、公休・有給＝人）。多い順 */
+function shortageItems(vios) {
+  const groups = getDepartmentGroups(AppState.staff);
+  const mainKey = (groups.find(g => g.key !== 'cast') || {}).key || 'employee';
+  const staffOf = id => (AppState.staff || []).find(x => x.id === id);
+  const out = [];
+  (vios || []).forEach(v => {
+    const n = Math.max(0, Number(v && v.short) || 0);
+    if (!n) return;
+    if (v.type === 'understaff') {
+      // キャストの行の人員不足は、検査の文が「◯日 キャスト ◯◯ が」で始まる（違反に部門の項目は足さない）
+      const cast = typeof v.message === 'string' && v.message.indexOf(`${v.day}日 キャスト ${shiftSym(v.role)} が`) >= 0;
+      out.push({ kind: 'under', n, day: v.day, role: v.role, gkey: cast ? 'cast' : mainKey, cast });
+    } else if (v.type === 'off-count' || v.type === 'paid') {
+      const st = staffOf(v.staffId); if (!st) return;
+      out.push({ kind: v.type === 'paid' ? 'paid' : 'off', n, staffId: st.id, name: st.name,
+                 plan: v.type === 'paid' ? (parseInt(st.paidLeave) || 0) : (st.maxOff || 0) });
+    }
+  });
+  const ord = { under: 0, off: 1, paid: 2 };
+  out.sort((a, b) => (b.n - a.n) || (ord[a.kind] - ord[b.kind]) || ((a.day || 0) - (b.day || 0)));
+  return out;
+}
+function shortageItemText(x) {
+  if (x.kind === 'under') return `${x.day}日の${x.cast ? 'キャストの' : ''}${shiftNameText(x.role)}が${x.n}人足りません`;
+  if (x.kind === 'off') return `${x.name}さんの公休を${x.n}日削って、出勤で埋めています（公休${x.plan - x.n}日／予定${x.plan}日）`;
+  return `${x.name}さんの有給を${x.n}日削っています（有給${x.plan - x.n}日／設定${x.plan}日）。設定の日数がまちがっていないか、③で確かめてください`;
+}
+let _shortNoteAll = false;   // 「ほか◯件（すべて出す）」を押したか
+function renderShortageNote() {
+  const el = document.getElementById('shortageNote');
+  if (!el) return;
+  const sh = AppState.generated ? shortageOfViolations(AppState.violations) : { total: 0 };
+  if (!(sh.total > 0)) { el.hidden = true; el.innerHTML = ''; return; }
+  const items = shortageItems(AppState.violations);
+  const show = _shortNoteAll ? items : items.slice(0, 6);
+  const li = x => `<li><span>${escapeHtml(shortageItemText(x))}</span>` + (x.kind === 'under'
+    ? `<button type="button" class="btn btn-ghost sn-why calc-view-only" data-sw-day="${x.day}" data-sw-key="${escapeHtml(x.role)}" data-sw-g="${escapeHtml(x.gkey)}" data-sw-go="1">理由を見る</button>` : '') + '</li>';
+  el.hidden = false;
+  el.innerHTML = `<p class="sn-head">予定どおり休みと有給を取らせると、<b>${sh.total}コマ</b>足りません。</p>`
+    + `<ul class="sn-list">${show.map(li).join('')}</ul>`
+    + (items.length > 6 ? `<button type="button" class="btn btn-ghost sn-more calc-view-only" id="snMore">${_shortNoteAll ? '6行だけ出す' : `ほか${items.length - 6}件（すべて出す）`}</button>` : '');
+}
+
+// ── 理由の枠 ──
+let _shortPanel = null;   // { day, key, gkey, opener }
+const _swKey = v => [v.type, v.staffId || '', v.day || 0, v.from || '', v.to || '', v.role || '', v.short || ''].join('|');
+function _swNew(before, after) {
+  const cnt = {};
+  before.forEach(v => { const k = _swKey(v); cnt[k] = (cnt[k] || 0) + 1; });
+  return after.filter(v => { const k = _swKey(v); if (cnt[k] > 0) { cnt[k]--; return false; } return true; });
+}
+const _swIsMust = t => getRuleLevel(t) === 'must' || (typeof MUST_TYPES_OPT !== 'undefined' && MUST_TYPES_OPT.has(t));
+/** 写しの表で、その人をその日そのシフトに入れて検査する（patch なら担当にも一時的に足す。表・データは変えない） */
+function _swSimulate(p, key, day, patch) {
+  const sh = Object.assign({}, AppState.shifts);
+  sh[p.id] = Object.assign({}, sh[p.id] || {}, { [day]: key });
+  let added = false;
+  if (patch) {
+    if (!Array.isArray(p.allowedShifts)) p.allowedShifts = [];
+    if (!p.allowedShifts.includes(key)) { p.allowedShifts.push(key); added = true; }
+  }
+  try { return checkViolations(sh); }
+  finally { if (added) { const i = p.allowedShifts.lastIndexOf(key); if (i >= 0) p.allowedShifts.splice(i, 1); } }
+}
+/** 新しく出る違反を、やさしい言葉に（その人のもの・その日のもの・ほかの人のもの） */
+function _swReasons(p, key, day, fresh) {
+  const must = [], soft = [], effects = [];
+  const cellAt = (d) => ((AppState.shifts || {})[p.id] || {})[d] || '';
+  const say = (v) => {
+    switch (v.type) {
+      case 'consecutive': return v.compliance ? `入れると6連勤以上になります（${v.len}連勤）`
+        : `入れると連勤の上限（${getMaxConsFor(p)}日）を超えます（${v.len}連勤）`;
+      case 'late-early': return v.day === day ? `前の日（${day - 1}日）が${shiftNameText(cellAt(day - 1))}なので、遅→早になります`
+        : `次の日（${day + 1}日）が${shiftNameText(cellAt(day + 1))}なので、遅→早になります`;
+      case 'night-after-work': return v.day === day ? `夜勤明けです（${day - 1}日が${shiftNameText(cellAt(day - 1))}）`
+        : `次の日（${day + 1}日）が出勤なので、夜勤明けに出勤になります`;
+      case 'day-skill': return `この日の${shiftNameText(key)}に要るスキル（${daySkillWords(daySkillsFor(key, day) || [])}）を持っていません`;
+      case 'pref-mismatch': return `${isLate(key) ? '遅番' : '早番'}に入らない希望です（③の早可・遅可）`;
+      case 'off-count': return `公休が予定より少なくなります（公休${(p.maxOff || 0) - (v.short || 0)}日／予定${p.maxOff || 0}日）`;
+      case 'hierarchy': return '責任者の順番の決まりにかかります';
+      case 'role-mismatch': return `${shiftNameText(key)}の担当ではありません`;
+      default: return `${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[v.type]) || v.type}になります`;
+    }
+  };
+  fresh.forEach(v => {
+    if (v.staffId === p.id) {
+      const t = say(v);
+      const list = _swIsMust(v.type) ? must : soft;
+      if (list.indexOf(t) < 0) list.push(t);
+    } else if (!v.staffId && v.day === day) {
+      const t = v.type === 'understaff' && v.role && v.role !== key
+        ? `${shiftNameText(v.role)}が1人減ります（${v.short || 1}人足りなくなります）`
+        : (v.type === 'understaff' ? '' : `その日の「${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[v.type]) || v.type}」になります`);
+      if (t && effects.indexOf(t) < 0) effects.push(t);
+    } else if (v.staffId && v.day === day && _swIsMust(v.type)) {
+      const o = (AppState.staff || []).find(x => x.id === v.staffId);
+      const t = `${o ? o.name + 'さんに' : 'ほかの人に'}「${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[v.type]) || v.type}」が出ます`;
+      if (effects.indexOf(t) < 0) effects.push(t);
+    }
+  });
+  return { must, soft, effects };
+}
+/** その日そのシフトが足りない理由をまとめる（表・データは変えない） */
+function explainShortage(day, key, gkey) {
+  const groups = getDepartmentGroups(AppState.staff);
+  const g = groups.find(x => x.key === gkey) || groups[0];
+  if (!g) return null;
+  const cast = g.key === 'cast';
+  const need = Math.max(0, Math.ceil(Number(getDayReq(g.reqs, g.dailyReqs || {}, key, day))) || 0);
+  const cellOf = (st) => ((AppState.shifts || {})[st.id] || {})[day] || '';
+  const inNow = g.staff.filter(st => cellOf(st) === key);
+  const capable = g.staff.filter(st => (st.allowedShifts || []).includes(key));
+  const base = checkViolations(AppState.shifts);
+  const people = [], wishOff = [], swaps = [], canNow = [];
+  capable.forEach(st => {
+    if (cellOf(st) === key) return;
+    const cur = cellOf(st);
+    const fx = ((AppState.fixedShifts || {})[st.id] || {})[day] || '';
+    const rq = ((AppState.requests || {})[st.id] || {})[day] || '';
+    const lines = [];
+    let hard = false, swap = false;
+    if (cur && isOff(cur)) {
+      if (cur === '有') { lines.push(fx === '有' || rq === '有' ? '有給（希望・固定）' : '有給（設定の有給の日数を入れるため、生成がこの日にしました）'); hard = true; }
+      else if (cur === '半') { lines.push('半休'); hard = true; }
+      else if (isPublicOff(cur) && ((fx && isOff(fx)) || (rq && isOff(rq)))) {
+        lines.push(fx && isOff(fx) && !(rq && isOff(rq)) ? `休みに固定しています（${shiftSym(fx)}）` : `休みの希望（${shiftSym(rq || fx)}）`);
+        hard = true; wishOff.push(st.name);
+      } else if (isPublicOff(cur)) lines.push('公休（生成で休みにした日）');
+      else if (cur === '余') lines.push('余（人が余った日の休み）');
+      else { lines.push((OFF_TYPES[cur] && OFF_TYPES[cur].label) || cur); hard = true; }
+    } else if (cur && isTraining(cur)) { lines.push(`研修（${shiftNameText(cur)}）`); hard = true; }
+    else if (cur && isWork(cur)) {
+      if (fx === cur || rq === cur) { lines.push(`${shiftNameText(cur)}に${fx === cur ? '固定' : '希望で決まって'}います`); hard = true; }
+      else { lines.push(`${shiftNameText(cur)}に入っています。入れ替えれば空けられるかもしれません`); swap = true; swaps.push(st.name); }
+    } else if (fx || rq) {
+      const v = fx || rq;
+      lines.push(isOff(v) ? `休みの希望（${shiftSym(v)}）` : `${shiftNameText(v)}に${fx ? '固定' : '希望で決まって'}います`);
+      hard = true; if (isOff(v)) wishOff.push(st.name);
+    } else lines.push('空いています');
+    let r = { must: [], soft: [], effects: [] };
+    if (!hard) r = _swReasons(st, key, day, _swNew(base, _swSimulate(st, key, day, false)));
+    const ok = !hard && !r.must.length;
+    if (ok && !swap) canNow.push(st.name);
+    people.push({ name: st.name, lines, must: r.must, soft: r.soft, effects: r.effects, hard, swap, ok });
+  });
+  // 担当を足せば入れられる人（その日に出勤していない・希望・固定・有給も無い人）
+  const cands = [];
+  let candNoSkill = 0;   // 空いているが、この日に要るスキル（v264）を持たない人（担当を足しても入れないので出さない）
+  g.staff.forEach(st => {
+    if ((st.allowedShifts || []).includes(key)) return;
+    const cur = cellOf(st);
+    if (cur && !(isPublicOff(cur) || cur === '余')) return;
+    if (staffDayState(st, day) !== 'free') return;
+    if (!hasDaySkill(st, key, day)) { candNoSkill++; return; }
+    const r = _swReasons(st, key, day, _swNew(base, _swSimulate(st, key, day, true)));
+    cands.push({ name: st.name, cautions: r.must.concat(r.effects), soft: r.soft });
+  });
+  cands.sort((a, b) => a.cautions.length - b.cautions.length);
+  const todo = [];
+  if (cands.length) todo.push(`③で${shiftNameText(key)}を担当に足す（${cands.slice(0, 5).map(c => c.name + 'さん').join('・')}）`);
+  if (wishOff.length) todo.push(`休みの希望を動かす（${wishOff.map(n => n + 'さん').join('・')}）`);
+  if (swaps.length) todo.push(`ほかのシフトの人と入れ替える（${swaps.map(n => n + 'さん').join('・')}）`);
+  if (canNow.length) todo.push(`手で入れるか、生成し直す（${canNow.map(n => n + 'さん').join('・')}）`);
+  todo.push(`その日の必要人数を見直す（いま${need}人）`);
+  return { day, key, gkey: g.key, cast, need, have: inNow.length, short: Math.max(0, need - inNow.length),
+           inNow: inNow.map(st => st.name), capable: capable.length, people, cands: cands.slice(0, 5), candMore: Math.max(0, cands.length - 5),
+           candNoSkill, daySkills: daySkillsFor(key, day), todo };
+}
+function _shortPanelEl() {
+  let el = document.getElementById('shortPanel');
+  if (el) return el;
+  el = document.createElement('section');
+  el.id = 'shortPanel';
+  el.className = 'short-panel';
+  el.setAttribute('role', 'region');
+  el.setAttribute('aria-labelledby', 'shpTitle');
+  el.hidden = true;
+  el.innerHTML = `<div class="sp-head"><h3 id="shpTitle" tabindex="-1"></h3><button type="button" class="modal-close" id="shpClose" aria-label="理由の枠を閉じる">✕</button></div><div class="sp-body" id="shpBody"></div>`;
+  document.body.appendChild(el);
+  el.querySelector('#shpClose').addEventListener('click', () => closeShortPanel());
+  return el;
+}
+function renderShortPanel() {
+  if (!_shortPanel) return;
+  const el = _shortPanelEl();
+  const ex = AppState.generated ? explainShortage(_shortPanel.day, _shortPanel.key, _shortPanel.gkey) : null;
+  const title = el.querySelector('#shpTitle'), body = el.querySelector('#shpBody');
+  if (!ex) { title.textContent = '理由'; body.innerHTML = '<p>表がありません。</p>'; return; }
+  const what = `${ex.day}日の${ex.cast ? 'キャストの' : ''}${shiftNameText(ex.key)}`;
+  if (!ex.short) {
+    title.textContent = `${what}は、いまは足りています。`;
+    body.innerHTML = `<p class="hint">必要 ${ex.need}人・入っている人 ${ex.have}人です（表や設定が変わったので数え直しました）。</p>`;
+    return;
+  }
+  title.textContent = `${what}が${ex.short}人足りません。`;
+  const pl = ex.people.map(x => {
+    const parts = x.lines.concat(x.must, x.effects);
+    if (x.ok) parts.push(x.swap ? '入れ替えれば入れられます' : '入れられます（生成のときの都合で入っていません。手で入れるか、生成し直してください）');
+    const softT = x.soft.length ? `<div class="hint">できれば避けたいこと：${escapeHtml(x.soft.join('・'))}</div>` : '';
+    return `<li><b>${escapeHtml(x.name)}さん</b>：${escapeHtml(parts.join('。'))}${softT}</li>`;
+  }).join('');
+  const cl = ex.cands.map(c => `<li>${escapeHtml(`${c.name}さんは${ex.day}日が空いています。③で${shiftNameText(ex.key)}を担当に足せば入れられます`
+      + (c.cautions.length ? `。ただし、${c.cautions.join('。')}` : ''))}</li>`).join('')
+    + (ex.candMore ? `<li class="hint">ほか${ex.candMore}人</li>` : '')
+    + (ex.candNoSkill ? `<li class="hint">${escapeHtml(`この日に要るスキル（${daySkillWords(ex.daySkills || [])}）を持たない人（${ex.candNoSkill}人）は、担当を足しても入れないので出していません`)}</li>` : '');
+  body.innerHTML = `<p>${escapeHtml(`${shiftNameText(ex.key)}ができる人は${ex.capable}人います。`)}`
+      + (ex.inNow.length ? `<span class="hint">（いま入っている人：${escapeHtml(ex.inNow.map(n => n + 'さん').join('・'))}）</span>` : '') + '</p>'
+    + (pl ? `<ul class="sp-list">${pl}</ul>` : '<p class="hint">この日に入っていない、できる人はいません。</p>')
+    + (cl ? `<h4>担当を足せば入れられる人</h4><ul class="sp-list">${cl}</ul>` : '')
+    + `<h4>どうすれば</h4><ul class="sp-list">${ex.todo.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`;
+}
+function openShortPanel(day, key, gkey, opener, goToCell) {
+  _shortPanel = { day, key, gkey, opener: opener || null };
+  const el = _shortPanelEl();
+  el.hidden = false;
+  document.body.classList.add('has-short-panel');
+  renderShortPanel();
+  if (goToCell) {
+    const tab = document.querySelector('.tab[data-tab="result"]');
+    if (tab && !tab.classList.contains('active')) tab.click();
+    const inp = document.querySelector(`.summary-req-input[data-key="${CSS.escape(key)}"][data-day="${day}"][data-gkey="${CSS.escape(gkey)}"]`);
+    const td = inp && inp.closest('td');
+    if (td) {
+      td.scrollIntoView({ block: 'center', inline: 'center' });
+      const r = td.getBoundingClientRect(), limit = window.innerHeight - el.offsetHeight - 12;
+      if (r.bottom > limit) window.scrollBy(0, r.bottom - limit);
+      td.classList.remove('vio-flash'); void td.offsetWidth; td.classList.add('vio-flash');
+      setTimeout(() => td.classList.remove('vio-flash'), 2400);
+    }
+  }
+  const t = el.querySelector('#shpTitle'); if (t) t.focus({ preventScroll: true });
+}
+function closeShortPanel() {
+  const el = document.getElementById('shortPanel');
+  const op = _shortPanel && _shortPanel.opener;
+  _shortPanel = null;
+  if (el) el.hidden = true;
+  document.body.classList.remove('has-short-panel');
+  if (op && op.isConnected) op.focus({ preventScroll: true });
+}
+// 表・希望・設定が変わったら、帯の下の文と、開いている理由の枠を数え直す（古い理由を出したままにしない）
+let _shortRefreshTimer = null;
+function scheduleShortageRefresh() {
+  if (_shortRefreshTimer) clearTimeout(_shortRefreshTimer);
+  _shortRefreshTimer = setTimeout(() => { _shortRefreshTimer = null; renderShortageNote(); if (_shortPanel) renderShortPanel(); }, 250);
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-sw-day]');
+    if (b) { openShortPanel(parseInt(b.dataset.swDay), b.dataset.swKey, b.dataset.swG, b, !!b.dataset.swGo); return; }
+    if (e.target.closest && e.target.closest('#snMore')) { _shortNoteAll = !_shortNoteAll; renderShortageNote(); }
+  });
+  // Esc は、小窓（.modal.show・.modal-overlay）が上に開いているときはその小窓に任せ、理由の枠は閉じない
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !_shortPanel) return;
+    const modalOpen = !!document.querySelector('.modal.show')
+      || [...document.querySelectorAll('.modal-overlay')].some(m => getComputedStyle(m).display !== 'none' && !m.hidden);
+    if (!modalOpen) closeShortPanel();
+  });
 }
 
 // ===== 線画のアイコンと、絵文字を使わない言葉（v251） =====
@@ -2340,8 +2618,13 @@ function _renderResultTableInner() {
         // 日ごとに要るスキル（v264）の日は点線の枠と title
         const dsT = daySkillTitle(key, d);
         // 配置人数(count)を上に小さく、その下に編集できる定数(必要人数)入力
+        // 足りないマスは、上の小さな数（入っている人数）を「理由を見る」ボタンにする（v265。Tab で止まり Enter でも開く）
+        const countHtml = count < dayReq
+          ? `<button type="button" class="short-why calc-view-only" data-sw-day="${d}" data-sw-key="${escapeHtml(key)}" data-sw-g="${escapeHtml(g.key)}"
+               aria-label="${escapeHtml(`${d}日の${g.key === 'cast' ? 'キャストの' : ''}${shiftNameText(key)}が${dayReq - count}人足りない理由を見る`)}" title="足りない理由を見る">${count}</button>`
+          : `<div style="font-size:10px;color:var(--text-muted);line-height:1">${count}</div>`;
         cells += `<td class="${cls}${dsT ? ' ds-mark' : ''}" style="padding:0">
-          <div style="font-size:10px;color:var(--text-muted);line-height:1">${count}</div>
+          ${countHtml}
           <input type="number" min="0" max="99" value="${escapeHtml(dayReq)}"
             class="summary-req-input" data-key="${escapeHtml(key)}" data-day="${d}"
             data-dept="${deptKey}" data-gkey="${escapeHtml(g.key)}" data-default="${escapeHtml(defaultReq)}" data-base="${escapeHtml(bInfo.base)}"

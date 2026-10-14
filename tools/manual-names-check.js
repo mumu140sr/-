@@ -8,7 +8,7 @@
 // アプリを、作り物のデータ（tools/suite/cases。本物のデータは使わない）でいろいろな状態にして、
 // 画面に出た文字を集め、手引きの名前と突き合わせる。状態：6つの画面、開いた小窓（実現性チェック・
 // エラー解消プラン・余の使い道・見込み・順番に確認して生成する・余の解消・途中から作り直す・まとめて固定・
-// 自動修正の案・シフト編集）、計算中、確認の文、知らせ、月の切り替え、1分生成のあとの知らせ。
+// 自動修正の案・シフト編集・人手が足りない理由の枠）、計算中、確認の文、知らせ、月の切り替え、1分生成のあとの知らせ。
 // 実際に出せなかった名前は、JS の文字列と CSS の content でも探し、そうと分かるように出す。
 //
 // 使い方（リポジトリの一番上で）:
@@ -125,6 +125,10 @@ const norm = s => String(s || '').replace(/\s+/g, '');
     partial:   async p => { await menu(p, 'btnPartialRegen'); await p.waitForTimeout(1200); },
     rangelock: async p => { await menu(p, 'btnRangeLock'); await p.waitForTimeout(800); },
     cell:      async p => { await p.click('.tab[data-tab="result"]'); await p.click('#resultTable td[data-sid]'); await p.waitForTimeout(400); },
+    // 人手が足りない理由（v265）: 帯の下の文の「理由を見る」で、画面の下の理由の枠を開く（足りない所が無い表なら何もしない）
+    shortwhy:  async p => { await p.click('.tab[data-tab="result"]');
+                            const bt = await p.$('#shortageNote:not([hidden]) .sn-why') || await p.$('.short-why');
+                            if (bt) { await bt.click(); await p.waitForTimeout(800); } },
     recheck:   async p => { await menu(p, 'btnRecheck'); await p.waitForTimeout(800); await p.click('.tab[data-tab="generate"]'); },
     month:     async p => { await p.evaluate(() => { const m = document.getElementById('targetMonth'); const [y, mo] = m.value.split('-').map(Number);
                               m.value = mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`; m.dispatchEvent(new Event('change')); });

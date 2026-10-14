@@ -7,11 +7,11 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=264" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=264" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=264" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=264">
-<link rel="stylesheet" href="css/style.css?v=264" />
+<link rel="icon" href="favicon.svg?v=265" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=265" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=265" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=265">
+<link rel="stylesheet" href="css/style.css?v=265" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -72,7 +72,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v264</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v265</span>
   </div>
   <div class="header-actions">
     <!-- 「データ」メニュー：今のボタンそのものを中に置く（id はそのまま。開閉は js/ui-shell.v6.js） -->
@@ -460,6 +460,8 @@
       <div id="resultBand" class="res-counts"></div>
       <button class="btn btn-primary" id="btnRepair"><svg class="ic" aria-hidden="true"><use href="#i-repair"/></svg>エラーを自動修正</button>
     </div>
+    <!-- 人手が足りない理由（v265。ui.v6.js の renderShortageNote。不足があるときだけ出す） -->
+    <div id="shortageNote" class="card short-note" hidden></div>
 
     <div class="card">
       <!-- 生成から変えたマス（生成直後の表と比べる） -->
@@ -508,13 +510,13 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=264"></script>
-<script src="js/optimizer.v6.js?v=264"></script>
-<script src="js/worker-client.v6.js?v=264"></script>
-<script src="js/ai-explain.v6.js?v=264"></script>
-<script src="js/ui.v6.js?v=264"></script>
-<script src="js/milp.v6.js?v=264"></script>
-<script src="js/app.v6.js?v=264"></script>
-<script src="js/ui-shell.v6.js?v=264"></script>
+<script src="js/data.v6.js?v=265"></script>
+<script src="js/optimizer.v6.js?v=265"></script>
+<script src="js/worker-client.v6.js?v=265"></script>
+<script src="js/ai-explain.v6.js?v=265"></script>
+<script src="js/ui.v6.js?v=265"></script>
+<script src="js/milp.v6.js?v=265"></script>
+<script src="js/app.v6.js?v=265"></script>
+<script src="js/ui-shell.v6.js?v=265"></script>
 </body>
 </html>

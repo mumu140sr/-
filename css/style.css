@@ -421,6 +421,30 @@ a { color: var(--link); }
 .lv-chip-soft { background: var(--lv-soft-bg); border: 2px dashed var(--lv-soft); color: var(--lv-soft); }
 .lv-chip-sur  { background: var(--sur-2); border: 1px solid var(--sur); color: var(--sur-fg); }
 .lv-chip .sur-sw { width: 14px; height: 14px; border-radius: 3px; background: repeating-linear-gradient(135deg, var(--sur) 0 3px, var(--sur-2) 3px 6px); border: 1px solid var(--sur-fg); }
+/* 人手が足りない理由（v265）: 帯の下の文・⑥の足りないマスのボタン・画面の下の理由の枠（暗幕なし） */
+.card.short-note { padding: 10px 16px; border-left: 4px solid var(--lv-must); }
+.short-note .sn-head { margin: 0 0 4px; color: var(--text); }
+.short-note .sn-head b { color: var(--lv-must); }
+.sn-list { margin: 0; padding-left: 18px; font-size: var(--fs-sm); line-height: 1.7; }
+.sn-list li span { margin-right: 6px; }
+.btn.sn-why, .btn.sn-more { min-height: 0; padding: 0 6px; font-size: var(--fs-xs); color: var(--link); text-decoration: underline; }
+.short-why { display: block; width: 100%; padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer;
+  font-size: 10px; line-height: 1; color: var(--lv-must); font-weight: 700; text-decoration: underline; font-family: inherit; }
+.short-why:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.short-panel { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: min(980px, 100%); max-height: 46vh;
+  overflow-y: auto; z-index: 9000; background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-top: 3px solid var(--lv-must); border-radius: var(--r-lg) var(--r-lg) 0 0; box-shadow: var(--shadow); }
+.short-panel .sp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 8px 16px;
+  border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; background: var(--surface); }
+.short-panel .sp-head h3 { margin: 0; font-size: var(--fs-md); color: var(--text); }
+.short-panel .sp-head h3:focus { outline: none; }
+.short-panel .modal-close { border: none; background: transparent; font-size: 20px; cursor: pointer; color: var(--text-soft);
+  min-width: var(--h-min); min-height: var(--h-min); border-radius: var(--r-md); }
+.short-panel .sp-body { padding: 8px 16px 14px; font-size: var(--fs-sm); line-height: 1.7; }
+.short-panel .sp-body p { margin: 0 0 6px; }
+.short-panel .sp-body h4 { margin: 10px 0 2px; font-size: var(--fs-sm); color: var(--text); }
+.short-panel .sp-list { margin: 0; padding-left: 18px; }
+body.has-short-panel { padding-bottom: 46vh; }
 /* 日ごとに要るスキル（v264）: ②の日別必要人数の中の欄と、②の表・⑥の必要人数の行のマスの印（点線の枠） */
 td.ds-mark { outline: 2px dotted var(--link); outline-offset: -3px; }
 .dss-box { margin-top: 12px; padding-top: 6px; border-top: 1px solid var(--border-subtle); }

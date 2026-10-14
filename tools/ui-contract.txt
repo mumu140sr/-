@@ -163,8 +163,14 @@ id	shiftChipContainer	HTML	1	ui.v6.js
 id	shiftEditModal	HTML	1	ui.v6.js
 id	shiftLegend	HTML	1	ui.v6.js
 id	shiftOptionContainer	HTML	1	ui.v6.js
+id	shortageNote	HTML	1	ui.v6.js
+id	shortPanel	JS	0	ui.v6.js
+id	shpBody	JS	0	ui.v6.js
+id	shpClose	JS	0	ui.v6.js
+id	shpTitle	JS	0	ui.v6.js
 id	sideNav	HTML	1	app.v6.js
 id	skillsList	HTML	1	ui.v6.js
+id	snMore	JS	0	ui.v6.js
 id	spApply	JS	0	ui.v6.js
 id	spBand	JS	0	ui.v6.js
 id	spCalc	JS	0	ui.v6.js
@@ -231,6 +237,7 @@ class	daily-skill-input	JS	0	ui.v6.js
 class	drag-over	JS	0	ui.v6.js
 class	dragging	JS	0	ui.v6.js
 class	edit-mark	JS	0	ui.v6.js
+class	has-short-panel	JS	0	ui.v6.js
 class	is-jumpable	JS	0	ui.v6.js
 class	is-selected	JS	0	ui-shell.v6.js
 class	is-split	JS	0	ui-shell.v6.js
@@ -306,6 +313,7 @@ attr	data-sp	JS	0	ui.v6.js
 attr	data-spk	JS	0	ui.v6.js
 attr	data-sprow	JS	0	ui.v6.js
 attr	data-staffhead	JS	0	ui.v6.js
+attr	data-sw-day	JS	0	ui.v6.js
 attr	data-tab	HTML	6	app.v6.js,ui-shell.v6.js,ui.v6.js
 attr	data-tu	JS	0	ui.v6.js
 attr	data-tutor	JS	0	ui.v6.js
