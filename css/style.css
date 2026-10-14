@@ -421,6 +421,10 @@ a { color: var(--link); }
 .lv-chip-soft { background: var(--lv-soft-bg); border: 2px dashed var(--lv-soft); color: var(--lv-soft); }
 .lv-chip-sur  { background: var(--sur-2); border: 1px solid var(--sur); color: var(--sur-fg); }
 .lv-chip .sur-sw { width: 14px; height: 14px; border-radius: 3px; background: repeating-linear-gradient(135deg, var(--sur) 0 3px, var(--sur-2) 3px 6px); border: 1px solid var(--sur-fg); }
+/* 人手の不足（v263）: 「絶対」と同じ赤の実線。印は四角の中の横線（余の縞と見分ける） */
+.lv-chip-short { background: var(--lv-must-bg); border: 1px solid var(--lv-must); color: var(--lv-must); cursor: help; }
+.lv-chip .short-sw { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid var(--lv-must);
+  background: linear-gradient(var(--lv-must), var(--lv-must)) center / 8px 2px no-repeat; }
 /* 0件の段階は目立たせない（形は同じまま） */
 .lv-chip.is-zero { background: var(--surface); color: var(--text-muted); border-color: var(--border); }
 .lv-chip.is-zero .ic { color: var(--text-muted); }
@@ -1047,6 +1051,19 @@ td.cell-fixed .shift-cell::before,
 .modal-overlay .modal-close { border: none; background: transparent; font-size: 20px; cursor: pointer; color: var(--text-soft); min-width: var(--h-min); min-height: var(--h-min); border-radius: var(--r-md); }
 .modal-overlay .modal-close:hover { background: var(--surface-3); }
 .modal-overlay .modal-content { max-height: 90vh; overflow-y: auto; padding: 0; }
+/* ②「シフト追加」の小窓（v263） */
+.as-body { padding: 16px 20px; line-height: 1.6; }
+.as-q { margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle); }
+.as-q h4 { margin: 0 0 6px; font-size: var(--fs-md); color: var(--text); }
+.as-q .hint { margin: 6px 0 0; }
+.as-row { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+.as-row label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.as-staff { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 2px 12px;
+  max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-md); padding: 6px 10px; }
+.as-staff-item { display: flex; align-items: center; gap: 6px; min-height: 28px; }
+.as-msg { margin: 10px 0 0; padding: 8px 12px; border-radius: var(--r-md); background: var(--lv-must-bg); color: var(--lv-must);
+  border: 1px solid var(--lv-must); font-weight: 700; }
+.as-foot { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; padding: 12px 20px 16px; border-top: 1px solid var(--border-subtle); }
 
 .modal-content {
   background: var(--surface); color: var(--text);

@@ -3,6 +3,7 @@
 # HTML の行は index.html から消してはいけない（id は1回だけ）。JS の行は JS の組み立て文字列から消してはいけない。
 # text: その id のボタンの文字を変えない（計算中の鍵が文字で閉じるボタンを見分ける）。textwrite: JS が文字を書き換えるので、中に子の要素を置かない。
 # disabled: JS が押せない状態を切り替える。代わりに作るボタンも、元が押せない間は押せない見た目・動きにする。
+id	addShiftModal	JS	0	ui.v6.js
 id	adjNo	JS	0	ui.v6.js
 id	adjSec	JS	0	ui.v6.js
 id	adjWith	JS	0	ui.v6.js
@@ -11,6 +12,16 @@ id	aiExplainClose	JS	0	ai-explain.v6.js
 id	aiExplainModal	JS	0	ai-explain.v6.js
 id	aiExplainOk	JS	0	ai-explain.v6.js
 id	appVersion	HTML	1	ui.v6.js
+id	asAll	JS	0	ui.v6.js($)
+id	asCancel	JS	0	ui.v6.js($)
+id	asClose	JS	0	ui.v6.js($)
+id	asLabel	JS	0	ui.v6.js($)
+id	asMsg	JS	0	ui.v6.js($)
+id	asNone	JS	0	ui.v6.js($)
+id	asOk	JS	0	ui.v6.js($)
+id	asReq	JS	0	ui.v6.js($)
+id	asReqCast	JS	0	ui.v6.js($)
+id	asSym	JS	0	ui.v6.js($)
 id	bsConflictNote	JS	0	ui.v6.js
 id	btnAIExplain	HTML	1	app.v6.js
 id	btnAddEvent	none	0	ui.v6.js
@@ -246,6 +257,7 @@ class	vio-flash	JS	0	ui.v6.js
 class	violation-item	JS	0	ui.v6.js
 attr	data-adjstop	JS	0	ui.v6.js
 attr	data-allowed	JS	0	ui-shell.v6.js,ui.v6.js
+attr	data-asstaff	JS	0	ui.v6.js
 attr	data-ck	JS	0	ui.v6.js
 attr	data-ckgo	JS	0	ui.v6.js
 attr	data-day	JS	0	ui.v6.js

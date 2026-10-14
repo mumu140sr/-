@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=262" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=262" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=262" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=262">
+<link rel="icon" href="favicon.svg?v=263" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=263" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=263" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=263">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=262" />
+<link rel="stylesheet" href="css/style.css?v=263" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -102,6 +102,10 @@ details.m-more > :not(summary) { color: var(--text); }
 .m-three dt { font-weight: 700; color: var(--text-soft); font-size: 14.5px; }
 .m-three dd { margin: 0; }
 .m-three dd ul { margin: 0; }
+.m-howto { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; font-size: 14.5px; line-height: 1.75; }
+.m-howto h4 { font-size: 15px; margin: 0 0 4px; }
+.m-howto p { margin: 4px 0; }
+.m-howto ol { margin: 4px 0; }
 @media (max-width: 560px) { .m-three { grid-template-columns: 1fr; } .m-three dd { margin-bottom: 6px; } }
 /* 表 */
 .m-tw { overflow-x: auto; margin: 6px 0 10px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
@@ -347,6 +351,19 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>「研」（研修）は、必要人数に数えません。</li>
         </ul>
       </details>
+      <div class="m-howto" id="addshift">
+        <h4>新しいシフトを足すとき</h4>
+        <p><span class="m-btn out"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>シフト追加</span> を押すと、6つの質問が出ます。答えてから <span class="m-btn pri"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>このシフトを足す</span> を押します。<span class="m-btn">やめる</span> を押すと、何も足しません。</p>
+        <ol>
+          <li><b>記号と名称</b>：記号は、表のマスに出る字です（4文字まで。例：深）。名称は、一覧で見分けるための名前です（例：深夜）。</li>
+          <li><b>早番の仲間か、遅番の仲間か</b>：朝から昼に入るなら「<span class="m-ui">早番の仲間</span>」、昼から夜に入るなら「<span class="m-ui">遅番の仲間</span>」です。遅番の次の日に早番を入れない決まりなどで使います。例：深夜は遅番の仲間です。</li>
+          <li><b>夜勤か</b>：「<span class="m-ui">はい、夜勤です</span>」にすると、次の日（夜勤明け）は自動で休みになるように作ります。</li>
+          <li><b>人数に数えるか</b>：ふつうは「<span class="m-ui">はい、数える（ふつうはこちら）</span>」です。「<span class="m-ui">いいえ、数えない</span>」は、研修のように店の人数に入らない出勤で、生成では入れません（希望・固定で入れた日だけ入ります）。</li>
+          <li><b>ふだんの必要人数</b>：はじめは0人です。月に数回しか使わないなら0のままにして、使う日だけ「<span class="m-ui">日別必要人数（上書き設定）</span>」で人数を入れます（例：深夜は7日と21日だけ1人）。</li>
+          <li><b>担当する人</b>：このシフトに入れる人にチェックを付けます。だれも選ばないと、生成ではこのシフトに人が入りません。あとから <span class="m-tab" data-n="3">スタッフ管理</span> の「<span class="m-ui">担当シフト</span>」でも直せます。</li>
+        </ol>
+        <p>足したあとも、表の欄と <span class="m-btn">詳細</span> でいつでも直せます（労働時間は、はじめ8時間です）。ふだん0人のシフトも、日別の人数を入れた月や、表に入っている月は、<span class="m-tab" data-n="6">シフト表</span> の下の必要人数の行に出ます。</p>
+      </div>
     </div>
 
     <div class="m-card m-screen" id="s3">
@@ -438,7 +455,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <h3><span class="m-tab" data-n="6">シフト表</span></h3>
       <dl class="m-three">
         <dt>ここでやること</dt><dd>できた表を確かめ、必要なら直して、保存します。</dd>
-        <dt>よく使うもの</dt><dd>上の帯（エラーと余の件数） <span class="m-btn pri"><svg class="ic" aria-hidden="true"><use href="#i-repair"/></svg>エラーを自動修正</span> <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-redo"/></svg>やり直す</span> <span class="m-btn">その他の操作</span> <span class="m-btn out"><svg class="ic" aria-hidden="true"><use href="#i-excel"/></svg>Excel出力</span></dd>
+        <dt>よく使うもの</dt><dd>上の帯（エラーの件数・余・不足） <span class="m-btn pri"><svg class="ic" aria-hidden="true"><use href="#i-repair"/></svg>エラーを自動修正</span> <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-redo"/></svg>やり直す</span> <span class="m-btn">その他の操作</span> <span class="m-btn out"><svg class="ic" aria-hidden="true"><use href="#i-excel"/></svg>Excel出力</span></dd>
         <dt>気をつけること</dt><dd><ul>
           <li>マスを押して変えたマスは、固定されます。作り直しても動きません。</li>
           <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> は、ページを読み込み直すと使えません。</li>
@@ -477,6 +494,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <li><span class="lv-chip lv-chip-must"><svg class="ic" aria-hidden="true"><use href="#i-must"/></svg>絶対</span><span>守ると決めたルールの違反。人員不足などは、いつも「絶対」です。</span></li>
       <li><span class="lv-chip lv-chip-soft"><svg class="ic" aria-hidden="true"><use href="#i-soft"/></svg>できれば</span><span>なるべく守りたいルールの違反。残っていても表は使えます。</span></li>
       <li><span class="lv-chip lv-chip-sur"><span class="sur-sw" aria-hidden="true"></span>余</span><span>エラーではありません。人が余った日の休みです。</span></li>
+      <li><span class="lv-chip lv-chip-short"><span class="short-sw" aria-hidden="true"></span>不足</span><span>人手が足りないときだけ、シフト表の上の帯に「不足 −2コマ」のように出ます。人員不足の人数・公休を削った出勤の日数・有給を削った出勤の日数の合計です。マウスを置くと、内訳が出ます。</span></li>
     </ul>
     <p>表のマスにも、同じ形の印が右上に付きます。左上の錠は、固定したマスです。</p>
     <div class="m-cells" aria-label="マスの見本">
@@ -541,7 +559,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <details><summary>計算している間、入力できない</summary>
         <p>計算中は、設定・希望・表の手直しを止めています。見ることはできます（折りたたみや「<span class="m-ui">詳細</span>」を開く、列の幅を変える、文字を選ぶ、<span class="m-tab" data-n="4">希望休入力</span> の「<span class="m-ui">入れる記号</span>」を選び替える、もできます）。計算中に入れた文字は消えるので、終わってから入れ直してください。終わるのを待つか、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>中止</span> が出ていれば押してください。</p></details>
       <details><summary>画面が前のままで、新しくならない</summary>
-        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v262 など）が出ています。知らされた番号と同じか確かめます。</p></details>
+        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v263 など）が出ています。知らされた番号と同じか確かめます。</p></details>
       <details><summary>データが消えた／別のパソコンで使いたい</summary>
         <p><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-export"/></svg>書き出し</span> で作ったファイルがあれば、「<span class="m-ui">データ</span>」の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg>取り込み</span> で戻せます。別のパソコンでも同じです。ファイルが無いと戻せません。</p></details>
       <details><summary>「人が足りない」と出る</summary>

@@ -111,6 +111,7 @@ const norm = s => String(s || '').replace(/\s+/g, '');
   const steps = {
     base:      async p => { await p.evaluate(() => { document.getElementById('settingsMore').open = true; toggleRuleLevelsPanel(); toggleDailyReqPanel(); });
                             await p.click('.tab[data-tab="roles"]'); await p.evaluate(() => document.querySelectorAll('.role-more-btn').forEach(x => x.click())); },
+    addshift:  async p => { await p.click('.tab[data-tab="roles"]'); await p.click('#btnAddShiftType'); await p.waitForTimeout(300); },
     feas:      async p => { await adv(p); await p.click('#btnFeasibility'); await p.waitForTimeout(3000); },
     relax:     async p => { await adv(p); await p.click('#btnRelax'); await p.waitForTimeout(4000); },
     surplan:   async p => { await adv(p); await p.click('#btnSurplusPlan'); await p.waitForTimeout(2000); },

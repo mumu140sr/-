@@ -3081,7 +3081,7 @@ function checkViolations(shifts) {
     const diff = offCount - (s.maxOff || 0);
     if (!isCast && diff < 0) {
       violations.push({
-        staffId: s.id, day: 0, type: 'off-count', short: -diff,   // 足りない日数（比べ方で使う）
+        staffId: s.id, day: 0, type: 'off-count', short: -diff,   // 足りない日数（比べ方・⑥の帯の「不足」で使う）
         message: `🚨 公休数 ${offCount}日（目標${s.maxOff}日, 差${diff}）`,
         action:  '公休数を増やしてください',
       });
@@ -3104,7 +3104,7 @@ function checkViolations(shifts) {
       }
       if (got < want) {
         violations.push({
-          staffId: s.id, day: 0, type: 'paid',
+          staffId: s.id, day: 0, type: 'paid', short: want - got,   // 足りない日数（⑥の帯の「不足」。v263）
           message: `⚠️ 有給 ${got}日（設定${want}日, 差${got - want}）`,
           action:  '有給を設定の日数まで入れてください',
         });
@@ -3275,7 +3275,7 @@ function checkViolations(shifts) {
         const req = getDayReq(g.reqs, g.dailyReqs || {}, k, d);
         if (req && counts[k] < req) {
           violations.push({
-            staffId: null, day: d, type: 'understaff',
+            staffId: null, day: d, type: 'understaff', short: req - counts[k],   // 足りない人数（⑥の帯の「不足」。v263）
             message: `🚨 ${d}日 ${gLabel}${shiftSym(k)} が${counts[k]}人（必要${req}人）`, role: k,
             action:  '他の日のシフトを移動してください',
           });
@@ -3917,36 +3917,20 @@ function runAIDiagnosis() {
     const gStaff = g.staff;
 
     // ── 1. 公休数の数学的実現可能性 ──
-    // 必要人日は「日別必要人数の上書き」も含めて日ごとに合計する
-    let totalRequired = 0;
-    for (let d = 1; d <= days; d++) {
-      shiftKeys.forEach(k => { totalRequired += getDayReq(g.reqs, g.dailyReqs || {}, k, d); });
-    }
+    // 人日の収支は calcCapacity（エラー解消プラン・作る前の見込み・余の使い道と同じ数え方。v263）。
+    // 必要人日は「日別必要人数の上書き」も含めて日ごとに合計し、必要人数を超えて決まっている出勤
+    // （必要人数0のシフトへの希望・🔒など）も足す。有給・研修・公休以外の休みも差し引く。
+    const cap = calcCapacity(g, days);
+    const totalRequired   = cap.baseRequired;
     const dailyRequired   = Math.round((totalRequired / days) * 10) / 10; // 1日平均
     const baseDaily       = shiftKeys.reduce((sum, k) => sum + (g.reqs[k] || 0), 0);
     const totalPersonDays = gStaff.length * days;
-    const totalMaxOff     = gStaff.reduce((sum, s) => sum + (s.maxOff || 0), 0);
-    // 出勤できない日は公休だけではない。有給（設定分は必ず消化）・研修・
-    // 季節休暇などの公休以外の休みも差し引かないと余力を過大評価してしまう。
-    let totalPaid = 0, totalTrain = 0, totalOtherOff = 0;
-    gStaff.forEach(s => {
-      let reqPaid = 0, trainN = 0, otherOff = 0;
-      for (let d = 1; d <= days; d++) {
-        const rq = (AppState.requests[s.id]    || {})[d];
-        const fx = (AppState.fixedShifts[s.id] || {})[d];
-        if (rq === '有' || fx === '有') { reqPaid++; continue; }
-        if ((rq && isTraining(rq)) || (fx && isTraining(fx))) { trainN++; continue; }
-        // 公休以外の休み（季/慶/引/半 など）は maxOff に含まれないので別途差し引く
-        const off = (rq && isOff(rq)) ? rq : ((fx && isOff(fx)) ? fx : '');
-        if (off && !isPublicOff(off)) otherOff++;
-      }
-      totalPaid     += Math.max(reqPaid, parseInt(s.paidLeave) || 0); // 設定分は必ず消化
-      totalTrain    += trainN;
-      totalOtherOff += otherOff;
-    });
-    const availWork = totalPersonDays - totalMaxOff - totalPaid - totalTrain - totalOtherOff;
-    const gSurplus  = availWork - totalRequired;
+    const totalMaxOff     = cap.totalMaxOff;
+    const totalPaid = cap.totalPaid, totalTrain = cap.totalTrain, totalOtherOff = cap.totalOtherOff;
+    const availWork = cap.avail;
+    const gSurplus  = cap.surplus;
     surplus = Math.min(surplus, gSurplus);
+    const fxText = forcedExcessText(cap);
     // 内訳の説明文（過大評価を防ぐため必ず明示する）
     const capLines =
       `スタッフ数: ${gStaff.length}人 × ${days}日 = ${totalPersonDays}人日\n` +
@@ -3956,8 +3940,8 @@ function runAIDiagnosis() {
       (totalOtherOff ? ` − その他の休み ${totalOtherOff}日` : '') +
       `\n＝ 出勤できる合計: ${availWork}人日\n` +
       `必要出勤: ${totalRequired}人日（1日平均 ${dailyRequired}人` +
-      (dailyRequired !== baseDaily ? `・日別上書きを反映済み` : '') + `）`;
-
+      (dailyRequired !== baseDaily ? `・日別上書きを反映済み` : '') + `）` +
+      (fxText ? `\n＋ 必要人数を超えて決まっている出勤: ${cap.forcedExcess}人日（${fxText}。希望・固定で、人数に数えない出勤）` : '');
     if (gSurplus < 0) {
       const shortage    = -gSurplus;
       const cutOffDays  = Math.ceil(shortage / gStaff.length);   // 1人あたり公休を何日減らせば足りるか
@@ -3975,7 +3959,8 @@ function runAIDiagnosis() {
           `　②「日別必要人数」の上書きを ${shortage}コマぶん減らす（土日の増員を戻す）` +
           `　③公休数を1人あたり ${cutOffDays}日 減らす` +
           `　④1日の必要人数を平均 ${feasibleDaily}人以下にする` +
-          `　⑤スタッフを ${Math.ceil(shortage / Math.max(1, days - Math.round(totalMaxOff / gStaff.length)))}人以上増やす`,
+          `　⑤スタッフを ${Math.ceil(shortage / Math.max(1, days - Math.round(totalMaxOff / gStaff.length)))}人以上増やす` +
+          (fxText ? `　⑥必要人数を超えて決まっている出勤（${fxText}）の希望・固定を見直すか、その日のそのシフトの必要人数に入れる` : ''),
       });
     } else if (dailyRequired > 0 && gSurplus < gStaff.length) {
       // 足りてはいるが余裕が薄い（1人日/人 未満）→ エラーが出やすい
@@ -4425,6 +4410,7 @@ const RELAX_PAIN_ORDER = { small: 0, mid: 1, large: 2 };
  */
 function calcCapacity(g, days) {
   const shiftKeys = getWorkShiftKeys();
+  const needAt = (k, d) => shiftKeys.includes(k) ? (Number(getDayReq(g.reqs, g.dailyReqs || {}, k, d)) || 0) : 0;
   let required = 0, excessDaily = 0;
   for (let d = 1; d <= days; d++) {
     shiftKeys.forEach(k => {
@@ -4435,22 +4421,47 @@ function calcCapacity(g, days) {
       if (need > base) excessDaily += (need - base);
     });
   }
+  // 1人1日ずつ、生成の計算（milp-core の公休の段）と同じ読み方で数える（v263）。
+  //  ・🔒を先に読み、無ければ④の希望（B1。④の希望の日を表で直して🔒にしたとき、④の値を数えていた）
+  //  ・有給は「決まっている有給＋足りない分を生成が入れる」。キャストには生成が有給を入れないので足さない。
+  //    🔒だけで入れた有給を、設定の日数から引かずに二重に数えていた
+  //  ・研修・必要人数を超えて決まっている出勤（希望・🔒）は、人数に数えずに出勤日を使う
   let totalPaid = 0, totalTrain = 0, totalOtherOff = 0;
+  const forced = {};   // 日 → シフト → 希望・🔒で決まっている出勤の人数
   g.staff.forEach(s => {
+    let lockedPaid = 0;
     for (let d = 1; d <= days; d++) {
-      const rq = (AppState.requests[s.id]    || {})[d];
-      const fx = (AppState.fixedShifts[s.id] || {})[d];
-      if (rq === '有' || fx === '有') { totalPaid++; continue; }
-      if ((rq && isTraining(rq)) || (fx && isTraining(fx))) { totalTrain++; continue; }
-      const off = (rq && isOff(rq)) ? rq : ((fx && isOff(fx)) ? fx : '');
-      if (off && !isPublicOff(off)) totalOtherOff++;
+      const lv = (AppState.fixedShifts[s.id] || {})[d] || (AppState.requests[s.id] || {})[d] || '';
+      if (lv && isOff(lv)) {
+        if (lv === '有') lockedPaid++;
+        else if (!isPublicOff(lv)) totalOtherOff++;   // 半 / 季 / 慶 / 引 / 余 など（公休系は公休目標に入っている）
+        continue;
+      }
+      const f = getFixedShiftAt(s.id, d);
+      if (f && isTraining(f)) { totalTrain++; continue; }
+      if (f && isWork(f)) { forced[d] = forced[d] || {}; forced[d][f] = (forced[d][f] || 0) + 1; }
     }
-    totalPaid += Math.max(0, (parseInt(s.paidLeave) || 0) - countPaidRequests(s, days));
+    const auto = getStaffDepartment(s) === 'cast' ? 0 : Math.max(0, (parseInt(s.paidLeave) || 0) - lockedPaid);
+    totalPaid += lockedPaid + auto;
   });
+  // 必要人数を超えて決まっている出勤（必要人数0のシフトへの希望・🔒など）。人数には数えないが、出勤日は使う
+  let forcedExcess = 0;
+  const forcedByKey = {};
+  Object.keys(forced).forEach(d => Object.keys(forced[d]).forEach(k => {
+    const ex = Math.max(0, forced[d][k] - needAt(k, parseInt(d)));
+    if (ex > 0) { forcedExcess += ex; forcedByKey[k] = (forcedByKey[k] || 0) + ex; }
+  }));
   const totalMaxOff = g.staff.reduce((sum, s) => sum + (s.maxOff || 0), 0);
   const avail = g.staff.length * days - totalMaxOff - totalPaid - totalTrain - totalOtherOff;
-  return { required, avail, surplus: avail - required, days,
-           totalMaxOff, totalPaid, excessDaily };
+  const req = required + forcedExcess;
+  return { required: req, avail, surplus: avail - req, days,
+           totalMaxOff, totalPaid, totalTrain, totalOtherOff, excessDaily,
+           baseRequired: required, forcedExcess, forcedByKey };
+}
+/** 「必要人数を超えて決まっている出勤」の内訳の文（深夜 2人日・遅 1人日）。無ければ '' */
+function forcedExcessText(cap) {
+  if (!cap || !(cap.forcedExcess > 0)) return '';
+  return Object.keys(cap.forcedByKey).map(k => `${shiftSym(k)} ${cap.forcedByKey[k]}人日`).join('・');
 }
 
 // その人がカレンダーで既に指定している'有'の日数（設定値との二重計上を防ぐ）
@@ -5538,7 +5549,9 @@ function analyzeLowerBound() {
       const castNote = castOff > 0 ? `キャストの公休数（合わせて ${castOff}日）は目安なので、キャストが公休を減らせば ${Math.min(short, castOff)}人日 まで埋まります` : '';
       res.reasons.push({
         kind: 'month', need, have: cap.avail, soft: monthShort === 0,
-        text: `${pfx}月全体: 必要 ${need}人日 に対し、出せるのは ${cap.avail}人日 です（不足 ${short}人日）` + (castNote ? `。${castNote}` : ''),
+        text: `${pfx}月全体: 必要 ${need}人日 に対し、出せるのは ${cap.avail}人日 です（不足 ${short}人日）`
+            + (cap.forcedExcess > 0 ? `。必要人日には、必要人数を超えて希望・固定で決まっている出勤 ${cap.forcedExcess}人日（${forcedExcessText(cap)}）を含みます` : '')
+            + (castNote ? `。${castNote}` : ''),
       });
     }
     // ⑦ 6連勤（⛔）を避けると出られない日（v246）。日ごとの数え方は「その日出勤できる人」を、前月末からの連勤や

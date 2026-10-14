@@ -69,8 +69,28 @@ function renderResultBand() {
   (AppState.violations || []).forEach(v => { const lv = vioLevelOf([v]); if (lv) n[lv]++; });
   const sur = (typeof listSurplusCells === 'function') ? listSurplusCells().length : 0;
   const chip = (lv, label, k) => `<span class="lv-chip lv-chip-${lv}${k ? '' : ' is-zero'}">${uiIcon(lv)}${label}<b>${k}</b><span class="lv-unit">件</span></span>`;
+  // 人手の不足（v263）: 人員不足の人数＋公休を削った出勤の日数＋有給を削った出勤の日数。画面で数え直さず、検査の違反の
+  // 足りない数（short）を足す（公休はキャストを数えない・ルールを OFF にしたものは数えない＝検査と同じ）。0なら出さない
+  const sh = shortageOfViolations(AppState.violations);
+  const shortChip = sh.total > 0
+    ? `<span class="lv-chip lv-chip-short" title="${escapeHtml(`人員不足 ${sh.under}人・公休を削った出勤 ${sh.off}日・有給を削った出勤 ${sh.paid}日`)}">`
+      + `<span class="short-sw" aria-hidden="true"></span>不足<b>−${sh.total}</b><span class="lv-unit">コマ</span></span>`
+    : '';
   el.innerHTML = chip('crit', '6連勤以上', n.crit) + chip('must', '絶対', n.must) + chip('soft', 'できれば', n.soft)
-    + `<span class="lv-chip lv-chip-sur${sur ? '' : ' is-zero'}"><span class="sur-sw" aria-hidden="true"></span>余<b>${sur}</b><span class="lv-unit">コマ</span></span>`;
+    + `<span class="lv-chip lv-chip-sur${sur ? '' : ' is-zero'}"><span class="sur-sw" aria-hidden="true"></span>余<b>${sur}</b><span class="lv-unit">コマ</span></span>`
+    + shortChip;
+}
+/** 違反の一覧から、人手の不足（人員不足の人数・公休を削った日数・有給を削った日数）を数える（v263。⑥の帯） */
+function shortageOfViolations(vios) {
+  const r = { under: 0, off: 0, paid: 0, total: 0 };
+  (vios || []).forEach(v => {
+    const k = Math.max(0, Number(v && v.short) || 0);
+    if (v.type === 'understaff') r.under += k;
+    else if (v.type === 'off-count') r.off += k;
+    else if (v.type === 'paid') r.paid += k;
+  });
+  r.total = r.under + r.off + r.paid;
+  return r;
 }
 
 // ===== 線画のアイコンと、絵文字を使わない言葉（v251） =====
@@ -742,24 +762,142 @@ function afterShiftSymChange() {
 }
 
 function setupRolePanel() {
-  document.getElementById('btnAddShiftType').addEventListener('click', () => {
-    const newKey = newShiftKey();
-    AppState.shiftTypes.push({
-      key:          newKey,
-      sym:          newShiftSym(),
-      label:        '新シフト',
-      color:        '#e2e8f0',
-      category:     'A',
-      countForStaff: true,
-      isTraining:   false,
-      isNight:      false,
-      workHours:    8,
+  document.getElementById('btnAddShiftType').addEventListener('click', () => showAddShiftModal());
+}
+
+// ②「シフト追加」（v263）: 足す前に、決めることを小窓で聞く。「やめる」・✕・外側を押したら何も足さない。
+// 以前は「新シフト・早番の仲間・必要1人・だれも担当しない」でそのまま足していたため、足したあとに何を決めれば
+// よいかが分からず、必要人数1人のまま毎日の人員不足が出ていた。新しいシフトは、ふだんの人数0人で足す。
+// 中の名前（key）は newShiftKey、最初の記号は newShiftSym（v258 のまま）。
+function showAddShiftModal() {
+  const old = document.getElementById('addShiftModal');
+  if (old) old.remove();
+  const sym0 = newShiftSym();
+  const staff = AppState.staff || [];
+  const posL = s => (POSITION_TYPES[s.positionType] || {}).label || '';
+  const staffRows = staff.length
+    ? staff.map(s => `<label class="as-staff-item"><input type="checkbox" data-asstaff="${escapeHtml(s.id)}"> ${escapeHtml(s.name)}` +
+        `<span class="hint">（${getStaffDepartment(s) === 'cast' ? 'キャスト' : '社員'}${posL(s) ? '・' + escapeHtml(posL(s)) : ''}）</span></label>`).join('')
+    : '<p class="hint" style="margin:0">スタッフがまだいません。あとで③スタッフ管理の「担当シフト」で選べます。</p>';
+  const modal = document.createElement('div');
+  modal.id = 'addShiftModal';
+  modal.className = 'modal-overlay';
+  modal.style.zIndex = 10050;
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:640px" role="dialog" aria-modal="true" aria-labelledby="asTitle">
+      <div class="modal-header"><h3 id="asTitle" style="margin:0">新しいシフトを足す</h3><button class="modal-close" id="asClose" aria-label="やめる">✕</button></div>
+      <div class="modal-body as-body">
+        <p class="hint" style="margin:0 0 12px">6つの質問に答えて「このシフトを足す」を押します。足したあとも、②の表と各行の「詳細」でいつでも直せます。</p>
+        <section class="as-q">
+          <h4>1. 記号と名称</h4>
+          <div class="as-row">
+            <label>記号 <input type="text" id="asSym" maxlength="4" value="${escapeHtml(sym0)}" style="width:80px;font-weight:700"></label>
+            <label>名称 <input type="text" id="asLabel" placeholder="例：深夜" style="width:180px"></label>
+          </div>
+          <p class="hint">記号は、表のマスに出る字です（4文字まで。例：深）。名称は、一覧で見分けるための名前です（例：深夜）。</p>
+        </section>
+        <section class="as-q">
+          <h4>2. 早番の仲間ですか、遅番の仲間ですか</h4>
+          <div class="as-row">
+            <label><input type="radio" name="asCat" value="A"> 早番の仲間</label>
+            <label><input type="radio" name="asCat" value="B"> 遅番の仲間</label>
+          </div>
+          <p class="hint">朝から昼に入るなら早番の仲間、昼から夜に入るなら遅番の仲間です。遅番の次の日に早番を入れない決まりや、早番・遅番の偏りを見るときに使います。例：朝の品出し → 早番の仲間、深夜 → 遅番の仲間。</p>
+        </section>
+        <section class="as-q">
+          <h4>3. 夜勤ですか</h4>
+          <div class="as-row">
+            <label><input type="radio" name="asNight" value="0" checked> いいえ（ふつうのシフト）</label>
+            <label><input type="radio" name="asNight" value="1"> はい、夜勤です</label>
+          </div>
+          <p class="hint">夜勤にすると、次の日（夜勤明け）は自動で休みになるように作ります。手で出勤を入れたときは、エラーで知らせます。</p>
+        </section>
+        <section class="as-q">
+          <h4>4. 人数に数えますか</h4>
+          <div class="as-row">
+            <label><input type="radio" name="asCount" value="1" checked> はい、数える（ふつうはこちら）</label>
+            <label><input type="radio" name="asCount" value="0"> いいえ、数えない</label>
+          </div>
+          <p class="hint">数えると、必要人数をこのシフトで満たし、生成でこのシフトに人を入れます。数えないと、研修のように店の人数に入らない出勤になり、生成では入れません（希望・固定で入れた日だけ入ります）。</p>
+        </section>
+        <section class="as-q">
+          <h4>5. ふだんの必要人数</h4>
+          <div class="as-row">
+            <label>社員 <input type="number" id="asReq" min="0" max="99" value="0" style="width:64px"> 人</label>
+            <label>キャスト <input type="number" id="asReqCast" min="0" max="99" value="0" style="width:64px"> 人</label>
+          </div>
+          <p class="hint">はじめは0人です。月に数回しか使わないなら0のままにして、使う日だけ②の「日別必要人数」で人数を入れます（例：深夜は7日と21日だけ1人）。毎日使うなら、毎日の人数を入れます。</p>
+        </section>
+        <section class="as-q">
+          <h4>6. 担当する人</h4>
+          <p class="hint" style="margin:0 0 6px">このシフトに入れる人にチェックを付けます。だれも選ばないと、生成ではこのシフトに人が入りません。あとから③スタッフ管理の「担当シフト」でも直せます。</p>
+          ${staff.length ? `<div class="as-row" style="margin-bottom:6px"><button type="button" class="btn btn-ghost" id="asAll">全員を選ぶ</button>
+            <button type="button" class="btn btn-ghost" id="asNone">チェックを外す</button></div>` : ''}
+          <div class="as-staff">${staffRows}</div>
+        </section>
+        <p class="hint" style="margin:4px 0 0">労働時間（はじめは8時間）・Excel出力の色・合算（社員＋キャスト）は、足したあと②の表と「詳細」で直せます。</p>
+        <div id="asMsg" class="as-msg" role="alert" style="display:none"></div>
+      </div>
+      <div class="modal-footer as-foot">
+        <button class="btn" id="asCancel">やめる</button>
+        <button class="btn btn-primary" id="asOk">${uiIcon('plus')}このシフトを足す</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const $ = id => modal.querySelector('#' + id);
+  const close = () => { modal.remove(); document.removeEventListener('keydown', onKey, true); };
+  const onKey = e => { if (e.key === 'Escape' && modal.isConnected) { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey, true);
+  const say = msg => { const m = $('asMsg'); m.textContent = msg; m.style.display = msg ? 'block' : 'none'; };
+  const radio = name => { const r = modal.querySelector(`input[name="${name}"]:checked`); return r ? r.value : null; };
+  // 人数に数えないシフトは必要人数を使わないので、欄を押せなくする
+  const syncCount = () => {
+    const counted = radio('asCount') !== '0';
+    ['asReq', 'asReqCast'].forEach(id => { $(id).disabled = !counted; });
+  };
+  modal.querySelectorAll('input[name="asCount"]').forEach(r => r.addEventListener('change', syncCount));
+  if ($('asAll')) $('asAll').addEventListener('click', () => modal.querySelectorAll('[data-asstaff]').forEach(c => { c.checked = true; }));
+  if ($('asNone')) $('asNone').addEventListener('click', () => modal.querySelectorAll('[data-asstaff]').forEach(c => { c.checked = false; }));
+  $('asCancel').addEventListener('click', close);
+  $('asClose').addEventListener('click', close);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  $('asOk').addEventListener('click', () => {
+    // ②は計算中の鍵の中（#panel-roles）。小窓を開いたあとで計算が始まっていたら足さない
+    if (typeof calcBusy === 'function' && calcBusy()) { say('いまは計算中なので足せません。計算が終わってから、もう一度押してください。'); return; }
+    const sym = String($('asSym').value || '').trim();
+    const label = String($('asLabel').value || '').trim();
+    const cat = radio('asCat');
+    const key = newShiftKey();
+    const prob = shiftSymProblem(sym, key, AppState.shiftTypes);
+    if (prob) { say(`1. 記号: ${prob}`); $('asSym').focus(); return; }
+    if (!label) { say('1. 名称を入れてください（例：深夜）'); $('asLabel').focus(); return; }
+    if (cat !== 'A' && cat !== 'B') { say('2. 早番の仲間か、遅番の仲間かを選んでください'); return; }
+    const counted = radio('asCount') !== '0';
+    const num = id => { const n = parseInt($(id).value); return isNaN(n) ? 0 : Math.max(0, Math.min(99, n)); };
+    const req = counted ? num('asReq') : 0, reqCast = counted ? num('asReqCast') : 0;
+    const who = Array.from(modal.querySelectorAll('[data-asstaff]:checked')).map(c => c.dataset.asstaff);
+    const t = { key, label, color: '#e2e8f0', category: cat, countForStaff: counted, isTraining: false,
+                isNight: radio('asNight') === '1', workHours: 8 };
+    if (sym !== key) t.sym = sym;
+    AppState.shiftTypes.push(t);
+    AppState.roleRequirements[key] = req;
+    if (!AppState.roleRequirementsCast) AppState.roleRequirementsCast = {};
+    AppState.roleRequirementsCast[key] = reqCast;
+    who.forEach(id => {
+      const s = staff.find(x => x.id === id); if (!s) return;
+      if (!Array.isArray(s.allowedShifts)) s.allowedShifts = [];
+      if (!s.allowedShifts.includes(key)) s.allowedShifts.push(key);
     });
-    AppState.roleRequirements[newKey] = 1;
-    renderRoleTable();
+    if (typeof _shiftKeysCache !== 'undefined') _shiftKeysCache = null;   // 人数に数える種類の一覧を作り直す
+    close();
     autoSave();
-    toast('シフト種別を追加しました', 'info');
+    refreshAllUI();               // ②の表・③の担当シフト・開いている日別必要人数の表
+    recheckAfterRuleChange();     // 人数を入れたときは、いまの表のエラーを数え直す
+    toast(`シフト「${sym}」（${label}）を足しました。担当 ${who.length}人・ふだんの必要人数 社員${req}人・キャスト${reqCast}人。` +
+          `直すときは②の表と「詳細」で直せます`, 'success', 6000);
   });
+  syncCount();
+  setTimeout(() => { try { $('asLabel').focus(); } catch (_) {} }, 0);
 }
 
 function renderRoleTable() {
@@ -2063,12 +2201,16 @@ function _renderResultTableInner() {
       tbody.appendChild(tr);
     });
 
-    // 集計行（部門の必要人数 > 0 のシフト種別）— 定数は各日セルで直接編集可能
+    // 集計行 — 定数は各日セルで直接編集可能。出すのは、部門のふだんの必要人数 > 0 のシフト種別と、
+    // ふだんは0人でも、この月に日別の人数（手入力・必要人数のルール）があるか、この部門の誰かが表で入っている種類（v263。
+    // 深夜など、使う日だけ日別で入れるシフトの行が出ず、⑥で人数を見られなかった）
     const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
     const deptKey = g.key === 'cast' ? 'cast' : 'employee';
+    const usedIn = key => g.staff.some(s => { const row = AppState.shifts[s.id] || {}; for (let d = 1; d <= days; d++) if (row[d] === key) return true; return false; });
+    const anyDayReq = key => { for (let d = 1; d <= days; d++) if ((Number(getDayReq(g.reqs, g.dailyReqs || {}, key, d)) || 0) > 0) return true; return false; };
     workKeys.forEach(key => {
       const defaultReq = g.reqs[key] || 0;
-      if (defaultReq === 0) return;
+      if (defaultReq === 0 && !anyDayReq(key) && !usedIn(key)) return;
       const tr = document.createElement('tr');
       tr.className = 'summary-row';
       let cells = `<td>${escapeHtml(shiftSym(key))} (必要${escapeHtml(defaultReq)})</td>`;
@@ -3217,10 +3359,13 @@ function showRelaxModal() {
   const capLines = getDepartmentGroups(AppState.staff).map(g => {
     const c = calcCapacity(g, _days);
     const label = (getDepartmentGroups(AppState.staff).length > 1) ? `【${g.label}】` : '';
+    // 必要人数を超えて希望・固定で決まっている出勤も、必要人日に入れている（v263）
+    const fx = (typeof forcedExcessText === 'function') ? forcedExcessText(c) : '';
+    const fxNote = fx ? `<br><span class="hint">${label}必要人日には、必要人数を超えて希望・固定で決まっている出勤 ${escapeHtml(c.forcedExcess)}人日（${escapeHtml(fx)}）を含みます</span>` : '';
     // 数は保存データの値から作るので、出口でもエスケープする（C10）
-    return c.surplus < 0
+    return (c.surplus < 0
       ? `${label}必要 ${escapeHtml(c.required)}人日 ／ 出せる ${escapeHtml(c.avail)}人日 → <b style="color:var(--danger)">${escapeHtml(-c.surplus)}人日 足りません</b>`
-      : `${label}必要 ${escapeHtml(c.required)}人日 ／ 出せる ${escapeHtml(c.avail)}人日 → <b style="color:var(--success)">余裕 ${escapeHtml(c.surplus)}人日</b>`;
+      : `${label}必要 ${escapeHtml(c.required)}人日 ／ 出せる ${escapeHtml(c.avail)}人日 → <b style="color:var(--success)">余裕 ${escapeHtml(c.surplus)}人日</b>`) + fxNote;
   }).join('<br>');
   const vioN = (AppState.violations || []).length;
 
@@ -5106,7 +5251,8 @@ function _surplusOf() {
   const days = getDaysInMonth(AppState.settings.targetMonth);
   return getDepartmentGroups(AppState.staff).map(g => {
     const c = calcCapacity(g, days);
-    return { key: g.key, label: g.label || g.key, surplus: c.surplus, required: c.required, avail: c.avail };
+    return { key: g.key, label: g.label || g.key, surplus: c.surplus, required: c.required, avail: c.avail,
+             forcedExcess: c.forcedExcess || 0, fxText: (typeof forcedExcessText === 'function') ? forcedExcessText(c) : '' };
   });
 }
 
@@ -5541,7 +5687,9 @@ function showSurplusPlanModal() {
   const render = () => {
     const capTxt = caps.map(c => c.surplus > 0
       ? `${caps.length > 1 ? '【' + c.label + '】' : ''}必要 ${c.required}人日 ／ 出せる ${c.avail}人日 → <b style="color:var(--link)">余り ${c.surplus}人日</b>`
-      : `${caps.length > 1 ? '【' + c.label + '】' : ''}余りはありません（${c.surplus < 0 ? (-c.surplus) + '人日 不足' : 'ちょうど'}）`).join('<br>');
+      : `${caps.length > 1 ? '【' + c.label + '】' : ''}余りはありません（${c.surplus < 0 ? (-c.surplus) + '人日 不足' : 'ちょうど'}）`).join('<br>')
+      // 必要人数を超えて希望・固定で決まっている出勤も、必要人日に入れている（v263）
+      + caps.filter(c => c.forcedExcess > 0).map(c => `<br><span class="hint">${caps.length > 1 ? '【' + escapeHtml(c.label) + '】' : ''}必要人日には、必要人数を超えて希望・固定で決まっている出勤 ${c.forcedExcess}人日（${escapeHtml(c.fxText)}）を含みます</span>`).join('');
     const staffOpt = (AppState.staff || []).map(x =>
       `<option value="${x.id}" ${sel.learner === x.id ? 'selected' : ''}>${escapeHtml(x.name)}</option>`).join('');
     const tutorBox = (AppState.staff || []).filter(x => rank[x.positionType] != null)
