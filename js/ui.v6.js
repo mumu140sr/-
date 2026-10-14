@@ -376,6 +376,7 @@ function setupSettingsPanel() {
       AppState.dailyRequirements = {}; AppState.dailyRequirementsCast = {};
       // 日ごとのスキル指定も日付つきなので片付ける。スキルの種類と目標人数（skills）は残す。
       const ds = {}; Object.keys(AppState.dailySkills || {}).forEach(k => { ds[k] = {}; }); AppState.dailySkills = ds;
+      AppState.dailyShiftSkills = {};   // 日ごとに要るスキル（v264）も日付つき
       AppState.violations = []; AppState.generated = false;
       AppState.genBase = null; AppState.editLog = [];   // 生成直後の控えと記録も前の月のもの
       if (typeof resetShiftHistory === 'function') resetShiftHistory();   // 前の月の表へ戻せないように
@@ -401,7 +402,7 @@ function setupSettingsPanel() {
     const has = { 表: cnt(AppState.shifts), 希望休: cnt(AppState.requests), 固定: cnt(AppState.fixedShifts),
                   特別日: Object.keys(AppState.specialDays || {}).length, 行事: (AppState.events || []).length,
                   日ごとの必要人数: cnt(AppState.dailyRequirements) + cnt(AppState.dailyRequirementsCast),
-                  日ごとのスキル指定: cnt(AppState.dailySkills) };
+                  日ごとのスキル指定: cnt(AppState.dailySkills), 日ごとに要るスキル: cnt(AppState.dailyShiftSkills) };
     const list = Object.keys(has).filter(k => has[k] > 0);
     // 前の月の日付つきデータが無ければ、聞かずにそのまま変える
     if (!list.length) { closeMonthModal(); doMonthChange(newMonth, false, false); return; }
@@ -619,6 +620,7 @@ const RULE_LEVEL_META = [
   { g: '人員・役職', t: 'off-count',         l: '公休数不足',            def: 'must', locked: true },
   { g: '人員・役職', t: 'consecutive',       l: '連勤超過',              def: 'must', locked: true },
   { g: '人員・役職', t: 'role-mismatch',     l: '担当外シフト',          def: 'must', locked: true },
+  { g: '人員・役職', t: 'day-skill',         l: '日ごとに要るスキル',    def: 'must', locked: true },
   { g: '人員・役職', t: 'overstaff',         l: '定数オーバー（必要人数より多い）', def: 'should' },
   { g: '人員・役職', t: 'vicemanager-absent',l: '副店長不在の日',        def: 'must' },
   { g: '人員・役職', t: 'resp-duplicate',    l: '責任者・総務の重複',    def: 'must' },
@@ -1073,6 +1075,7 @@ function renderRoleTable() {
         if (AppState.roleRequirementsCast) delete AppState.roleRequirementsCast[type.key];
         if (AppState.dailyRequirements) delete AppState.dailyRequirements[type.key];
         if (AppState.dailyRequirementsCast) delete AppState.dailyRequirementsCast[type.key];
+        if (AppState.dailyShiftSkills) delete AppState.dailyShiftSkills[type.key];   // 日ごとに要るスキル（v264）
         AppState.shiftTypes.splice(idx, 1);
         renderRoleTable();
         autoSave(); recheckAfterRuleChange();
@@ -1122,6 +1125,99 @@ function _dailyReqStyle(isOv, isRule) {
 function _dailyReqTitle(isOv, override, base, ruleText) {
   if (isOv) return `この日だけ ${override}人（上書きを消すと ${base}人${ruleText ? '・ルールの数' : ''}）`;
   return ruleText || `ふだんの数（${base}人）`;
+}
+
+// ===== 日ごとに要るスキル（v264）の画面 =====
+// ②の「日別必要人数（上書き設定）」の中に置く。ふだんは折りたたみの中で目立たず、使う日だけ選ぶ。
+/** いまの月の指定の一覧（日 → シフトの並び順）。[{ d, k, skills }] */
+function listDayShiftSkills() {
+  const days = getDaysInMonth(AppState.settings.targetMonth) || 31;
+  const order = (AppState.shiftTypes || []).map(t => t.key);
+  const m = AppState.dailyShiftSkills || {};
+  const out = [];
+  Object.keys(m).forEach(k => Object.keys(m[k] || {}).forEach(ds => {
+    const d = parseInt(ds, 10), sk = m[k][ds];
+    if (d >= 1 && d <= days && Array.isArray(sk) && sk.length) out.push({ d, k, skills: sk });
+  }));
+  return out.sort((a, b) => (a.d - b.d) || (order.indexOf(a.k) - order.indexOf(b.k)));
+}
+/** 「S営業」「P営業」のどれか（1つなら「S営業」） */
+function daySkillWords(skills) {
+  return skills.map(n => `「${n}」`).join('') + (skills.length > 1 ? 'のどれか' : '');
+}
+/** マスの title に足す文。指定が無ければ '' */
+function daySkillTitle(key, d) {
+  const sk = daySkillsFor(key, d);
+  return sk ? `要るスキル：${daySkillWords(sk)}を持つ人だけ` : '';
+}
+/** その日そのシフトに入れる人（担当していて、要るスキルを持つ人）の数。部門をまたいで数える */
+function daySkillCapable(key, d) {
+  return (AppState.staff || []).filter(s => (s.allowedShifts || []).includes(key) && hasDaySkill(s, key, d)).length;
+}
+function dayShiftSkillsSectionHtml(days, types) {
+  const names = [];
+  (AppState.skills || []).forEach(sk => { if (sk && sk.name && names.indexOf(sk.name) < 0) names.push(sk.name); });
+  const list = listDayShiftSkills();
+  const wd = d => getWeekdayLabel(getWeekday(AppState.settings.targetMonth, d));
+  const rows = list.map(x => {
+    const n = daySkillCapable(x.k, x.d);
+    return `<li class="dss-row"><span><b>${x.d}日（${wd(x.d)}）</b> ${escapeHtml(shiftSym(x.k))}：${escapeHtml(daySkillWords(x.skills))}を持つ人だけ`
+      + `<span class="hint">（入れる人 ${n}人${n === 0 ? '・だれも入れません' : ''}）</span></span>`
+      + `<button type="button" class="btn btn-ghost" data-dss-del="${escapeHtml(x.k)}|${x.d}">外す</button></li>`;
+  }).join('');
+  const dayOpts = Array.from({ length: days }, (_, i) => i + 1).map(d => `<option value="${d}">${d}日（${wd(d)}）</option>`).join('');
+  const shiftOpts = types.map(t => `<option value="${escapeHtml(t.key)}">${escapeHtml(shiftSymOf(t))}（${escapeHtml(t.label || '')}）</option>`).join('');
+  const skillChecks = names.map(n => `<label class="dss-skill"><input type="checkbox" data-dss-skill="${escapeHtml(n)}"> ${escapeHtml(n)}</label>`).join('');
+  return `<div class="dss-box" id="dssBox">
+    <h4 style="margin:14px 0 4px">日ごとに要るスキル</h4>
+    <p class="hint" style="margin:0 0 6px">その日のそのシフトに入れる人を、スキルで絞ります（例：入れ替えの日の深夜は「S営業」か「P営業」を持つ人だけ）。いくつか選ぶと「どれか1つを持っていればよい」になります。選んでいない日・シフトは今までどおりです。社員・キャストの両方に当てます。</p>
+    ${list.length ? `<ul class="dss-list" id="dssList">${rows}</ul>` : '<p class="hint" id="dssList" style="margin:0 0 6px">いまは指定がありません。</p>'}
+    ${names.length ? `<div class="dss-add">
+      <label>日 <select id="dssDay">${dayOpts}</select></label>
+      <label>シフト <select id="dssShift">${shiftOpts}</select></label>
+      <span class="dss-skills">要るスキル ${skillChecks}</span>
+      <button type="button" class="btn" id="dssAdd">${uiIcon('plus')}この日に指定する</button>
+    </div>
+    <div id="dssMsg" class="dss-msg" role="status" style="display:none"></div>`
+    : '<p class="hint" style="margin:0">スキルがまだありません。先に「スタッフ管理」の「スキル設定」でスキルを作ってください。</p>'}
+  </div>`;
+}
+function wireDayShiftSkillsSection(container) {
+  const box = container.querySelector('#dssBox');
+  if (!box) return;
+  const say = (msg, bad) => {
+    const m = box.querySelector('#dssMsg'); if (!m) return;
+    m.textContent = msg; m.style.display = msg ? 'block' : 'none'; m.classList.toggle('bad', !!bad);
+  };
+  const after = (msg) => {
+    autoSave();
+    renderDailyReqPanel();                         // 一覧とマスの印を描き直す
+    recheckAfterRuleChange({ fromDailyPanel: true });   // いまの表のエラーを数え直す（⑥の印も描き直す）
+    const m2 = document.querySelector('#dssBox #dssMsg');
+    if (m2 && msg) { m2.textContent = msg; m2.style.display = 'block'; }
+  };
+  const add = box.querySelector('#dssAdd');
+  if (add) add.addEventListener('click', () => {
+    const d = parseInt(box.querySelector('#dssDay').value, 10);
+    const k = box.querySelector('#dssShift').value;
+    const sk = Array.from(box.querySelectorAll('[data-dss-skill]:checked')).map(c => c.dataset.dssSkill);
+    if (!(d >= 1) || !k) return;
+    if (!sk.length) { say('要るスキルを1つ以上選んでください', true); return; }
+    if (!AppState.dailyShiftSkills) AppState.dailyShiftSkills = {};
+    const had = !!daySkillsFor(k, d);
+    (AppState.dailyShiftSkills[k] = AppState.dailyShiftSkills[k] || {})[d] = sk;
+    const n = daySkillCapable(k, d);
+    after(`${d}日の${shiftSym(k)}は、${daySkillWords(sk)}を持つ人だけにしました${had ? '（前の指定を置き換えました）' : ''}。入れる人 ${n}人` +
+          (n === 0 ? '。だれも入れないので、その日は人員不足になります' : ''));
+  });
+  box.querySelectorAll('[data-dss-del]').forEach(b => b.addEventListener('click', () => {
+    const [k, ds] = b.dataset.dssDel.split('|');
+    const m = AppState.dailyShiftSkills || {};
+    if (!m[k] || !m[k][ds]) return;
+    delete m[k][ds];
+    if (!Object.keys(m[k]).length) delete m[k];
+    after(`${ds}日の${shiftSym(k)}の指定を外しました（だれでも入れるようになります）`);
+  }));
 }
 
 function renderDailyReqPanel() {
@@ -1176,12 +1272,14 @@ function renderDailyReqPanel() {
         const ruleText = dayReqRuleText(bInfo, defaultVal);
         // 全セルに数字を表示（通常=グレー / ルールの日=点線の下線 / 上書き=黒太字＋黄背景）
         const cellBg = isOv ? 'var(--accent-soft)' : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
-        html += `<td style="padding:1px;border:1px solid var(--border);background:${cellBg}">
+        // 日ごとに要るスキル（v264）の日は、マスを点線の枠で囲み、title に要るスキルを書く
+        const dsT = daySkillTitle(type.key, d);
+        html += `<td style="padding:1px;border:1px solid var(--border);background:${cellBg}"${dsT ? ' class="ds-mark"' : ''}>
           <input type="number" min="0" max="99"
             value="${escapeHtml(isOv ? override : bInfo.base)}"
             data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}" data-default="${escapeHtml(defaultVal)}"
             data-base="${escapeHtml(bInfo.base)}" data-rule-text="${escapeHtml(ruleText)}"
-            title="${escapeHtml(_dailyReqTitle(isOv, override, bInfo.base, ruleText))}"
+            title="${escapeHtml(_dailyReqTitle(isOv, override, bInfo.base, ruleText) + (dsT ? '／' + dsT : ''))}"
             class="daily-req-input" style="${_dailyReqStyle(isOv, !!ruleText)}"/>
         </td>`;
       }
@@ -1219,7 +1317,9 @@ function renderDailyReqPanel() {
   if ((AppState.skills || []).length) {
     html += `<p class="hint" style="margin-top:6px">「スキル：」の行はスキル要件です。忙しい日だけ「目標人数」を増やす、閑散日は下げる、といった調整ができます（最低ラインは目標を超えません）。</p>`;
   }
+  html += dayShiftSkillsSectionHtml(days, countableTypes);   // 日ごとに要るスキル（v264）
   container.innerHTML = html;
+  wireDayShiftSkillsSection(container);
 
   // スキル要件の日別上書き
   container.querySelectorAll('.daily-skill-input').forEach(el => {
@@ -1487,6 +1587,8 @@ function renderSkillsPanel() {
           if (oldDays || !AppState.dailySkills[newName]) AppState.dailySkills[newName] = AppState.dailySkills[oldName];
           delete AppState.dailySkills[oldName];
         }
+        // 日ごとに要るスキル（v264）の名前も一緒に直す（移さないときは、元の名前のままにする）
+        renameDayShiftSkill(oldName, newName);
         if (others.length) toast(`保有者（${oldHolders}人）と日別指定を「${newName}」に移しました。` +
           `同じ名前の「${oldName}」（目標0）は一覧に残っています。いらなければ削除してください`, 'info', 8000);
         } else {
@@ -1516,6 +1618,9 @@ function renderSkillsPanel() {
       });
       AppState.skills.splice(idx, 1);
       if (AppState.dailySkills && !dup) delete AppState.dailySkills[sk.name];   // 日別の上書きも消す
+      // 日ごとに要るスキル（v264）からも外す（空になった指定は消す。その日そのシフトは、だれでも入れるようになる）
+      const dsN = dup ? 0 : renameDayShiftSkill(sk.name, null);
+      if (dsN) toast(`「日ごとに要るスキル」の ${dsN}か所 からも「${sk.name}」を外しました`, 'info', 6000);
       renderSkillsPanel();
       renderStaffTable();
       if (typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
@@ -1931,6 +2036,7 @@ const REQ_ALERT_TYPE = {
   'req-solo': 'resp-duplicate', 'event-req': 'event-absent', 'special-req': 'special-day',
   'req-offcount': 'off-count', 'paid-short': 'paid', 'day': 'understaff', 'role': 'understaff',
   'comp-days': 'understaff',   // 6連勤を避けると出られない日の人員不足（v246）
+  'req-day-skill': 'day-skill',   // 日ごとに要るスキルを持たない人の希望・固定（v264）
 };
 function _reqIsMust(kind) {
   const t = REQ_ALERT_TYPE[kind];
@@ -2208,9 +2314,15 @@ function _renderResultTableInner() {
     const deptKey = g.key === 'cast' ? 'cast' : 'employee';
     const usedIn = key => g.staff.some(s => { const row = AppState.shifts[s.id] || {}; for (let d = 1; d <= days; d++) if (row[d] === key) return true; return false; });
     const anyDayReq = key => { for (let d = 1; d <= days; d++) if ((Number(getDayReq(g.reqs, g.dailyReqs || {}, key, d)) || 0) > 0) return true; return false; };
+    // 日ごとに要るスキル（v264）の指定があるシフトも出す（印を見られるように）。その部門にそのシフトを担当する人がいるときだけ
+    const anyDaySkill = key => {
+      if (!g.staff.some(s => (s.allowedShifts || []).includes(key))) return false;
+      for (let d = 1; d <= days; d++) if (daySkillsFor(key, d)) return true;
+      return false;
+    };
     workKeys.forEach(key => {
       const defaultReq = g.reqs[key] || 0;
-      if (defaultReq === 0 && !anyDayReq(key) && !usedIn(key)) return;
+      if (defaultReq === 0 && !anyDayReq(key) && !usedIn(key) && !anyDaySkill(key)) return;
       const tr = document.createElement('tr');
       tr.className = 'summary-row';
       let cells = `<td>${escapeHtml(shiftSym(key))} (必要${escapeHtml(defaultReq)})</td>`;
@@ -2225,13 +2337,15 @@ function _renderResultTableInner() {
         const bInfo = dayReqBase(g.reqs, key, d);
         const ovr = ((g.dailyReqs || {})[key] || {})[d];
         const ruleNote = (ovr == null && bInfo.rule) ? ` / ${dayReqRuleText(bInfo, defaultReq)}` : '';
+        // 日ごとに要るスキル（v264）の日は点線の枠と title
+        const dsT = daySkillTitle(key, d);
         // 配置人数(count)を上に小さく、その下に編集できる定数(必要人数)入力
-        cells += `<td class="${cls}" style="padding:0">
+        cells += `<td class="${cls}${dsT ? ' ds-mark' : ''}" style="padding:0">
           <div style="font-size:10px;color:var(--text-muted);line-height:1">${count}</div>
           <input type="number" min="0" max="99" value="${escapeHtml(dayReq)}"
             class="summary-req-input" data-key="${escapeHtml(key)}" data-day="${d}"
             data-dept="${deptKey}" data-gkey="${escapeHtml(g.key)}" data-default="${escapeHtml(defaultReq)}" data-base="${escapeHtml(bInfo.base)}"
-            title="配置 ${count}人 / 必要 ${escapeHtml(dayReq)}人（この数字が定数。変更できます）${escapeHtml(ruleNote)}"
+            title="配置 ${count}人 / 必要 ${escapeHtml(dayReq)}人（この数字が定数。変更できます）${escapeHtml(ruleNote)}${dsT ? escapeHtml(' / ' + dsT) : ''}"
             style="width:100%;height:20px;border:none;background:transparent;text-align:center;font-size:11px;font-weight:700"/>
         </td>`;
       }
@@ -2599,7 +2713,28 @@ function genInputFp() {
   return JSON.stringify([AppState.settings.targetMonth, c(AppState.requests),
     c(AppState.dailyRequirements), c(AppState.dailyRequirementsCast),
     c(AppState.roleRequirements), c(AppState.roleRequirementsCast), c(AppState.skills), c(AppState.dailySkills),
-    (AppState.staff || []).map(s => [s.id, s.allowedShifts, s.paidLeave, s.maxOff, s.positionType, s.department])]);
+    (AppState.staff || []).map(s => [s.id, s.allowedShifts, s.paidLeave, s.maxOff, s.positionType, s.department])]
+    // 日ごとに要るスキル（v264）は、指定があるときだけ足す（無い月は前の版と同じ指紋。保存してある表を「古い」と言わない）
+    .concat(hasAnyDayShiftSkills() ? [c(AppState.dailyShiftSkills)] : []));
+}
+/**
+ * 日ごとに要るスキル（v264）の中のスキル名を from → to に直す。to が null なら外す（空になった指定は消す）。
+ * スキルの改名・削除で使う。直した指定（日・シフト）の数を返す
+ */
+function renameDayShiftSkill(from, to) {
+  const m = AppState.dailyShiftSkills || {};
+  let n = 0;
+  Object.keys(m).forEach(k => {
+    Object.keys(m[k] || {}).forEach(d => {
+      const arr = m[k][d];
+      if (!Array.isArray(arr) || !arr.includes(from)) return;
+      n++;
+      const next = Array.from(new Set(arr.map(x => x === from ? to : x).filter(x => x != null)));
+      if (next.length) m[k][d] = next; else delete m[k][d];
+    });
+    if (!Object.keys(m[k] || {}).length) delete m[k];
+  });
+  return n;
 }
 /** いまの表の状態: 'none'（まだ作っていない・別の月）/ 'stale'（作ったあとに希望・設定を変えた）/ 'ok' */
 function genTableState() {
@@ -3505,6 +3640,7 @@ function listSurplusCells() {
 
 // その人がその日に入れるシフト（担当シフト・早可/遅可の範囲）
 // 責任者・総務（1日1人だけの役割）は除く。定数を増やすと必ず「重複」エラーになるため。
+// day を渡したときは、その日そのシフトに要るスキル（v264）を持たないシフトも除く（0 なら日で絞らない）。
 function candidateShiftsFor(staff, day) {
   const solo = (typeof SOLO_SHIFT_KEYS !== 'undefined') ? SOLO_SHIFT_KEYS : [];
   const roles = getWorkShiftKeys().filter(k => {
@@ -3514,6 +3650,7 @@ function candidateShiftsFor(staff, day) {
   return (staff.allowedShifts || []).filter(k => {
     if (!roles.includes(k)) return false;
     if (solo.indexOf(k) >= 0) return false;   // 早責/遅責/早総務/遅総務 は増やせない
+    if (day && !hasDaySkill(staff, k, day)) return false;   // 日ごとに要るスキル（v264）
     const p = staff.prefs || [];
     if (p.length) {
       if (isEarlyCategory(k) && !p.includes('早可')) return false;
@@ -4239,7 +4376,7 @@ function showSurplusResolveModal() {
     .filter(t => t.isTraining && bandOf(t.key) === band)
     .map(t => t.key);
   const learnerKeys = (st, band) =>
-    candidateShiftsFor(st, 1).filter(k => bandOf(k) === band).concat(trainingKeys(band));
+    candidateShiftsFor(st, 0).filter(k => bandOf(k) === band).concat(trainingKeys(band));   // 日ごとに要るスキルは日の中で絞る
   const isTrainKey = (k) => (AppState.shiftTypes || []).some(t => t.key === k && t.isTraining);
 
   const findPairDays = (tutorIds, idL, band) => {
@@ -4277,7 +4414,7 @@ function showSurplusResolveModal() {
       }
       if (!T) for (const t of tutors) {               // ② いなければ、その時間帯に入れる人
         const v = cellOf(t.id, d);
-        const kf = candidateShiftsFor(t, 1).filter(k => bandOf(k) === band);
+        const kf = candidateShiftsFor(t, d).filter(k => bandOf(k) === band);   // その日に要るスキル（v264）も見る
         if ((!v || v === '余' || isPublicOff(v)) && !keepOff(t.id, d) && kf.length) { T = t; vt = v; mode = 'both'; tkeysFree = kf; break; }
       }
       if (!mode) continue;
@@ -4285,6 +4422,7 @@ function showSurplusResolveModal() {
       // 教わる人のシフトは、いちばんエラーが増えないものを選ぶ
       let best = null;
       lkeys.forEach(lk => {
+        if (!hasDaySkill(L, lk, d)) return;   // その日そのシフトに要るスキル（v264）を持っていない
         const r = preview(() => {
           if (!isTrainKey(lk)) {   // 研修は人員にカウントされないので定数はそのまま
             const store = castL ? (AppState.dailyRequirementsCast || (AppState.dailyRequirementsCast = {}))
@@ -5334,17 +5472,21 @@ function _trainingCandidates(learnerId, band, tutorIds) {
     // どのシフトで入れるか。出勤日は、いまのシフトがふつうのシフトならそのまま。
     // 1日1人の役なら、同じ時間帯のふつうのシフトにする（+1すると責任者・総務が2人になるため）。
     let keys, k, roleNote = '', blocked = '';
+    // 日ごとに要るスキル（v264）: その日そのシフトに要るスキルを持たないシフトでは入れない
+    const dayKeys = normKeys.filter(x => hasDaySkill(L, x, d));
     if (kind === 'work') {
-      if (!_isSoloKey(cur)) { keys = normKeys.indexOf(cur) >= 0 ? normKeys : [cur].concat(normKeys); k = cur; }
+      if (!_isSoloKey(cur)) { keys = dayKeys.indexOf(cur) >= 0 ? dayKeys : [cur].concat(dayKeys); k = cur; }
       else {
-        keys = normKeys.filter(x => sameCat(x, cur));
-        if (!keys.length) keys = normKeys.slice();
+        keys = dayKeys.filter(x => sameCat(x, cur));
+        if (!keys.length) keys = dayKeys.slice();
         k = keys[0] || '';
-        if (!k) blocked = `いまは「${shiftSym(cur)}」（1日1人の役）です。同じ時間帯のふつうのシフトを担当していないので、この日には足せません`;
+        if (!k) blocked = normKeys.length && !dayKeys.length
+          ? `いまは「${shiftSym(cur)}」（1日1人の役）です。この日の同じ時間帯のシフトに要るスキルを持っていないので、この日には足せません`
+          : `いまは「${shiftSym(cur)}」（1日1人の役）です。同じ時間帯のふつうのシフトを担当していないので、この日には足せません`;
       }
     } else {
-      keys = normKeys.slice();
-      if (!keys.length) continue;                 // ふつうのシフトを担当していない
+      keys = dayKeys.slice();
+      if (!keys.length) continue;                 // ふつうのシフトを担当していない（その日に要るスキルが無いときも）
       k = (already && keys.indexOf(already) >= 0) ? already : keys[0];
     }
     const confAt = (dd) => {
@@ -6303,6 +6445,12 @@ function showGenerateWizard() {
         ${rowsOut.length ? `<div style="border:1px solid var(--border);border-radius:8px;max-height:36vh;overflow:auto">${rowsOut.join('')}</div>`
                          : '<p class="hint">すべて既定の人数です。</p>'}
         ${notes}
+        ${(() => {   // 日ごとに要るスキル（v264）。ここでは見るだけ（直すときは②の日別必要人数の中で）
+          const ds = listDayShiftSkills();
+          return ds.length ? `<div style="margin-top:10px"><b>日ごとに要るスキル</b>
+            <span class="hint">（見るだけです。直すときは「シフト種別」の「日別必要人数（上書き設定）」の中で直します）</span>
+            <ul style="margin:4px 0 0;padding-left:18px">${ds.map(x => `<li>${x.d}日(${wdOf(x.d)}) ${escapeHtml(shiftSym(x.k))}：${escapeHtml(daySkillWords(x.skills))}を持つ人だけ（入れる人 ${daySkillCapable(x.k, x.d)}人）</li>`).join('')}</ul></div>` : '';
+        })()}
         <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px">
           <span>別の日を足す:</span>
           <select id="wzAddKey">${keys.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(shiftSym(k))}</option>`).join('')}</select>

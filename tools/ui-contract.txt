@@ -69,6 +69,11 @@ id	dailyReqPanel	HTML	1	ui.v6.js
 id	dailyReqToggle	HTML	1	ui.v6.js
 id	dataMenu	HTML	1	ui-shell.v6.js
 id	deliveryDays	HTML	1	ui.v6.js
+id	dssAdd	JS	0	ui.v6.js
+id	dssBox	JS	0	ui.v6.js
+id	dssDay	JS	0	ui.v6.js
+id	dssMsg	JS	0	ui.v6.js
+id	dssShift	JS	0	ui.v6.js
 id	editListBtn	JS	0	ui.v6.js
 id	editMarkCb	JS	0	ui.v6.js
 id	editSummary	HTML	1	ui.v6.js
@@ -214,6 +219,7 @@ id	wzReset	JS	0	ui.v6.js($)
 id	wzUndo	JS	0	ui.v6.js($)
 class	active	HTML	2	app.v6.js,ui.v6.js
 class	allowed-label	JS	0	ui-shell.v6.js,ui.v6.js
+class	bad	JS	0	ui.v6.js
 class	btn-primary	HTML	8	ui.v6.js
 class	calc-lock-area	JS	0	milp.v6.js,ui.v6.js
 class	calc-view-only	JS	0	milp.v6.js
@@ -264,6 +270,8 @@ attr	data-day	JS	0	ui.v6.js
 attr	data-dayhead	JS	0	ui.v6.js
 attr	data-del	JS	0	ui.v6.js
 attr	data-del-idx	JS	0	ui.v6.js
+attr	data-dss-del	JS	0	ui.v6.js
+attr	data-dss-skill	JS	0	ui.v6.js
 attr	data-ev-del	JS	0	ui.v6.js
 attr	data-ev-field	JS	0	ui.v6.js
 attr	data-ev-staff	JS	0	ui.v6.js

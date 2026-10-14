@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=263" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=263" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=263" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=263">
+<link rel="icon" href="favicon.svg?v=264" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=264" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=264" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=264">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=263" />
+<link rel="stylesheet" href="css/style.css?v=264" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -316,7 +316,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>「<span class="m-ui">詳しい設定</span>」の中：
             <ul>
               <li>「<span class="m-ui">計算のしかた</span>」：ふだんはそのまま（両方オン）にします。</li>
-              <li>「<span class="m-ui">ルールごとの強弱（ON/OFF）</span>」：ルールごとに「<span class="m-ui">絶対</span>」「<span class="m-ui">できれば</span>」「<span class="m-ui">OFF（使わない）</span>」を選べます。人員不足・公休数不足・連勤超過・担当外シフトは変えられません。</li>
+              <li>「<span class="m-ui">ルールごとの強弱（ON/OFF）</span>」：ルールごとに「<span class="m-ui">絶対</span>」「<span class="m-ui">できれば</span>」「<span class="m-ui">OFF（使わない）</span>」を選べます。人員不足・公休数不足・連勤超過・担当外シフト・日ごとに要るスキルは変えられません。</li>
               <li>「<span class="m-ui">必要人数のルール</span>」：「入れ替え日は遅番を2人」のように、条件で人数を決めます。月が変わっても、日付が自動で決まります。</li>
             </ul>
           </li>
@@ -347,6 +347,14 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>画面のマスの色は、カテゴリで決まります（早番系は青、遅番系は橙、研修は紫）。<span class="m-btn">詳細</span> の中の「<span class="m-ui">Excel出力の色</span>」は、Excel に出すときの色です。</li>
           <li>「<span class="m-ui">必要人数/日</span>」は、社員とキャストで別々に入れます。人が余った日は、多く入れずに「余」（休み）にします。</li>
           <li>「<span class="m-ui">日別必要人数（上書き設定）</span>」で、特定の日だけ人数を変えられます。土日だけのつもりでも、月に何日もあると大きな人数になります。人員不足の大きな原因です。</li>
+          <li>同じ折りたたみの中の「<span class="m-ui">日ごとに要るスキル</span>」で、その日のそのシフトに入れる人を、スキルで絞れます（例：入れ替えの日の深夜は「S営業」か「P営業」を持つ人だけ）。
+            <ul>
+              <li>日・シフト・要るスキルを選んで <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>この日に指定する</span> を押します。いくつか選ぶと「どれか1つを持っていればよい」になります。やめるときは <span class="m-btn">外す</span> を押します。</li>
+              <li>生成では、スキルを持たない人をその日そのシフトに入れません。入れる人が足りなければ、人員不足として出ます。希望・固定や手直しで入れたときは、「絶対」のエラー（日ごとに要るスキル）になります。</li>
+              <li>指定した日は、この表と <span class="m-tab" data-n="6">シフト表</span> の下の必要人数の行で、マスが点線で囲まれます。マウスを置くと、要るスキルが出ます。</li>
+              <li>社員・キャストの両方に当てます。月を切り替えて片付けると消えます。スキルの名前を変えると一緒に変わり、スキルを消すと指定からも外れます。</li>
+            </ul>
+          </li>
           <li>「<span class="m-ui">必要人数のルール</span>」が当たる日は、ルールの人数が出ます（数字に点線の下線。マウスを置くと、どのルールかが出ます）。その日もふだんの人数を入れられます。ルールの人数と同じ数を入れると、その日の上書きは消えます。<span class="m-tab" data-n="6">シフト表</span> の下の必要人数の行でも同じです。</li>
           <li>「研」（研修）は、必要人数に数えません。</li>
         </ul>
@@ -520,6 +528,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <tr><td><span class="m-ui">公休数不足</span></td><td>休み（休・公・☆）が、公休数に届かない人がいる。</td><td>必要人数や有給の日数を見直します。</td></tr>
           <tr><td><span class="m-ui">連勤超過</span></td><td>連勤上限より長く、続けて出勤している。</td><td>休みを挟みます。前月末の連勤日数が正しいか確かめます。</td></tr>
           <tr><td><span class="m-ui">担当外シフト</span></td><td>担当シフトに無いシフトが入っている。</td><td>担当シフトにチェックを足すか、そのマスを変えます。</td></tr>
+          <tr><td><span class="m-ui">日ごとに要るスキル</span></td><td>その日のそのシフトに要るスキルを、持っていない人が入っている（希望・固定・手で直したマス）。</td><td>スキルを持つ人と入れ替えるか、その日の要るスキルを見直します。</td></tr>
           <tr><td><span class="m-ui">定数オーバー（必要人数より多い）</span></td><td>必要人数より多く入っている。</td><td>出勤の固定や希望を減らします。</td></tr>
           <tr><td><span class="m-ui">副店長不在の日</span></td><td>副店長がいない日に、早責・遅責もチーフ以上でそろっていない。</td><td>副店長の休みをずらします。</td></tr>
           <tr><td><span class="m-ui">責任者・総務の重複</span></td><td>同じ時間帯に、早責などが2人以上いる。</td><td>片方を、ふつうのシフトにします。</td></tr>
@@ -559,7 +568,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <details><summary>計算している間、入力できない</summary>
         <p>計算中は、設定・希望・表の手直しを止めています。見ることはできます（折りたたみや「<span class="m-ui">詳細</span>」を開く、列の幅を変える、文字を選ぶ、<span class="m-tab" data-n="4">希望休入力</span> の「<span class="m-ui">入れる記号</span>」を選び替える、もできます）。計算中に入れた文字は消えるので、終わってから入れ直してください。終わるのを待つか、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>中止</span> が出ていれば押してください。</p></details>
       <details><summary>画面が前のままで、新しくならない</summary>
-        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v263 など）が出ています。知らされた番号と同じか確かめます。</p></details>
+        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v264 など）が出ています。知らされた番号と同じか確かめます。</p></details>
       <details><summary>データが消えた／別のパソコンで使いたい</summary>
         <p><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-export"/></svg>書き出し</span> で作ったファイルがあれば、「<span class="m-ui">データ</span>」の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg>取り込み</span> で戻せます。別のパソコンでも同じです。ファイルが無いと戻せません。</p></details>
       <details><summary>「人が足りない」と出る</summary>

@@ -96,6 +96,7 @@ function exportPayload() {
       roleRequirements: AppState.roleRequirements, roleRequirementsCast: AppState.roleRequirementsCast,
       dailyRequirements: AppState.dailyRequirements, dailyRequirementsCast: AppState.dailyRequirementsCast,
       skills: AppState.skills, dailySkills: AppState.dailySkills,
+      dailyShiftSkills: AppState.dailyShiftSkills || {},   // 日ごとに要るスキル（v264）
       staff: AppState.staff, requests: AppState.requests, fixedShifts: AppState.fixedShifts,
       specialDays: AppState.specialDays, events: AppState.events, shifts: AppState.shifts,
       genBase: AppState.genBase || null, editLog: AppState.editLog || [],   // 生成直後の表と、変えたマスの記録
@@ -619,7 +620,7 @@ function recheckAfterStaffChange(beforeSc) {
 }
 // 見込みが古くなったかの指紋（表・希望などに加え、担当・スキル・設定・必要人数も見る）
 function forecastFp() {
-  return contentFingerprint() + JSON.stringify([AppState.settings, AppState.staff, AppState.skills, AppState.dailySkills,
+  return contentFingerprint() + JSON.stringify([AppState.settings, AppState.staff, AppState.skills, AppState.dailySkills, AppState.dailyShiftSkills,
     AppState.roleRequirements, AppState.roleRequirementsCast, AppState.shiftTypes, AppState.specialDays, AppState.events]);
 }
 function showForecastModal() {
@@ -1379,6 +1380,7 @@ function showSurplusPopup() {
     'vicemanager-absent': ['副店長・責任者の不在',  'その日カバーできていない',               '副店長かチーフ責任者を配置'],
     'resp-duplicate':     ['責任者の重複',          '同じ時間帯に責任者が過剰',               'どちらかを通常シフトに'],
     'role-mismatch':      ['担当外シフト',          '入れないシフトに配置されている',         '担当を見直す／担当を広げる'],
+    'day-skill':          ['日ごとに要るスキル',    'その日そのシフトに要るスキルを持たない人が入っている', 'スキルを持つ人と入れ替える／その日の要るスキルを見直す'],
     'pref-mismatch':      ['早遅希望と不一致',      '早可/遅可の希望に反している',             '希望に合うよう入れ替える'],
     'event-absent':       ['行事日の欠勤',          '行事の対象者が休みになっている',         'その日を出勤に'],
     'balance-diff':       ['早遅バランスのずれ',    '早番多め／遅番多めの目標比率から外れている', '担当シフトを見直す／許容幅を広げる'],
@@ -1787,6 +1789,7 @@ const MUST_VIOLATION_TYPES = new Set([
   'vicemanager-absent', 'single-work', 'pref-mismatch', 'role-mismatch',
   'event-absent', 'night-after-work',
   'off-count', 'late-early', // 公休不足・遅→早(休みなし) も絶対NG
+  'day-skill',               // 日ごとに要るスキル（v264）
 ]);
 // ルール強弱設定があればそれに従う（optimizer.js の getRuleLevel）。無ければ既定分類。
 function isMustViolation(type) {

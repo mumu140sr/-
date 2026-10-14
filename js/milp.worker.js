@@ -3,14 +3,14 @@
    既存の焼きなまし(optimizer.worker.js)とは独立。HiGHS(WASM)は
    選択時に初めて CDN から読み込む（遅延ロード）。
    =========================================== */
-self.importScripts('data.js?v=263', 'optimizer.js?v=263', 'milp-core.js?v=263');
+self.importScripts('data.js?v=264', 'optimizer.js?v=264', 'milp-core.js?v=264');
 
 // HiGHS(WASM) はリポジトリ内に同梱（オフライン可・CDN不要）。パスは worker(js/) から相対。
 const HIGHS_BASE = 'vendor/';
 let _solverPromise = null;
 function getSolver() {
   if (!_solverPromise) {
-    self.importScripts(HIGHS_BASE + 'highs.js?v=263'); // → self.Module（Emscripten factory）
+    self.importScripts(HIGHS_BASE + 'highs.js?v=264'); // → self.Module（Emscripten factory）
     _solverPromise = self.Module({ locateFile: (f) => HIGHS_BASE + f });
   }
   return _solverPromise;
@@ -29,6 +29,7 @@ async function runMilp(msg, emit) {
     AppState.dailyRequirementsCast = incoming.dailyRequirementsCast || {};
     AppState.skills                = incoming.skills                || [];
     AppState.dailySkills           = incoming.dailySkills           || {};
+    AppState.dailyShiftSkills      = incoming.dailyShiftSkills      || {};   // 日ごとに要るスキル（v264。無ければ空）
     AppState.staff       = incoming.staff       || [];
     const seedShifts     = incoming.shifts      || {};
     AppState.requests    = incoming.requests    || {};

@@ -421,6 +421,18 @@ a { color: var(--link); }
 .lv-chip-soft { background: var(--lv-soft-bg); border: 2px dashed var(--lv-soft); color: var(--lv-soft); }
 .lv-chip-sur  { background: var(--sur-2); border: 1px solid var(--sur); color: var(--sur-fg); }
 .lv-chip .sur-sw { width: 14px; height: 14px; border-radius: 3px; background: repeating-linear-gradient(135deg, var(--sur) 0 3px, var(--sur-2) 3px 6px); border: 1px solid var(--sur-fg); }
+/* 日ごとに要るスキル（v264）: ②の日別必要人数の中の欄と、②の表・⑥の必要人数の行のマスの印（点線の枠） */
+td.ds-mark { outline: 2px dotted var(--link); outline-offset: -3px; }
+.dss-box { margin-top: 12px; padding-top: 6px; border-top: 1px solid var(--border-subtle); }
+.dss-list { list-style: none; margin: 0 0 8px; padding: 0; }
+.dss-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0;
+  border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
+.dss-add { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: var(--fs-sm); }
+.dss-add label { display: inline-flex; align-items: center; gap: 6px; }
+.dss-skills { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.dss-skill { white-space: nowrap; }
+.dss-msg { margin-top: 8px; padding: 6px 10px; border-radius: var(--r-md); background: var(--accent-soft); border: 1px solid var(--border); color: var(--text); }
+.dss-msg.bad { background: var(--lv-must-bg); border-color: var(--lv-must); color: var(--lv-must); font-weight: 700; }
 /* 人手の不足（v263）: 「絶対」と同じ赤の実線。印は四角の中の横線（余の縞と見分ける） */
 .lv-chip-short { background: var(--lv-must-bg); border: 1px solid var(--lv-must); color: var(--lv-must); cursor: help; }
 .lv-chip .short-sw { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid var(--lv-must);

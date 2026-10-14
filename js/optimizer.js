@@ -285,9 +285,10 @@ const MUST_TYPES_OPT = new Set([
   'vicemanager-absent', 'single-work', 'pref-mismatch', 'role-mismatch',
   'event-absent', 'night-after-work',
   'off-count', 'late-early', // ユーザー要望: 公休不足・遅→早(休みなし) も絶対NG
+  'day-skill',               // 日ごとに要るスキル（v264）
 ]);
-// 設定不可（安全のため常に既定）のルール: 人員不足・公休不足・連勤超過・担当外シフト。
-const RULE_LOCKED = new Set(['understaff', 'off-count', 'consecutive', 'role-mismatch']);
+// 設定不可（安全のため常に既定）のルール: 人員不足・公休不足・連勤超過・担当外シフト・日ごとに要るスキル（v264）。
+const RULE_LOCKED = new Set(['understaff', 'off-count', 'consecutive', 'role-mismatch', 'day-skill']);
 // ルールの強弱レベルを取得: 'off' | 'should' | 'must'。
 // 固定ルールと未設定は既定分類（MUST_TYPES_OPT にあれば must、無ければ should）。
 function getRuleLevel(type) {
@@ -327,6 +328,7 @@ const VIOLATION_LABEL = {
   'special-day':       '特別日の配置',
   'event-absent':      '行事日の欠勤',
   'night-after-work':  '夜勤明けの出勤',
+  'day-skill':         '日ごとに要るスキル',
   'rest-style':        '休み方の希望',
   'weekend-pref':      '土日休み希望',
 };
@@ -2948,6 +2950,17 @@ function checkViolations(shifts) {
           });
         }
 
+        // 日ごとに要るスキル（v264）: その日そのシフトに要るスキルを1つも持たない人が入っている。いつも「絶対」
+        // （生成は空いているマスに入れない。🔒・希望・手直しで入ったときにここで出る。社員・キャストとも）
+        if (!hasDaySkill(s, cur, d)) {
+          const needSk = daySkillsFor(cur, d);
+          violations.push({
+            staffId: s.id, day: d, type: 'day-skill', role: cur,
+            message: `${shiftSym(cur)}に要るスキルがありません（この日は${needSk.map(n => `「${n}」`).join('')}${needSk.length > 1 ? 'のどれか' : ''}を持つ人だけ）`,
+            action:  'スキルを持つ人と入れ替えるか、この日の要るスキルを見直してください',
+          });
+        }
+
         // prefs チェック
         if (s.prefs && s.prefs.length > 0) {
           if (isEarly(cur) && !s.prefs.includes('早可')) {
@@ -4165,6 +4178,7 @@ function runAIDiagnosis() {
       'bad-rest':        '遅→休→早パターン',
       'single-work':     '単発出勤',
       'role-mismatch':   '担当外シフト',
+      'day-skill':       '日ごとに要るスキル',
       'pref-mismatch':   '早遅希望不一致',
       'off-count':       '公休数不足',
       'understaff':      '人員不足',
@@ -4961,7 +4975,8 @@ function analyzeLowerBound() {
           return;
         }
         let any = false;
-        (s.allowedShifts || []).forEach(k => { if (cap[k] != null) { cap[k]++; any = true; } });
+        // 日ごとに要るスキル（v264）: その日そのシフトに要るスキルを持たない人は、そのシフトには入れない
+        (s.allowedShifts || []).forEach(k => { if (cap[k] != null && hasDaySkill(s, k, d)) { cap[k]++; any = true; } });
         if (any) freeCount++;
       });
 
@@ -4973,9 +4988,11 @@ function analyzeLowerBound() {
         if (need > 0 && cap[k] < need) {
           roleShort += (need - cap[k]);
           forcedK.push(k);
+          const dsk = daySkillsFor(k, d);   // 日ごとに要るスキル（v264）で絞っている日は、それも書く
           res.reasons.push({
             kind: 'role', day: d, role: k, need, have: cap[k],
-            text: `${pfx}${d}日: 「${shiftSym(k)}」が ${need}人 必要ですが、その日入れる人は ${cap[k]}人 しかいません（不足 ${need - cap[k]}人）`,
+            text: `${pfx}${d}日: 「${shiftSym(k)}」が ${need}人 必要ですが、その日入れる人は ${cap[k]}人 しかいません（不足 ${need - cap[k]}人）`
+                + (dsk ? `。この日の「${shiftSym(k)}」は${dsk.map(n => `「${n}」`).join('')}${dsk.length > 1 ? 'のどれか' : ''}を持つ人だけです` : ''),
           });
         }
       });
@@ -5155,6 +5172,21 @@ function analyzeLowerBound() {
             kind: 'req-role', day: d, staffId: s.id,
             fix: `${s.name}さんの担当シフトに「${shiftSym(v)}」を足すか、${d}日の希望を別のシフトに変えてください`,
             text: `${pfx}${d}日: ${s.name}さんに「${shiftSym(v)}」の希望が入っていますが、この方の担当シフトに「${shiftSym(v)}」がありません`,
+          });
+        }
+      });
+
+      // (1') 日ごとに要るスキル（v264）を持たない人の希望・固定（必ず「日ごとに要るスキル」のエラーになる）
+      g.staff.forEach(s => {
+        for (let d = 1; d <= days; d++) {
+          const v = confirmOf(s, d);
+          if (!v || !isWork(v) || hasDaySkill(s, v, d)) continue;
+          const dsk = daySkillsFor(v, d);
+          const skTxt = `${dsk.map(n => `「${n}」`).join('')}${dsk.length > 1 ? 'のどれか' : ''}`;
+          res.reasons.push({
+            kind: 'req-day-skill', day: d, staffId: s.id, role: v,
+            fix: `${s.name}さんの${d}日の希望・固定を別のシフトに変えるか、その日の「${shiftSym(v)}」に要るスキルを見直してください`,
+            text: `${pfx}${d}日: ${s.name}さんに「${shiftSym(v)}」の希望・固定が入っていますが、この日の「${shiftSym(v)}」は${skTxt}を持つ人だけです`,
           });
         }
       });
@@ -5790,7 +5822,7 @@ function analyzeLowerBound() {
     'req-solo': 'resp-duplicate', 'req-le': 'late-early', 'event-req': 'event-absent',
     'req-night': 'night-after-work', 'req-pair': 'pair-rest', 'req-weekend': 'weekend-pref',
     'req-offcount': 'off-count', 'req-spread': 'rest-style', 'req-switch': 'category-switch',
-    'paid-short': 'paid', 'special-req': 'special-day',
+    'paid-short': 'paid', 'special-req': 'special-day', 'req-day-skill': 'day-skill',
   };
   res.reasons = res.reasons.filter(r => !(COUNT_ONE[r.kind] && getRuleLevel(COUNT_ONE[r.kind]) === 'off'));
   res.reasons.forEach(r => { if (!r.soft && COUNT_ONE[r.kind]) res.minErrors += 1; });

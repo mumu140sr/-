@@ -171,6 +171,27 @@ function buildAIExplanation() {
     sections.push({ title: '役割タイプの不一致', body, severity: 'critical' });
   }
 
+  // === 4'. 日ごとに要るスキル（v264） ===
+  if (byType['day-skill']) {
+    const items = byType['day-skill'];
+    const byStaff = {};
+    items.forEach(v => {
+      const name = staffName(v.staffId);
+      (byStaff[name] = byStaff[name] || []).push(`${v.day}日（${shiftSym(v.role)}）`);
+    });
+    const detail = Object.entries(byStaff)
+      .map(([name, days]) => `${name}：${days.join(', ')}`).join('\n• ');
+    let body = `その日そのシフトに要るスキルを持たない人が入っています。`;
+    body += `\n• ${detail}`;
+    body += `\n\n【原因として考えられること】`;
+    body += `\n• 希望や固定で、その日そのシフトに入れている`;
+    body += `\n• 表を手で直した・入れ替えた`;
+    body += `\n\n【解決のヒント】`;
+    body += `\n・スキルを持つ人と入れ替える`;
+    body += `\n・シフト種別の「日別必要人数」の中の「日ごとに要るスキル」を見直す`;
+    sections.push({ title: '日ごとに要るスキル', body, severity: 'critical' });
+  }
+
   // === 5. 連勤中の時間帯切替 ===
   if (byType['category-switch']) {
     const items = byType['category-switch'];

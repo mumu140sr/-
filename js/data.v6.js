@@ -161,6 +161,9 @@ const AppState = {
   // スキル要件の日別上書き { スキル名: { day: { req: 目標人数, min: 最低ライン } } }
   // 指定が無い日は skills の既定値を使う
   dailySkills: {},
+  // 日ごとに要るスキル（v264）{ シフトの中の名前: { day: [スキル名, …] } }。その日そのシフトに入れるのは、
+  // 担当シフトに入っていて、並べたスキルのどれか1つを持つ人だけ。社員・キャストの両方に当てる
+  dailyShiftSkills: {},
   // スタッフ一覧
   // 各スタッフ: { id, name, department, positionType, allowedShifts[], maxOff, prefs[], balance, prevConsecutive, prevLastShift, note }
   staff: [],
@@ -493,6 +496,44 @@ function hasDailySkillOverride(name) {
   return Object.keys(m).length > 0;
 }
 
+// ===== 日ごとに要るスキル（v264） =====
+// 「入れ替えの日の深夜は、S営業かP営業のどちらかを持つ人だけ」のように、日とシフトごとに要るスキルを選ぶ。
+// 生成（milp-core）・検査（checkViolations の day-skill）・作る前の見込み・余の候補は、どれもこの2つで判定する。
+/** その日そのシフトに要るスキル（どれか1つを持っていればよい）。指定が無ければ null */
+function daySkillsFor(key, day) {
+  const m = ((AppState.dailyShiftSkills || {})[key] || {})[day];
+  return Array.isArray(m) && m.length ? m : null;
+}
+/** その人が、その日そのシフトに要るスキルを持っているか（指定が無ければ true。担当シフトかどうかは見ない） */
+function hasDaySkill(s, key, day) {
+  const need = daySkillsFor(key, day);
+  if (!need) return true;
+  const own = (s && Array.isArray(s.skills)) ? s.skills : [];
+  return need.some(n => own.includes(n));
+}
+/** 指定が1つでもあるか（無ければ、Worker へ渡す中身に項目を入れない＝前の版と同じ中身にする） */
+function hasAnyDayShiftSkills() {
+  const m = AppState.dailyShiftSkills || {};
+  return Object.keys(m).some(k => Object.keys(m[k] || {}).some(d => Array.isArray(m[k][d]) && m[k][d].length > 0));
+}
+/** 取り込み・読込: 形を直す（日は1〜31の整数、スキル名は空でない文字。重なりと空の指定は捨てる） */
+function sanitizeDailyShiftSkills(m) {
+  const out = {};
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return out;
+  Object.keys(m).forEach(k => {
+    const byDay = m[k];
+    if (!byDay || typeof byDay !== 'object' || Array.isArray(byDay)) return;
+    Object.keys(byDay).forEach(ds => {
+      const d = parseInt(ds, 10);
+      if (!(d >= 1 && d <= 31) || String(d) !== String(ds).trim()) return;
+      const arr = Array.isArray(byDay[ds]) ? byDay[ds].filter(x => typeof x === 'string' && x.trim()) : [];
+      const uniq = Array.from(new Set(arr));
+      if (uniq.length) (out[k] = out[k] || {})[d] = uniq;
+    });
+  });
+  return out;
+}
+
 // 研修は既定で早番カテゴリ（A）扱い。ただし②シフト種別マスターで
 // カテゴリB（遅番）に設定された場合はその設定を優先する。
 function isEarlyCategory(shift) {
@@ -620,6 +661,19 @@ function _appValueProblems(d, stop) {
     });
   }
   (Array.isArray(d.events) ? d.events : []).forEach((ev, i) => { if (obj(ev)) num(ev.day, `${i + 1}つ目の行事の日`); });
+  // 日ごとに要るスキル（v264）: { シフト: { 日: [スキル名] } }
+  if (d.dailyShiftSkills != null) {
+    if (!obj(d.dailyShiftSkills)) bad('日ごとに要るスキルの形が正しくありません');
+    else Object.keys(d.dailyShiftSkills).forEach(k => {
+      const m = d.dailyShiftSkills[k];
+      if (!obj(m)) { bad('日ごとに要るスキルの形が正しくありません'); return; }
+      Object.keys(m).forEach(dd => {
+        const n = Number(dd);
+        if (!(Number.isInteger(n) && n >= 1 && n <= 31)) bad('日ごとに要るスキルの日が正しくありません');
+        if (!Array.isArray(m[dd]) || m[dd].some(x => typeof x !== 'string')) bad('日ごとに要るスキルのスキル名が正しくありません');
+      });
+    });
+  }
   return out;
 }
 
@@ -643,6 +697,7 @@ function saveToStorage() {
       dailyRequirementsCast: AppState.dailyRequirementsCast,
       skills:               AppState.skills,
       dailySkills:          AppState.dailySkills,
+      dailyShiftSkills:     AppState.dailyShiftSkills || {},
       staff:                AppState.staff,
       requests:             AppState.requests,
       shifts:               AppState.shifts,
@@ -673,7 +728,7 @@ function defaultAppDataBase() {
 }
 // AppState に入れる項目（取り込みの前に控えて、失敗したら戻すのにも使う）
 const APP_DATA_KEYS = ['settings', 'shiftTypes', 'roleRequirements', 'roleRequirementsCast', 'dailyRequirements',
-  'dailyRequirementsCast', 'skills', 'dailySkills', 'events', 'staff', 'requests', 'shifts', 'fixedShifts',
+  'dailyRequirementsCast', 'skills', 'dailySkills', 'dailyShiftSkills', 'events', 'staff', 'requests', 'shifts', 'fixedShifts',
   'specialDays', 'violations', 'generated', 'genBase', 'editLog'];
 /**
  * 保存データ（または取り込んだファイル）を、AppState に入れられる形に直した新しいオブジェクトを返す。AppState は触らない。
@@ -721,6 +776,7 @@ function normalizeAppData(data, base) {
     out.dailyRequirementsCast = data.dailyRequirementsCast || {};
     out.skills                = Array.isArray(data.skills) ? data.skills : [];
     out.dailySkills           = data.dailySkills || {};
+    out.dailyShiftSkills      = sanitizeDailyShiftSkills(data.dailyShiftSkills);   // 日ごとに要るスキル（v264）
 
     // events（v4以降）
     out.events = Array.isArray(data.events) ? data.events : [];
@@ -849,6 +905,7 @@ function resetAll() {
   AppState.dailyRequirementsCast = {};
   AppState.skills                = [];
   AppState.dailySkills           = {};
+  AppState.dailyShiftSkills      = {};
   AppState.settings.penalties = { ...DEFAULT_PENALTIES };
   _staffIdCounter = 1;
   _storageHold = false;   // リセットで、読めなかった元のデータを守るための保存の停止も解除する（C10）

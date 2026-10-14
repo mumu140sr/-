@@ -150,6 +150,10 @@
         }
         if (!free(s, d)) { ks.forEach(k => { bin.add(V(si, d, roleIdx[k])); cons.push(`z_${si}_${d}_${roleIdx[k]}: ${V(si, d, roleIdx[k])} = 0`); }); continue; }
         const t = []; ks.forEach(k => { bin.add(V(si, d, roleIdx[k])); t.push(V(si, d, roleIdx[k])); });
+        // 日ごとに要るスキル（v264）: その日そのシフトに要るスキルを1つも持たない人は入れない（「絶対」）。
+        // 空いているマスだけ。🔒・希望で決まったマスは上で決めたまま（検査で day-skill のエラーにする）。
+        // 指定が無い日・シフトでは何も足さない（式は前の版と同じ）
+        ks.forEach(k => { if (!hasDaySkill(s, k, d)) cons.push(`ds_${si}_${d}_${roleIdx[k]}: ${V(si, d, roleIdx[k])} = 0`); });
         if (paidTarget[s.id] > 0) { const yv = Y(si, d); bin.add(yv); t.push(yv); } // 有給候補（勤務と排他）
         if (t.length) cons.push(`one_${si}_${d}: ${t.join(' + ')} <= 1`);
       }

@@ -112,6 +112,10 @@ const norm = s => String(s || '').replace(/\s+/g, '');
     base:      async p => { await p.evaluate(() => { document.getElementById('settingsMore').open = true; toggleRuleLevelsPanel(); toggleDailyReqPanel(); });
                             await p.click('.tab[data-tab="roles"]'); await p.evaluate(() => document.querySelectorAll('.role-more-btn').forEach(x => x.click())); },
     addshift:  async p => { await p.click('.tab[data-tab="roles"]'); await p.click('#btnAddShiftType'); await p.waitForTimeout(300); },
+    // 日ごとに要るスキル（v264）: 指定が1つある状態の一覧（「外す」）と欄
+    dayskill:  async p => { await p.click('.tab[data-tab="roles"]');
+                            await p.evaluate(() => { const n = (AppState.skills[0] || {}).name; if (n) AppState.dailyShiftSkills = { [getWorkShiftKeys()[0]]: { 3: [n] } };
+                              toggleDailyReqPanel(); }); await p.waitForTimeout(300); },
     feas:      async p => { await adv(p); await p.click('#btnFeasibility'); await p.waitForTimeout(3000); },
     relax:     async p => { await adv(p); await p.click('#btnRelax'); await p.waitForTimeout(4000); },
     surplan:   async p => { await adv(p); await p.click('#btnSurplusPlan'); await p.waitForTimeout(2000); },
