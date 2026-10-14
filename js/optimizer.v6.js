@@ -3243,13 +3243,13 @@ function checkViolations(shifts) {
       });
       if (have < min) {
         violations.push({
-          staffId: null, day: d, type: 'skill-late',
+          staffId: null, day: d, type: 'skill-late', skill: sk.name, band: target, have, min, need,   // どのスキル・時間帯か（理由の枠の文。v266）
           message: `🚨 ${d}日 ${label}に「${sk.name}」できる人が${have}人（最低${min}人必要）`,
           action:  `「${sk.name}」スキルのある人を${label}に配置してください`,
         });
       } else if (have < need) {
         violations.push({
-          staffId: null, day: d, type: 'skill-short',
+          staffId: null, day: d, type: 'skill-short', skill: sk.name, band: target, have, min, need,   // 同上（v266）
           message: `⚠️ ${d}日 ${label}に「${sk.name}」できる人が${have}人（目標${need}人・最低${min}人はOK）`,
           action:  `可能なら「${sk.name}」スキルのある人をもう1人${label}に配置してください`,
         });

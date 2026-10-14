@@ -155,11 +155,22 @@ function renderShortageNote() {
 
 // ── 理由の枠 ──
 let _shortPanel = null;   // { day, key, gkey, opener }
-const _swKey = v => [v.type, v.staffId || '', v.day || 0, v.from || '', v.to || '', v.role || '', v.short || ''].join('|');
+const _swKey = v => [v.type, v.staffId || '', v.day || 0, v.from || '', v.to || '', v.role || '', v.short || '',
+  v.count || '', v.len || '', v.skill || ''].join('|');
 function _swNew(before, after) {
   const cnt = {};
   before.forEach(v => { const k = _swKey(v); cnt[k] = (cnt[k] || 0) + 1; });
   return after.filter(v => { const k = _swKey(v); if (cnt[k] > 0) { cnt[k]--; return false; } return true; });
+}
+// 入れたことで新しく出る違反（v266）。同じ人（人のつかない違反は同じ日）で同じ種類の件数が増えていないものは、
+// 出る日がずれただけなので除く。連勤・切り替え・公休・有給・人員不足・スキルは、件数が同じでも長さ・回数・
+// 足りない数が変われば新しいものとして残す
+const _SW_GRADED = new Set(['consecutive', 'band-switch', 'off-count', 'paid', 'understaff', 'skill-late', 'skill-short']);
+function _swFresh(before, after) {
+  const grp = v => v.type + '|' + (v.staffId ? 's' + v.staffId : 'd' + (v.day || 0));
+  const tally = list => { const c = {}; list.forEach(v => { const k = grp(v); c[k] = (c[k] || 0) + 1; }); return c; };
+  const b = tally(before), a = tally(after);
+  return _swNew(before, after).filter(v => _SW_GRADED.has(v.type) || (a[grp(v)] || 0) > (b[grp(v)] || 0));
 }
 const _swIsMust = t => getRuleLevel(t) === 'must' || (typeof MUST_TYPES_OPT !== 'undefined' && MUST_TYPES_OPT.has(t));
 /** 写しの表で、その人をその日そのシフトに入れて検査する（patch なら担当にも一時的に足す。表・データは変えない） */
@@ -174,44 +185,100 @@ function _swSimulate(p, key, day, patch) {
   try { return checkViolations(sh); }
   finally { if (added) { const i = p.allowedShifts.lastIndexOf(key); if (i >= 0) p.allowedShifts.splice(i, 1); } }
 }
-/** 新しく出る違反を、やさしい言葉に（その人のもの・その日のもの・ほかの人のもの） */
+/** 新しく出る違反を、やさしい言葉に（その人のもの・その日のもの・ほかの人のもの）。検査の種類の名前を
+ *  そのままつながず、何がどうなるかを書く（v266）。見つからない種類だけ「「◯◯」のエラーが出ます」 */
 function _swReasons(p, key, day, fresh) {
   const must = [], soft = [], effects = [];
-  const cellAt = (d) => ((AppState.shifts || {})[p.id] || {})[d] || '';
-  const say = (v) => {
+  const cellOf = (id, d) => ((AppState.shifts || {})[id] || {})[d] || '';
+  const cellAt = (d) => cellOf(p.id, d);
+  // 前の日のシフト。1日の前は前の月の最後の日（検査と同じく前月末の最後のシフト）
+  const prevText = (lead) => day > 1 ? `${lead ? '前の日（' + (day - 1) + '日）' : (day - 1) + '日'}が${shiftNameText(cellAt(day - 1))}`
+    : `前の月の最後の日が${shiftNameText(getPrevMonthEnd(p).lastShift)}`;
+  const label = (t) => (typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[t]) || t;
+  const bandOf = (k) => isLate(k) ? '遅番' : '早番';
+  const group = getDepartmentGroups(AppState.staff).find(g => g.staff.some(s => s.id === p.id));
+  // その人の違反
+  const sayOwn = (v) => {
     switch (v.type) {
       case 'consecutive': return v.compliance ? `入れると6連勤以上になります（${v.len}連勤）`
         : `入れると連勤の上限（${getMaxConsFor(p)}日）を超えます（${v.len}連勤）`;
-      case 'late-early': return v.day === day ? `前の日（${day - 1}日）が${shiftNameText(cellAt(day - 1))}なので、遅→早になります`
+      case 'band-switch': return `早遅の切り替えが、月の上限を超えます（${v.count}回／月${v.count - v.over}回まで）`;
+      case 'late-early': return v.day === day ? `${prevText(true)}なので、遅→早になります`
         : `次の日（${day + 1}日）が${shiftNameText(cellAt(day + 1))}なので、遅→早になります`;
-      case 'night-after-work': return v.day === day ? `夜勤明けです（${day - 1}日が${shiftNameText(cellAt(day - 1))}）`
+      case 'night-after-work': return v.day === day ? `夜勤明けです（${prevText(false)}）`
         : `次の日（${day + 1}日）が出勤なので、夜勤明けに出勤になります`;
+      case 'category-switch': return v.day === day
+        ? `連勤の途中で早番と遅番が入れ替わります（${prevText(false)}）`
+        : `連勤の途中で早番と遅番が入れ替わります（${day + 1}日が${shiftNameText(cellAt(day + 1))}）`;
+      case 'bad-rest': return `遅番→休み1日→早番の並びになります（${v.day}日の休みをはさみます）`;
+      case 'pair-rest': return `遅番→休み1日→早番の並びになります（この人は、時間帯が変わるときは2連休にする決まりです）`;
+      case 'single-work': return '前の日と次の日が休みなので、1日だけの出勤（単発出勤）になります';
+      case 'long-rest': return '続けて休む日数が、連休の上限を超えます';
       case 'day-skill': return `この日の${shiftNameText(key)}に要るスキル（${daySkillWords(daySkillsFor(key, day) || [])}）を持っていません`;
-      case 'pref-mismatch': return `${isLate(key) ? '遅番' : '早番'}に入らない希望です（③の早可・遅可）`;
+      case 'pref-mismatch': return `③で「${isLate(key) ? '遅可' : '早可'}」が付いていないので、${bandOf(key)}に入らない人です`;
       case 'off-count': return `公休が予定より少なくなります（公休${(p.maxOff || 0) - (v.short || 0)}日／予定${p.maxOff || 0}日）`;
-      case 'hierarchy': return '責任者の順番の決まりにかかります';
+      case 'paid': return '有給が設定の日数に届かなくなります';
+      case 'pair-rest-count': return '2連休の回数が、目安に届かなくなります';
+      case 'balance-diff': return '早番と遅番のかたよりが、③の「早遅バランス」の目安を超えます';
+      case 'weekend-pref': return '土日は休みたい希望の人です（③の「土日休み」）';
+      case 'rest-style': return (v.day === day || isWork(cellAt(v.day)))
+        ? '休みをこまめに入れたい希望の人で、4連勤以上になります（③の「休み方」）'
+        : `休みを連休で取りたい希望の人で、1日だけの休み（${v.day}日）ができます（③の「休み方」）`;
+      case 'hierarchy': {
+        // 同じ時間帯に、この人より順位が上で、このシフトを担当できる人がいる（検査と同じ決め方）
+        const sameBand = (c) => isLate(key) ? isLate(c) : (isEarlyCategory(c) && !isTraining(c));
+        const better = ((group && group.staff) || []).filter(s => s.id !== p.id && isWork(cellOf(s.id, day)) && sameBand(cellOf(s.id, day))
+          && (s.allowedShifts || []).includes(key) && getStaffPriority(s) < getStaffPriority(p))
+          .sort((a, b) => getStaffPriority(a) - getStaffPriority(b))[0];
+        return better ? `この日は順位が上の${better.name}さんが${bandOf(key)}にいるので、${shiftNameText(key)}は${better.name}さんが入る決まりです（責任者の順番）`
+          : '同じ時間帯に順位が上の人がいるので、責任者の順番の決まりにかかります';
+      }
       case 'role-mismatch': return `${shiftNameText(key)}の担当ではありません`;
-      default: return `${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[v.type]) || v.type}になります`;
+      case 'event-absent': return '行事の日に休みになります';
+      default: return `「${label(v.type)}」のエラーが出ます`;
     }
   };
-  fresh.forEach(v => {
-    if (v.staffId === p.id) {
-      const t = say(v);
-      const list = _swIsMust(v.type) ? must : soft;
-      if (list.indexOf(t) < 0) list.push(t);
-    } else if (!v.staffId && v.day === day) {
-      const t = v.type === 'understaff' && v.role && v.role !== key
-        ? `${shiftNameText(v.role)}が1人減ります（${v.short || 1}人足りなくなります）`
-        : (v.type === 'understaff' ? '' : `その日の「${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[v.type]) || v.type}」になります`);
-      if (t && effects.indexOf(t) < 0) effects.push(t);
-    } else if (v.staffId && v.day === day && _swIsMust(v.type)) {
-      const o = (AppState.staff || []).find(x => x.id === v.staffId);
-      const t = `${o ? o.name + 'さんに' : 'ほかの人に'}「${(typeof VIOLATION_LABEL !== 'undefined' && VIOLATION_LABEL[v.type]) || v.type}」が出ます`;
-      if (effects.indexOf(t) < 0) effects.push(t);
+  // その日の違反（人のつかないもの）
+  const sayDay = (v) => {
+    switch (v.type) {
+      case 'understaff': return v.role && v.role !== key ? `${shiftNameText(v.role)}が1人減ります（${v.short || 1}人足りなくなります）` : '';
+      case 'skill-late': case 'skill-short': {
+        if (!v.skill) return `「${label(v.type)}」のエラーが出ます`;
+        const want = v.type === 'skill-late' ? v.min : v.need;
+        return `${v.band === 'early' ? '早番' : '遅番'}の「${v.skill}」が${Math.max(1, (want || 0) - (v.have || 0))}人足りなくなります`
+          + `（できる人${v.have}人／${v.type === 'skill-late' ? '最低' : '目標'}${want}人）`;
+      }
+      case 'overstaff': return `${shiftNameText(v.role)}が必要人数より多くなります`;
+      case 'resp-duplicate': return `${shiftNameText(v.role)}が、1日の人数（必要人数）より多くなります`;
+      case 'vicemanager-absent': return `副店長がいない日なので、${shiftNameText('早責')}と${shiftNameText('遅責')}の両方をチーフ以上にする決まりにかかります`;
+      case 'special-day': {
+        const kind = (AppState.specialDays || {})[v.day];
+        const role = kind === 'replacement' ? '遅責' : '早責';
+        return `${kind === 'replacement' ? '入れ替え日' : '新装日'}なので、副店長が${shiftNameText(role)}に入る決まりですが、入らなくなります`;
+      }
+      default: return `その日に「${label(v.type)}」のエラーが出ます`;
     }
+  };
+  // ほかの人の違反（その日の「絶対」のもの）
+  const sayOther = (v, o) => {
+    const who = o ? o.name + 'さん' : 'ほかの人';
+    if (v.type === 'hierarchy' && o) {
+      return `${who}が${shiftNameText(cellOf(o.id, day))}に入っていて、順位が上の${p.name}さんが同じ時間帯に入ると、責任者の順番の決まりにかかります（2人を入れ替えるとよい）`;
+    }
+    return `${who}に「${label(v.type)}」のエラーが出ます`;
+  };
+  const add = (list, t) => { if (t && list.indexOf(t) < 0) list.push(t); };
+  fresh.forEach(v => {
+    if (v.type === 'special-day') { if (v.day === day) add(_swIsMust(v.type) ? effects : soft, sayDay(v)); }
+    else if (v.staffId === p.id) add(_swIsMust(v.type) ? must : soft, sayOwn(v));
+    else if (!v.staffId && v.day === day) add(_swIsMust(v.type) ? effects : soft, sayDay(v));
+    else if (v.staffId && v.day === day && _swIsMust(v.type)) add(effects, sayOther(v, (AppState.staff || []).find(x => x.id === v.staffId)));
   });
   return { must, soft, effects };
 }
+// 休みの希望・固定の言い方（有給・半休は「休み」とまとめない。v266）
+const offWishText = (v) => v === '有' ? '有給の希望' : v === '半' ? '半休の希望' : `休みの希望（${shiftSym(v)}）`;
+const offFixText = (v) => v === '有' ? '有給に固定しています' : v === '半' ? '半休に固定しています' : `休みに固定しています（${shiftSym(v)}）`;
 /** その日そのシフトが足りない理由をまとめる（表・データは変えない） */
 function explainShortage(day, key, gkey) {
   const groups = getDepartmentGroups(AppState.staff);
@@ -235,22 +302,25 @@ function explainShortage(day, key, gkey) {
       if (cur === '有') { lines.push(fx === '有' || rq === '有' ? '有給（希望・固定）' : '有給（設定の有給の日数を入れるため、生成がこの日にしました）'); hard = true; }
       else if (cur === '半') { lines.push('半休'); hard = true; }
       else if (isPublicOff(cur) && ((fx && isOff(fx)) || (rq && isOff(rq)))) {
-        lines.push(fx && isOff(fx) && !(rq && isOff(rq)) ? `休みに固定しています（${shiftSym(fx)}）` : `休みの希望（${shiftSym(rq || fx)}）`);
+        lines.push(fx && isOff(fx) && !(rq && isOff(rq)) ? offFixText(fx) : offWishText(rq || fx));
         hard = true; wishOff.push(st.name);
       } else if (isPublicOff(cur)) lines.push('公休（生成で休みにした日）');
       else if (cur === '余') lines.push('余（人が余った日の休み）');
       else { lines.push((OFF_TYPES[cur] && OFF_TYPES[cur].label) || cur); hard = true; }
-    } else if (cur && isTraining(cur)) { lines.push(`研修（${shiftNameText(cur)}）`); hard = true; }
+    } else if (cur && isTraining(cur)) {
+      // 名称に「研修」とあれば記号だけ（「研修に出ています（「研」（研修））」と重ねない）
+      const tl = ((getShiftType(cur) || {}).label || '');
+      lines.push(`研修に出ています（${tl.indexOf('研修') >= 0 ? `「${shiftSym(cur)}」` : shiftNameText(cur)}）`); hard = true; }
     else if (cur && isWork(cur)) {
-      if (fx === cur || rq === cur) { lines.push(`${shiftNameText(cur)}に${fx === cur ? '固定' : '希望で決まって'}います`); hard = true; }
+      if (fx === cur || rq === cur) { lines.push(`${shiftNameText(cur)}に${fx === cur ? '固定しています' : '希望で決まっています'}`); hard = true; }
       else { lines.push(`${shiftNameText(cur)}に入っています。入れ替えれば空けられるかもしれません`); swap = true; swaps.push(st.name); }
     } else if (fx || rq) {
       const v = fx || rq;
-      lines.push(isOff(v) ? `休みの希望（${shiftSym(v)}）` : `${shiftNameText(v)}に${fx ? '固定' : '希望で決まって'}います`);
+      lines.push(isOff(v) ? (fx ? offFixText(v) : offWishText(v)) : `${shiftNameText(v)}に${fx ? '固定しています' : '希望で決まっています'}`);
       hard = true; if (isOff(v)) wishOff.push(st.name);
     } else lines.push('空いています');
     let r = { must: [], soft: [], effects: [] };
-    if (!hard) r = _swReasons(st, key, day, _swNew(base, _swSimulate(st, key, day, false)));
+    if (!hard) r = _swReasons(st, key, day, _swFresh(base, _swSimulate(st, key, day, false)));
     const ok = !hard && !r.must.length;
     if (ok && !swap) canNow.push(st.name);
     people.push({ name: st.name, lines, must: r.must, soft: r.soft, effects: r.effects, hard, swap, ok });
@@ -264,7 +334,7 @@ function explainShortage(day, key, gkey) {
     if (cur && !(isPublicOff(cur) || cur === '余')) return;
     if (staffDayState(st, day) !== 'free') return;
     if (!hasDaySkill(st, key, day)) { candNoSkill++; return; }
-    const r = _swReasons(st, key, day, _swNew(base, _swSimulate(st, key, day, true)));
+    const r = _swReasons(st, key, day, _swFresh(base, _swSimulate(st, key, day, true)));
     cands.push({ name: st.name, cautions: r.must.concat(r.effects), soft: r.soft });
   });
   cands.sort((a, b) => a.cautions.length - b.cautions.length);
