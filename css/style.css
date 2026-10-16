@@ -445,6 +445,26 @@ a { color: var(--link); }
 .short-panel .sp-body h4 { margin: 10px 0 2px; font-size: var(--fs-sm); color: var(--text); }
 .short-panel .sp-list { margin: 0; padding-left: 18px; }
 body.has-short-panel { padding-bottom: 46vh; }
+/* 余り・不足の内訳（v267）: 帯の「余」「不足」のボタンと、できることごとの余り・不足の表（⑤の実現性チェック・⑥の下の枠） */
+button.lv-chip-btn { font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+button.lv-chip-btn:hover { filter: brightness(0.97); }
+button.lv-chip-btn:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.rc-wrap { margin: 12px 0 4px; }
+.rc-wrap h4 { margin: 10px 0 4px; font-size: var(--fs-sm); color: var(--text); }
+.rc-wrap h5.rc-dept { margin: 10px 0 4px; font-size: var(--fs-sm); color: var(--text-soft); font-weight: 600; }
+.rc-scroll { overflow-x: auto; max-width: 100%; }
+.rc-table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: var(--fs-sm); }
+.rc-table th, .rc-table td { border-bottom: 1px solid var(--border); padding: 4px 8px; text-align: right; vertical-align: top; color: var(--text); }
+.rc-table thead th { color: var(--text-soft); font-weight: 600; background: var(--surface-2); white-space: nowrap; }
+.rc-table th[scope="row"], .rc-table thead th:first-child { text-align: left; font-weight: 500; }
+.rc-table td:last-child, .rc-table thead th:last-child { text-align: left; }
+.rc-table tr.rc-total th, .rc-table tr.rc-total td { font-weight: 700; background: var(--surface-2); }
+.rc-table tr.rc-sub th[scope="row"] { padding-left: 24px; color: var(--text-soft); }
+.rc-table .rc-plus { color: var(--text); }
+.rc-table .rc-minus { color: var(--lv-must); font-weight: 700; }
+.btn.rc-more { padding: 0 8px; min-height: 0; font-size: var(--fs-xs); margin-left: 4px; vertical-align: baseline; }
+.rc-note { margin: 8px 0 4px; font-size: var(--fs-sm); color: var(--text); }
+
 /* 日ごとに要るスキル（v264）: ②の日別必要人数の中の欄と、②の表・⑥の必要人数の行のマスの印（点線の枠） */
 td.ds-mark { outline: 2px dotted var(--link); outline-offset: -3px; }
 .dss-box { margin-top: 12px; padding-top: 6px; border-top: 1px solid var(--border-subtle); }

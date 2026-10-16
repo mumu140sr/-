@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=266" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=266" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=266" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=266">
+<link rel="icon" href="favicon.svg?v=267" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=267" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=267" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=267">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=266" />
+<link rel="stylesheet" href="css/style.css?v=267" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -436,7 +436,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>「<span class="m-ui">はじめての方は</span>」の <span class="m-btn out"><svg class="ic" aria-hidden="true"><use href="#i-wizard"/></svg>順番に確認して生成する</span>：ルール → 必要人数 → 希望の噛み合わせ → 余 → 生成 の順に、確かめながら進みます。</li>
           <li>「<span class="m-ui">詳しい機能</span>」の中の4つ：
             <ul>
-              <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</span>：作る前に、人手が足りるかと、必ず残るエラーを調べます。</li>
+              <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</span>：作る前に、人手が足りるかと、必ず残るエラーを調べます。「<span class="m-ui">できることごとの余り・不足（この月の見込み）</span>」の表で、責任者・総務・スキルなど、何ができる人が足りないかも分かります（<a href="#errors">エラーの見方</a> の「不足」）。</li>
               <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-plan"/></svg>エラー解消プラン</span>：どの設定をどれだけ変えるとエラーが減るかを、影響の小さい順に並べます。</li>
               <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-sur-use"/></svg>余の使い道を決める</span>：余る人手を、トレーニングなどに使う日を選びます。</li>
               <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-forecast"/></svg>設定を変えたときの見込み</span>：担当シフトを足したら表がどう変わるかを、試しに作って比べます。</li>
@@ -520,6 +520,14 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <li><span class="lv-chip lv-chip-sur"><span class="sur-sw" aria-hidden="true"></span>余</span><span>エラーではありません。人が余った日の休みです。</span></li>
       <li><span class="lv-chip lv-chip-short"><span class="short-sw" aria-hidden="true"></span>不足</span><span>人手が足りないときだけ、シフト表の上の帯に「不足 −2コマ」のように出ます。人員不足の人数・公休を削った出勤の日数・有給を削った出勤の日数の合計です。マウスを置くと、内訳が出ます。帯のすぐ下に、どこが足りないかの文と、足りない理由を見るボタンが出ます（<a href="#s6">シフト表</a> の「くわしく」）。</span></li>
     </ul>
+    <p>帯の「余」「不足」は押せます（<span class="m-key">Tab</span> で選んで <span class="m-key">Enter</span> でも）。画面の下に「<span class="m-ui">余り・不足の内訳</span>」が出ます。</p>
+    <ul>
+      <li>「<span class="m-msg" data-pat="いまの表の不足 ◯コマの内訳">いまの表の不足 ◯コマの内訳</span>」：人員不足は役ごと（例：責任者 1コマ（2日の「遅責」））、休み・有給を削った出勤は全体の人手で出します。合わせると帯の「不足」と同じ数です。</li>
+      <li>「<span class="m-ui">スキル（不足の数には入っていません）</span>」：人数は足りているが、そのスキルを持つ人が足りない日です。例：早番の「営業」が2日に1人足りません。</li>
+      <li>「<span class="m-msg" data-pat="いまの表の余 ◯コマ">いまの表の余 ◯コマ</span>」：余の人が何をできるかです。1人がいくつもできるので、足すと余の数より多くなります。</li>
+      <li>「<span class="m-ui">できることごとの余り・不足（この月の見込み）</span>」：役ごと・スキルごとに、その月の必要なコマと、できる人が出られるコマを比べた表です。責任者（早番責任者・遅番責任者）のように、名称から「早番」「遅番」を外すと同じになるシフトは1行にまとめています（<span class="m-btn">内訳</span> で、シフトごとに開きます）。社員とキャストは分け、スキルは社員とキャストを合わせて数えます。
+        同じ人がいくつもの役をできるので、出られるコマは役どうしで取り合いになります。余りがプラスでも、足りない日に出ている日は足りません。</li>
+    </ul>
     <p>表のマスにも、同じ形の印が右上に付きます。左上の錠は、固定したマスです。</p>
     <div class="m-cells" aria-label="マスの見本">
       <figure><span class="shift-cell c-blue e-crit">早</span><figcaption>6連勤以上</figcaption></figure>
@@ -584,7 +592,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
       <details><summary>計算している間、入力できない</summary>
         <p>計算中は、設定・希望・表の手直しを止めています。見ることはできます（折りたたみや「<span class="m-ui">詳細</span>」を開く、列の幅を変える、文字を選ぶ、<span class="m-tab" data-n="4">希望休入力</span> の「<span class="m-ui">入れる記号</span>」を選び替える、もできます）。計算中に入れた文字は消えるので、終わってから入れ直してください。終わるのを待つか、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>中止</span> が出ていれば押してください。</p></details>
       <details><summary>画面が前のままで、新しくならない</summary>
-        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v266 など）が出ています。知らされた番号と同じか確かめます。</p></details>
+        <p><span class="m-key">Ctrl</span>+<span class="m-key">F5</span>（Mac は <span class="m-key">Command</span>+<span class="m-key">Shift</span>+<span class="m-key">R</span>）で読み込み直します。画面の左上、「<span class="m-ui">シフト自動生成</span>」の右に、版の番号（v267 など）が出ています。知らされた番号と同じか確かめます。</p></details>
       <details><summary>データが消えた／別のパソコンで使いたい</summary>
         <p><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-export"/></svg>書き出し</span> で作ったファイルがあれば、「<span class="m-ui">データ</span>」の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg>取り込み</span> で戻せます。別のパソコンでも同じです。ファイルが無いと戻せません。</p></details>
       <details><summary>「人が足りない」と出る</summary>

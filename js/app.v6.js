@@ -951,6 +951,7 @@ function showFeasibilityModal() {
     </p>
     ${verdict}
     ${renderDayMarginsHtml()}
+    ${(typeof renderRoleCapacityHtml === 'function') ? renderRoleCapacityHtml() : ''}
     <div id="wishFixBox"></div>
     ${notes}
     <div id="fixPlanBox"></div>

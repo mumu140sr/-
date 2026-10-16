@@ -76,11 +76,12 @@ function renderResultBand() {
   // 足りない数（short）を足す（公休はキャストを数えない・ルールを OFF にしたものは数えない＝検査と同じ）。0なら出さない
   const sh = shortageOfViolations(AppState.violations);
   const shortChip = sh.total > 0
-    ? `<span class="lv-chip lv-chip-short" title="${escapeHtml(`人員不足 ${sh.under}人・公休を削った出勤 ${sh.off}日・有給を削った出勤 ${sh.paid}日`)}">`
-      + `<span class="short-sw" aria-hidden="true"></span>不足<b>−${sh.total}</b><span class="lv-unit">コマ</span></span>`
+    ? `<button type="button" class="lv-chip lv-chip-short lv-chip-btn calc-view-only" data-band-open="short" title="${escapeHtml(`人員不足 ${sh.under}人・公休を削った出勤 ${sh.off}日・有給を削った出勤 ${sh.paid}日`)}" aria-label="不足 ${sh.total}コマ。余り・不足の内訳を見る">`
+      + `<span class="short-sw" aria-hidden="true"></span>不足<b>−${sh.total}</b><span class="lv-unit">コマ</span></button>`
     : '';
   el.innerHTML = chip('crit', '6連勤以上', n.crit) + chip('must', '絶対', n.must) + chip('soft', 'できれば', n.soft)
-    + `<span class="lv-chip lv-chip-sur${sur ? '' : ' is-zero'}"><span class="sur-sw" aria-hidden="true"></span>余<b>${sur}</b><span class="lv-unit">コマ</span></span>`
+    // v267: 「余」「不足」は押すと、下の枠に余り・不足の内訳を出す（Tab で止まり Enter でも開く）
+    + `<button type="button" class="lv-chip lv-chip-sur lv-chip-btn calc-view-only${sur ? '' : ' is-zero'}" data-band-open="sur" aria-label="余 ${sur}コマ。余り・不足の内訳を見る"><span class="sur-sw" aria-hidden="true"></span>余<b>${sur}</b><span class="lv-unit">コマ</span></button>`
     + shortChip;
   renderShortageNote();                 // 帯の下の文（v265）
   if (_shortPanel) scheduleShortageRefresh();   // 開いている理由の枠も数え直す
@@ -364,6 +365,7 @@ function _shortPanelEl() {
 }
 function renderShortPanel() {
   if (!_shortPanel) return;
+  if (_shortPanel.mode === 'band') { renderBandPanel(); return; }   // 帯の「余」「不足」から開いたとき（v267）
   const el = _shortPanelEl();
   const ex = AppState.generated ? explainShortage(_shortPanel.day, _shortPanel.key, _shortPanel.gkey) : null;
   const title = el.querySelector('#shpTitle'), body = el.querySelector('#shpBody');
@@ -418,8 +420,166 @@ function closeShortPanel() {
   _shortPanel = null;
   if (el) el.hidden = true;
   document.body.classList.remove('has-short-panel');
-  if (op && op.isConnected) op.focus({ preventScroll: true });
+  // 開いている間に帯や表が描き直されて押したボタンが作り直されたときは、同じボタンを探して戻す（v267）
+  let back = op && op.isConnected ? op : null;
+  if (!back && op && op.dataset) {
+    const ds = op.dataset;
+    back = ds.bandOpen ? document.querySelector(`[data-band-open="${CSS.escape(ds.bandOpen)}"]`)
+      : (ds.swDay ? [...document.querySelectorAll(`[data-sw-day="${CSS.escape(ds.swDay)}"]`)].find(x => x.dataset.swKey === ds.swKey && x.dataset.swG === ds.swG && !!x.dataset.swGo === !!ds.swGo) : null);
+  }
+  if (back) back.focus({ preventScroll: true });
 }
+// ===== 余り・不足の内訳（v267） =====
+// ⑥の帯の「余」「不足」を押すと、理由の枠と同じ下の枠に出す。いまの表の内訳は帯と同じ検査の違反から数え（画面で数え直さない）、
+// 月の表（できることごとの余り・不足）は作る前の見込みと同じ部品で数える（optimizer の roleCapacityTable）。
+const _rcOpen = new Set();   // 内訳を開いているまとめた行（部門:名前）。描き直しても開いたまま
+function _rcDays(list, combined) {
+  const f = x => combined && !x.union && x.keys && x.keys.length ? `${x.day}日（${x.keys.map(k => '「' + shiftSym(k) + '」').join('・')}）`
+    : (x.union ? `${x.day}日（合わせて）` : (x.slot ? `${x.day}日（枠）` : `${x.day}日`));
+  if (!list.length) return 'なし';
+  const head = list.slice(0, 8).map(f).join('・');
+  return list.length > 8 ? `${head} ほか${list.length - 8}日` : head;
+}
+const _rcDiff = (n) => n >= 0 ? `<span class="rc-plus">余り ${n}</span>` : `<span class="rc-minus">不足 ${-n}</span>`;
+/** まとめた行の名前: 責任者（「早責」・「遅責」）。まとめていない行: 「早」（早番） */
+function _rcRowLabel(r) {
+  return r.name ? `${r.name}（${r.keys.map(k => '「' + shiftSym(k) + '」').join('・')}）` : shiftNameText(r.keys[0]);
+}
+/** できることごとの余り・不足の表（この月の見込み）。⑤の実現性チェックと⑥の内訳の枠で使う */
+function renderRoleCapacityHtml(pre) {
+  if (typeof roleCapacityTable !== 'function') return '';
+  const t = pre || roleCapacityTable();
+  if (!t.groups.length) return '';
+  const multi = t.groups.length > 1;
+  const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound() : { reasons: [] };
+  const head = '<thead><tr><th>できること</th><th>必要</th><th>出られる</th><th>余り・不足</th><th>足りない日</th></tr></thead>';
+  const tr = (label, x, cls, extra) => `<tr${cls ? ` class="${cls}"` : ''}${extra || ''}><th scope="row">${label}</th><td>${x.needText || x.need}</td><td>${x.avail}</td><td>${_rcDiff(x.diff)}</td><td>${escapeHtml(x.daysText)}</td></tr>`;
+  let html = '';
+  t.groups.forEach(g => {
+    const rows = [];
+    const tot = g.total;
+    rows.push(tr('全体（どのシフトでも）', { need: tot.need, avail: tot.avail, diff: tot.diff, daysText: _rcDays(tot.short, false) }, 'rc-total',
+      tot.forcedExcess > 0 ? ` title="${escapeHtml(`必要には、必要人数を超えて希望・固定で決まっている出勤 ${tot.forcedExcess}コマ（${tot.forcedText}）を含みます`)}"` : ''));
+    g.rows.forEach(r => {
+      const id = `${g.key}:${r.name || r.keys[0]}`;
+      const open = _rcOpen.has(id);
+      const btn = r.sub ? ` <button type="button" class="btn btn-ghost rc-more calc-view-only" data-rc-toggle="${escapeHtml(id)}" aria-expanded="${open}">${open ? '内訳を閉じる' : '内訳'}</button>` : '';
+      rows.push(`<tr${r.sub ? ' class="rc-group"' : ''}><th scope="row">${escapeHtml(_rcRowLabel(r))}${btn}</th><td>${r.need}</td><td>${r.avail}</td><td>${_rcDiff(r.diff)}</td><td>${escapeHtml(_rcDays(r.short, !!r.sub))}</td></tr>`);
+      (r.sub || []).forEach(u => rows.push(`<tr class="rc-sub" data-rc-of="${escapeHtml(id)}"${open ? '' : ' hidden'}><th scope="row">${escapeHtml(shiftNameText(u.keys[0]))}</th><td>${u.need}</td><td>${u.avail}</td><td>${_rcDiff(u.diff)}</td><td>${escapeHtml(_rcDays(u.short, false))}</td></tr>`));
+    });
+    html += (multi ? `<h5 class="rc-dept">${escapeHtml(g.label)}</h5>` : '') + `<div class="rc-scroll"><table class="rc-table">${head}<tbody>${rows.join('')}</tbody></table></div>`;
+  });
+  if (t.skills.length) {
+    const rows = t.skills.map(k => `<tr><th scope="row">${escapeHtml(`${k.band === 'early' ? '早番' : '遅番'}の「${k.name}」`)}</th>`
+      + `<td>${k.need}${k.target !== k.need ? `<span class="hint">（目標 ${k.target}）</span>` : ''}</td><td>${k.avail}</td><td>${_rcDiff(k.diff)}</td><td>${escapeHtml(_rcDays(k.short, false))}</td></tr>`);
+    html += `<h5 class="rc-dept">スキル${multi ? '（社員とキャストを合わせて数えます）' : ''}</h5><div class="rc-scroll"><table class="rc-table">${head}<tbody>${rows.join('')}</tbody></table></div>`;
+  }
+  // 作る前の見込みの「6連勤を避けると足りない期間」（役ごと）も、同じ文で添える
+  const comp = (lb.reasons || []).filter(x => x.kind === 'comp-days');
+  return `<div class="rc-wrap"><h4>できることごとの余り・不足（この月の見込み）</h4>${html}`
+    + `<p class="rc-note">同じ人がいくつもの役をできるので、出られるコマは役どうしで取り合いになります。余りがプラスでも、足りない日に出ている日は足りません。</p>`
+    + `<p class="hint">必要は、その月の必要人数の合計です（スキルは最低ラインの合計）。出られるは、その役ができる人の出られる日数の合計で、公休の予定・有給・研修・休みの希望・ほかの役に決まっている日を引いています。足りない日は、その日に出られる「できる人」が必要より少ない日です（「合わせて」は、まとめた役を合わせると足りない日、「枠」は、できる人はいても入れる枠が足りない日）。</p>`
+    + (comp.length ? `<p class="hint">6連勤を作らずに出せる日数で見ると、次の期間も足りません（作る前の見込みと同じ）：</p><ul class="sp-list rc-comp">${comp.slice(0, 8).map(x => `<li>${escapeHtml(x.text)}</li>`).join('')}${comp.length > 8 ? `<li class="hint">ほか${comp.length - 8}件</li>` : ''}</ul>` : '')
+    + '</div>';
+}
+/** いまの表の「不足」の内訳（帯と同じ検査の違反から）。人員不足は役ごと、休み・有給は全体、スキルは別の行 */
+function bandBreakdown(pre) {
+  const vios = AppState.violations || [];
+  const sh = shortageOfViolations(vios);
+  const items = shortageItems(vios);
+  const groups = getDepartmentGroups(AppState.staff);
+  const mainKey = (groups.find(g => g.key !== 'cast') || {}).key || 'employee';
+  // 人員不足を役（まとめた行）ごとに
+  const roles = new Map();
+  items.filter(x => x.kind === 'under').forEach(x => {
+    const nm = roleRowName(x.role);
+    const id = (x.cast ? 'cast:' : 'main:') + (nm || x.role);
+    if (!roles.has(id)) roles.set(id, { label: (x.cast ? 'キャストの' : '') + (nm || shiftNameText(x.role)), combined: !!nm, n: 0, days: [] });
+    const r = roles.get(id); r.n += x.n; r.days.push(x);
+  });
+  const underList = [...roles.values()].sort((a, b) => b.n - a.n).map(r => {
+    const ds = r.days.sort((a, b) => a.day - b.day).map(x => `${x.day}日${r.combined ? 'の「' + shiftSym(x.role) + '」' : ''}${x.n > 1 ? `（${x.n}人）` : ''}`);
+    return `${r.label} ${r.n}コマ（${ds.slice(0, 8).join('・')}${ds.length > 8 ? ` ほか${ds.length - 8}日` : ''}）`;
+  });
+  // スキル（不足の数には入れない）
+  const sk = new Map();
+  vios.filter(v => (v.type === 'skill-late' || v.type === 'skill-short') && v.skill).forEach(v => {
+    const id = v.type + '|' + v.band + '|' + v.skill;
+    if (!sk.has(id)) sk.set(id, { v, days: [] });
+    const want = v.type === 'skill-late' ? v.min : v.need;
+    sk.get(id).days.push({ day: v.day, n: Math.max(1, (want || 0) - (v.have || 0)) });
+  });
+  const skillList = [...sk.values()].map(({ v, days }) => {
+    const nm = `${v.band === 'early' ? '早番' : '遅番'}の「${v.skill}」`;
+    days.sort((a, b) => a.day - b.day);
+    const same = days.every(x => x.n === days[0].n);
+    const ds = same ? days.map(x => `${x.day}日`) : days.map(x => `${x.day}日（${x.n}人）`);
+    const dt = `${ds.slice(0, 8).join('・')}${ds.length > 8 ? ` ほか${ds.length - 8}日` : ''}`;
+    return v.type === 'skill-late'
+      ? `${nm}が${dt}に${same ? `${days[0].n}人${days.length > 1 ? 'ずつ' : ''}` : ''}足りません（最低${v.min}人）`
+      : `${nm}が${dt}に目標まで${same ? `${days[0].n}人${days.length > 1 ? 'ずつ' : ''}` : ''}足りません（目標${v.need}人。できれば）`;
+  });
+  // 余: 余のマスの人ができること（1人がいくつもできるので、足すと余の数より多くなる）
+  const t = pre || ((typeof roleCapacityTable === 'function') ? roleCapacityTable() : { groups: [], skills: [] });
+  const sur = (typeof listSurplusCells === 'function') ? listSurplusCells() : [];
+  const surBy = new Map();
+  const gOf = id => groups.find(g => g.staff.some(s => s.id === id));
+  sur.forEach(c => {
+    const s = (AppState.staff || []).find(x => x.id === c.id); if (!s) return;
+    const g = gOf(s.id); const tg = g && t.groups.find(x => x.key === g.key);
+    const pre = (g && g.key === 'cast' && groups.length > 1) ? 'キャストの' : '';
+    ((tg && tg.rows) || []).forEach(r => {
+      if (!(s.allowedShifts || []).some(k => r.keys.includes(k))) return;
+      const lab = pre + (r.name || shiftNameText(r.keys[0]));
+      surBy.set(lab, (surBy.get(lab) || 0) + 1);
+    });
+    t.skills.forEach(k => { if ((s.skills || []).includes(k.name)) { const lab = `${k.band === 'early' ? '早番' : '遅番'}の「${k.name}」`; surBy.set(lab, (surBy.get(lab) || 0) + 1); } });
+  });
+  return { sh, underList, skillList, sur: sur.length, surList: [...surBy.entries()].map(([k, n]) => `${k} ${n}`), mainKey };
+}
+function renderBandPanel() {
+  const el = _shortPanelEl();
+  const title = el.querySelector('#shpTitle'), body = el.querySelector('#shpBody');
+  title.textContent = '余り・不足の内訳';
+  if (!AppState.generated) { body.innerHTML = '<p>表がありません。</p>'; return; }
+  const tbl = (typeof roleCapacityTable === 'function') ? roleCapacityTable() : null;   // 1回だけ数えて、内訳と表の両方で使う
+  const b = bandBreakdown(tbl);
+  const parts = [];
+  if (b.sh.total > 0) {
+    parts.push(`<h4>いまの表の不足 ${b.sh.total}コマの内訳</h4><ul class="sp-list">`
+      + (b.sh.under > 0 ? `<li>${escapeHtml(`人員不足 ${b.sh.under}コマ：${b.underList.join('・')}`)}</li>` : '')
+      + (b.sh.off + b.sh.paid > 0 ? `<li>${escapeHtml(`休み・有給を削った出勤 ${b.sh.off + b.sh.paid}コマ：全体の人手（${[b.sh.off ? `公休 ${b.sh.off}日` : '', b.sh.paid ? `有給 ${b.sh.paid}日` : ''].filter(Boolean).join('・')}）`)}</li>` : '')
+      + '</ul>');
+  } else parts.push('<h4>いまの表の不足</h4><p>いまの表に、人手の不足はありません。</p>');
+  if (b.skillList.length) parts.push(`<h4>スキル（不足の数には入っていません）</h4><ul class="sp-list">${b.skillList.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`);
+  parts.push(b.sur > 0
+    ? `<h4>いまの表の余 ${b.sur}コマ</h4><p>${escapeHtml(`余の人ができること：${b.surList.join('・') || 'なし'}`)}</p><p class="hint">1人がいくつもできるので、足すと余の数より多くなります。</p>`
+    : '<h4>いまの表の余</h4><p>いまの表に、余はありません。</p>');
+  body.innerHTML = parts.join('') + renderRoleCapacityHtml(tbl);
+}
+function openBandPanel(opener) {
+  _shortPanel = { mode: 'band', opener: opener || null };
+  const el = _shortPanelEl();
+  el.hidden = false;
+  document.body.classList.add('has-short-panel');
+  renderShortPanel();
+  const t = el.querySelector('#shpTitle'); if (t) t.focus({ preventScroll: true });
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (e) => {
+    const bo = e.target.closest && e.target.closest('[data-band-open]');
+    if (bo) { openBandPanel(bo); return; }
+    const tg = e.target.closest && e.target.closest('[data-rc-toggle]');
+    if (tg) {
+      const id = tg.dataset.rcToggle, open = tg.getAttribute('aria-expanded') !== 'true';
+      if (open) _rcOpen.add(id); else _rcOpen.delete(id);
+      const tb = tg.closest('tbody');
+      if (tb) tb.querySelectorAll('tr[data-rc-of]').forEach(r => { if (r.dataset.rcOf === id) r.hidden = !open; });
+      tg.setAttribute('aria-expanded', String(open)); tg.textContent = open ? '内訳を閉じる' : '内訳';
+    }
+  });
+}
+
 // 表・希望・設定が変わったら、帯の下の文と、開いている理由の枠を数え直す（古い理由を出したままにしない）
 let _shortRefreshTimer = null;
 function scheduleShortageRefresh() {

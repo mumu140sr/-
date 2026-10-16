@@ -241,6 +241,8 @@ class	has-short-panel	JS	0	ui.v6.js
 class	is-jumpable	JS	0	ui.v6.js
 class	is-selected	JS	0	ui-shell.v6.js
 class	is-split	JS	0	ui-shell.v6.js
+class	modal	HTML	1	ui.v6.js
+class	modal-overlay	JS	0	ui.v6.js
 class	nav-link	HTML	1	ui.v6.js
 class	open	JS	0	app.v6.js,ui-shell.v6.js
 class	range-sel	JS	0	ui.v6.js
@@ -271,6 +273,7 @@ class	violation-item	JS	0	ui.v6.js
 attr	data-adjstop	JS	0	ui.v6.js
 attr	data-allowed	JS	0	ui-shell.v6.js,ui.v6.js
 attr	data-asstaff	JS	0	ui.v6.js
+attr	data-band-open	JS	0	ui.v6.js
 attr	data-ck	JS	0	ui.v6.js
 attr	data-ckgo	JS	0	ui.v6.js
 attr	data-day	JS	0	ui.v6.js
@@ -296,6 +299,8 @@ attr	data-pairgo	JS	0	ui.v6.js
 attr	data-plan	JS	0	ui.v6.js
 attr	data-pref	JS	0	ui.v6.js
 attr	data-prule	JS	0	ui.v6.js
+attr	data-rc-of	JS	0	ui.v6.js
+attr	data-rc-toggle	JS	0	ui.v6.js
 attr	data-rcgo	JS	0	app.v6.js
 attr	data-reco	JS	0	ui.v6.js
 attr	data-relax	JS	0	ui.v6.js
