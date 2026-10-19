@@ -467,7 +467,9 @@ button.lv-chip-btn:focus-visible { outline: 2px solid var(--link); outline-offse
 /* 行の名前の列の右に区切りの線（横に送ったとき、名前の横の数が名前の続きに見えないように。sticky でも動く影で引く） */
 .rc-table th[scope="row"], .rc-table thead tr:first-child th:first-child { box-shadow: inset -2px 0 0 var(--border); }
 .rc-table td.rc-diff { white-space: nowrap; }
-.rc-table .rc-why { display: block; margin-top: 2px; font-size: var(--fs-xs); font-weight: 400; color: var(--text-soft); white-space: normal; text-align: left; }
+.rc-table .rc-why { display: block; margin-top: 2px; font-size: var(--fs-xs); font-weight: 400; color: var(--text-soft); white-space: normal; text-align: left;
+  /* 名前の列の keep-all を受け継ぐと、句読点でしか折り返せず「希望・」だけで行が切れた（v267）。文のまとまりで折り返す（対応しないブラウザはふつうの折り返し） */
+  word-break: normal; word-break: auto-phrase; }
 .rc-table td.rc-na { color: var(--text-soft); }
 .rc-table tr.rc-total th, .rc-table tr.rc-total td { font-weight: 700; background: var(--surface-2); }
 .rc-table tr.rc-sub th[scope="row"] { padding-left: 24px; color: var(--text-soft); }

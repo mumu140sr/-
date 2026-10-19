@@ -1398,8 +1398,12 @@ function showSurplusPopup() {
     }).join('');
   // 根本原因（症状の裏にある本当の原因）を最優先で表示
   let rootHtml = '';
+  // 「◯コマ不足」は赤い太字で目立たせる（v267 の直し: 部門ごとの文にしたとき、ただの文字になっていた）
+  const redShort = (h) => h.replace(/(\d+(?:\.\d+)?コマ不足)/g, '<b style="color:var(--lv-must)">$1</b>');
+  let rootHasCap = false;   // 根本原因に「そもそも人手が足りない」（月の合計の数）を出したか。出したら下の段落では同じ文をくり返さない
   if (hasErrors && typeof analyzeRootCauses === 'function') {
     const roots = analyzeRootCauses().slice(0, 3);
+    rootHasCap = roots.some(r => r.cap);
     if (roots.length) {
       rootHtml = `
         <div class="note-must" style="padding:10px 12px;border-radius:6px;margin-bottom:12px">
@@ -1407,7 +1411,7 @@ function showSurplusPopup() {
           ${roots.map((r, i) => `
             <div style="margin-top:${i ? 8 : 6}px">
               <div style="font-weight:700;color:var(--lv-must)">${i + 1}. ${escapeHtml(r.title)}</div>
-              <div style="color:var(--text-soft);font-size:13px;margin:2px 0">${escapeHtml(r.detail)}</div>
+              <div style="color:var(--text-soft);font-size:13px;margin:2px 0">${redShort(escapeHtml(r.detail))}</div>
               <div style="color:var(--link);font-size:13px">→ ${escapeHtml(r.fix)}</div>
             </div>`).join('')}
         </div>`;
@@ -1464,9 +1468,10 @@ function showSurplusPopup() {
         : `月の合計で、コマ数が ${capNum(shortageComa)}コマ 足りません`)
       : `人手が足りない日があります`;
     body = `${causeHtml}
-      <p>${escapeHtml(cap.detailText)}
+      <p>${rootHasCap ? '月の合計の数は、上の「根本原因」に出ています。'
+        : `${redShort(escapeHtml(cap.detailText))}
       ${shortageComa > 0 ? '' : '月の合計は足りていますが、特定の日・シフトで埋められていません。'}
-      数え方は、⑤「実現性チェック（生成前）」の表の「全体」の行と同じです。シフト表の帯の「不足」は、いまの表で実際に足りないコマの数なので、この数とは違うことがあります。</p>
+      数え方は、⑤「実現性チェック（生成前）」の表の「全体」の行と同じです。`}シフト表の帯の「不足」は、いまの表で実際に足りないコマの数なので、この数とは違うことがあります。</p>
       ${shortDays ? `<div style="margin:8px 0"><b>埋まっていない主な箇所：</b><ul style="margin:4px 0;padding-left:20px;line-height:1.7">${shortDays}</ul></div>` : ''}
       ${offShort.length ? `<p>公休が足りていない人：<b>${escapeHtml(offShort.join('・'))}</b></p>` : ''}
       <div class="note-must" style="padding:10px 12px;border-radius:6px">

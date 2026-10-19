@@ -444,19 +444,31 @@ const _rcDiff = (n) => n >= 0 ? `<span class="rc-plus">余り ${capNum(n)}</span
 let _rcHelpOpen = false;   // 表の見方の折りたたみ。描き直しても開いたまま
 document.addEventListener('toggle', (e) => { if (e.target && e.target.matches && e.target.matches('details.rc-help')) _rcHelpOpen = e.target.open; }, true);
 /** 読みまちがえやすい行の一言。数の欄でなく行の名前の下に出す（v267 の直し: 数の欄では細く何行にも折り返していた） */
+/** 削る日がある人の名前（2人まで。残りは「ほか◯人」） */
+function _rcCutNames(who) {
+  const l = (who || []).filter(w => w.name);
+  if (!l.length) return '';
+  return l.slice(0, 2).map(w => w.name + 'さん').join('・') + (l.length > 2 ? ` ほか${l.length - 2}人` : '');
+}
 function _rcWhy(x, total, skill) {
-  let why = '';
+  const whys = [];
+  // 削る日のある行は、だれの何を直せばよいかも書く（v267 の直し: 担当を増やす・休みの希望を動かす、の効かない案内しか出ていなかった）
+  const fixCut = () => { const nm = _rcCutNames(x.cutWho); return `${nm ? nm + 'の' : ''}出勤の希望・固定を減らすか、公休数・有給を見直してください`; };
   if (skill && !x.need) {
     // 目標に届かない日のエラーの重さは、①の「ルールごとの強弱」の「スキル目標に不足」で決まる（v267 の直し: いつも「できれば」と書いていた）
     const lv = (typeof getRuleLevel === 'function') ? getRuleLevel('skill-short') : 'should';
-    why = lv === 'off' ? '最低ラインはありません。目標に届かなくてもエラーにはなりません'
-      : `最低ラインはありません。目標に届かない日は「${lv === 'must' ? '絶対' : 'できれば'}」のエラーになります`;
-  } else if (x.cut > 0) why = `希望・固定のとおりにすると、休み・有給を${capNum(x.cut)}日削って埋めることになります`;
-  else if (total && x.diff >= 0 && x.short.length) {
-    const ds = x.short.map(y => y.day + '日');
-    why = `月の合計では足りますが、${ds.slice(0, 3).join('・')}${ds.length > 3 ? ` ほか${ds.length - 3}日` : ''}は足りません`;
+    whys.push(lv === 'off' ? '最低ラインはありません。目標に届かなくてもエラーにはなりません'
+      : `最低ラインはありません。目標に届かない日は「${lv === 'must' ? '絶対' : 'できれば'}」のエラーになります`);
+  } else if (x.cut > 0) {
+    whys.push(total
+      ? `必要人数を超えて決まっている出勤があり、希望・固定のとおりにすると、休み・有給を${capNum(x.cut)}日削ることになります。${fixCut()}`
+      : `希望・固定のとおりにすると、休み・有給を${capNum(x.cut)}日削って埋めることになります。${fixCut()}`);
   }
-  return why ? `<span class="rc-why">${escapeHtml(why)}</span>` : '';
+  if (total && x.diff >= 0 && x.short.length) {
+    const ds = x.short.map(y => y.day + '日');
+    whys.push(`月の合計では足りますが、${ds.slice(0, 3).join('・')}${ds.length > 3 ? ` ほか${ds.length - 3}日` : ''}は足りません`);
+  }
+  return whys.map(w => `<span class="rc-why">${escapeHtml(w)}</span>`).join('');
 }
 /** まとめた行の名前: 責任者（「早責」・「遅責」）。まとめていない行: 「早」（早番） */
 function _rcRowLabel(r) {
@@ -468,7 +480,7 @@ function renderRoleCapacityHtml(pre) {
   const t = pre || roleCapacityTable();
   if (!t.groups.length) return '';
   const multi = t.groups.length > 1;
-  const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound() : { reasons: [] };
+  const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound({ noFix: true }) : { reasons: [] };
   // 「余り・不足」は行の名前のすぐ右（v267 の直し: スマホの幅では画面の外から始まり、横に送ると名前の横で数が半分切れていた）
   const head = '<thead><tr><th rowspan="2" scope="col">できること</th><th colspan="4" scope="colgroup" class="rc-unit">数は、1人が1日入る分＝1</th><th rowspan="2" scope="col">足りない日</th></tr>'
     + '<tr><th scope="col">余り・不足</th><th scope="col">必要</th><th scope="col">出られる</th><th scope="col">埋められる</th></tr></thead>';
@@ -506,16 +518,19 @@ function renderRoleCapacityHtml(pre) {
   const shortTot = t.groups.filter(g => g.total.diff < 0);
   const forced = shortTot.filter(g => g.total.forcedExcess > 0).map(g => `${multi ? g.label + '：' : ''}${capNum(g.total.forcedExcess)}コマ（${g.total.forcedText}）`);
   const rule = '①基本設定の「詳しい設定」の中の「必要人数のルール」';
+  // 休み・有給を削る日のある行（担当を増やしても、休みの希望を動かしても減らない。v267 の直し）
+  const anyCut = t.groups.some(g => g.total.cut > 0 || g.rows.some(r => r.cut > 0)) || t.skills.some(k => k.cut > 0);
   return `<div class="rc-wrap"><h4>できることごとの余り・不足（この月の見込み）</h4>${html}`
     + (roleShort ? `<p class="rc-todo"><b>不足の行があるときは</b>、次のどれかをします：その役を担当できる人を増やす（③スタッフ管理の「担当シフト」。スキルの行は「スキル」）・足りない日の休みの希望や有給を動かす（④希望休入力）・必要人数を見直す（②シフト種別、${rule}）。</p>` : '')
+    + (anyCut ? `<p class="rc-todo"><b>「休み・有給を◯日削って」と出ている行は</b>、その人の出勤の希望・固定が、その人の出られる日数（公休・有給の予定を引いた日数）より多い分です。担当を増やしても、休みの希望を動かしても減りません。行の名前の下に出ている人の出勤の希望・固定を減らす（④希望休入力。固定は⑥シフト表）か、その人の公休数・有給の日数を見直します（③スタッフ管理の「公休数（月の休み数）」「有給（月の有給数）」）。</p>` : '')
     + (shortTot.length ? `<p class="rc-todo"><b>全体の行が不足のときは</b>、人の数と日数の合計が足りません。担当を増やしたり、休みの希望を別の日へ動かしたりしても、この数は変わりません。必要人数を見直す（②シフト種別、${rule}）か、公休数・有給の日数を見直します（③スタッフ管理の「公休数（月の休み数）」「有給（月の有給数）」）。`
       + (forced.length ? `必要には、必要人数を超えて希望・固定で決まっている出勤（${escapeHtml(forced.join('、'))}）が入っています。その希望・固定を見直すと、不足が減ります。` : '') + '</p>' : '')
     + (comp.length ? `<p class="hint">6連勤を作らずに出せる日数で見ると、次の期間も足りません（作る前の見込みと同じ）：</p><ul class="sp-list rc-comp">${comp.slice(0, 8).map(x => `<li>${escapeHtml(x.text)}</li>`).join('')}${comp.length > 8 ? `<li class="hint">ほか${comp.length - 8}件</li>` : ''}</ul>` : '')
     + `<details class="rc-help"${_rcHelpOpen ? ' open' : ''}><summary class="calc-view-only">表の見方（数の意味と、不足が多く出るわけ）</summary>`
     + `<p class="hint">必要：その役に、この月に入る人の数の合計です（スキルは最低ラインの合計）。出られる：その役ができる人が、この月に出られる日数の合計です（公休の予定・有給・研修・休みの希望と、ほかの役や、その役が要らない日、必要人数より多く決まっている日の出勤を引き、その役が要る日に入れる日数までにしています）。スキルの行は、その時間帯に希望・固定で入っている保有者を、シフト表のエラーと同じく、必要人数を超えていても、研修や人数に数えないシフトでも数えます。目標だけの日も数えます。埋められる：その役が要る日に、できる人を1人1日1つずつ当てはめてみて、埋まる数です。1人が埋めるのは、その人の出られる日数までです（希望・固定で決まっている人は先に入れますが、その人の出られる日数の中でだけ数えます）。余り・不足：休み・有給を削らずに全部埋まれば「余り」（出られる − 必要。0より小さければ0）、埋まらない所があれば「不足」（必要 − 埋められる）です。</p>`
-    + `<p class="hint">不足が「必要 − 出られる」より多くなるのは、足りない枠が、だれも入れない日にあったり、出られる人が同じ日に重なっていたりするときです。たとえば、ある1日にしか入れない人が2人いても、その日に要るのが1人なら、入れるのは1人だけです。希望・固定で、その人の出られる日数より多く出勤が決まっているときも、超えた分は埋められるに数えず、不足に残します（予定どおり休みと有給を取らせると足りないため。シフト表の帯の「不足」と同じ考え方です）。その行の名前の下に、休み・有給を何日削ることになるかが出ます。</p>`
+    + `<p class="hint">不足が「必要 − 出られる」より多くなるのは、足りない枠が、だれも入れない日にあったり、出られる人が同じ日に重なっていたりするときです。たとえば、ある1日にしか入れない人が2人いても、その日に要るのが1人なら、入れるのは1人だけです。希望・固定で、その人の出られる日数より多く出勤が決まっているときも、超えた分は埋められるに数えず、不足に残します（予定どおり休みと有給を取らせると足りないため。シフト表の帯の「不足」と同じ考え方です）。その行の名前の下に、休み・有給を何日削ることになるかと、だれの希望・固定かが出ます。どの日を削る日とするかは、1人ずつ、決まった出勤を日付の早い順に出られる日数ぶんまで出勤できる日とし、残り（遅い日付）を削る日とします。上の行（全体の行も入れて）の削る日を足すと、その部門で削る日数の合計になります（どの役の枠も埋めない日は、全体の行に出します）。</p>`
     + `<p class="hint">全体の行は、だれが何をできるかを見ずに、人の数と日数の合計だけで比べます（AI診断レポートの「人手が◯人日 足りません」と同じ数え方）。足りない日があるときは「月の合計では足りますが、…は足りません」と添えます。</p>`
-    + `<p class="hint">足りない日：その日に出られる「できる人」が必要より少ない日です（「合わせて」は、まとめた役のどれにも1人ずつ入れきれない日、「枠」は、できる人はいても入れる枠が足りない日）。足りない日が「なし」でも、月全体で出られる日数が足りなければ不足になります。</p>`
+    + `<p class="hint">足りない日：その日に出られる「できる人」が必要より少ない日です（「合わせて」は、まとめた役のどれにも1人ずつ入れきれない日、「枠」は、できる人はいても入れる枠が足りない日）。足りない日が「なし」でも、月全体で出られる日数が足りないときや、休み・有給を削る日があるときは不足になります。</p>`
     + `<p class="rc-note">同じ人がいくつもの役をできるので、出られる日数は役どうしで取り合いになります。行ごとに見て足りていても、全部の役を同時に埋められるとは限りません。</p>`
     + '</details></div>';
 }
@@ -2611,7 +2626,7 @@ function _tryRequestChange(changes, lb0, reason) {
       AppState.requests[c.id] = AppState.requests[c.id] || {};
       if (c.to === '') delete AppState.requests[c.id][c.day]; else AppState.requests[c.id][c.day] = c.to;
     });
-    const lb = analyzeLowerBound();
+    const lb = analyzeLowerBound({ noFix: true });
     const gone = !lb.reasons.some(r => _reqKey(r) === _reqKey(reason));
     return gone && lb.minErrors < lb0.minErrors;
   } finally {
@@ -2676,7 +2691,7 @@ function requestFixOptions(reason, lb0) {
 }
 /** 希望だけで必ず🚨になるものの一覧（理由だけ。直し方の案はあとから1件ずつ足す） */
 function requestCertainMusts() {
-  const lb = analyzeLowerBound();
+  const lb = analyzeLowerBound({ noFix: true });
   return { lb, items: lb.reasons.filter(r => _reqIsMust(r.kind)).map(r => ({ reason: r, options: null })) };
 }
 let _reqAlertSeq = 0;
@@ -3391,12 +3406,20 @@ function _retargetSnapHistory(kinds, rec) {
 }
 const SNAP_KEPT_MSG = '余の解消・余の使い道で入れた変更は残しています。戻すときは「元に戻す」を押してください';
 /** 変えた所だけの履歴を積む（余の解消が実行されたとき）。組は写さない（上の _rebaseSnaps の注意） */
-function recordDeltaHistory(list) {
+function recordDeltaHistory(list, opts) {
   if (!list || !list.length) return;
-  _rebaseSnaps(list, 'redo');
-  _undoStack.push({ delta: list });
+  const noRebase = !!(opts && opts.noRebase);   // 開いている画面の「戻す」の控えには当てない（元に戻す・やり直すでも当てない）
+  if (!noRebase) _rebaseSnaps(list, 'redo');
+  _undoStack.push(noRebase ? { delta: list, noRebase } : { delta: list });
   if (_undoStack.length > 100) _undoStack.shift();
   _redoStack = []; _redoBeforeRecord = null;
+  updateHistoryButtons();
+}
+/** 画面の控えで丸ごと戻した変更の組を、元に戻す・やり直すの履歴から外す（戻したあとに ↩・↪ が何もしない・取り消した変更をもう一度入れる、にならないように） */
+function _dropHistoryDeltas(lists) {
+  if (!lists || !lists.size) return;
+  _undoStack = _undoStack.filter(st => !(st.delta && lists.has(st.delta)));
+  _redoStack = _redoStack.filter(st => !(st.delta && lists.has(st.delta)));
   updateHistoryButtons();
 }
 function _afterHistoryApply(touchedStaff) {
@@ -3481,7 +3504,7 @@ function undoShiftEdit() {
   const st = _undoStack.pop();
   if (st.delta) {                               // 変えた所だけを戻す
     _applyChangeList(st.delta, 'undo');
-    _rebaseSnaps(st.delta, 'undo');
+    if (!st.noRebase) _rebaseSnaps(st.delta, 'undo');
     _redoStack.push(st);
     _afterHistoryApply(st.delta.some(c => c[0] === 'paid'));
   } else if (st.gen) {                          // 生成する前の表へ戻す
@@ -3502,7 +3525,7 @@ function redoShiftEdit() {
   const st = _redoStack.pop();
   if (st.delta) {
     _applyChangeList(st.delta, 'redo');
-    _rebaseSnaps(st.delta, 'redo');
+    if (!st.noRebase) _rebaseSnaps(st.delta, 'redo');
     _undoStack.push(st);
     _afterHistoryApply(st.delta.some(c => c[0] === 'paid'));
   } else if (st.gen) {                          // 生成した表へ進める
@@ -6719,9 +6742,14 @@ function showSurplusPlanModal() {
 // 「確認しました」を押したかどうか（この画面を開いている間だけ覚える）
 let _nextStepAcked = false;
 
-// 指摘に付いている「ボタン1つで直せる操作」を実行する
-function applyNextAct(act) {
+// 指摘に付いている「ボタン1つで直せる操作」を実行する。変えた所だけを元に戻すの履歴に積む（v267 の直し: 積んでいなかったので
+// ↩ で戻せなかった）。順番に確認して生成するの中から押したとき（opts.inWizard）は、その画面の「戻す」の控えには当てない
+// （ページの「このページの変更を取り消す」で、これまでどおり戻せるように）。積んだ組は opts.onRecord に渡す
+// （その画面が控えで戻したら、履歴からも外すため）
+function applyNextAct(act, opts) {
   if (!act) return false;
+  const hb = (typeof captureChangeBase === 'function') ? captureChangeBase() : null;
+  let done = false;
   if (act.type === 'request') {
     // C6: 固定（🔒）のあるマスは、④の希望を書いても生成・検査は🔒を先に読むので何も直らない（B1）
     if (((AppState.fixedShifts || {})[act.staffId] || {})[act.day]) {
@@ -6731,21 +6759,26 @@ function applyNextAct(act) {
       return false;
     }
     AppState.requests[act.staffId] = AppState.requests[act.staffId] || {};
-    AppState.requests[act.staffId][act.day] = act.to;
-    return true;
-  }
-  if (act.type === 'dailyReq') {
+    // 希望を外すときは消す（空の文字を残すと、「希望休が1件も入っていない人」から外れるなど、入っている扱いになっていた）
+    if (act.to) AppState.requests[act.staffId][act.day] = act.to;
+    else delete AppState.requests[act.staffId][act.day];
+    done = true;
+  } else if (act.type === 'dailyReq') {
     AppState.dailyRequirements = AppState.dailyRequirements || {};
     AppState.dailyRequirements[act.key] = AppState.dailyRequirements[act.key] || {};
     AppState.dailyRequirements[act.key][act.day] = act.to;
-    return true;
-  }
-  if (act.type === 'dailyReqDelete') {
+    done = true;
+  } else if (act.type === 'dailyReqDelete') {
     const st = (AppState.dailyRequirements || {})[act.key];
     if (st) delete st[act.day];
-    return true;
+    done = true;
   }
-  return false;
+  if (done && hb && typeof changesSince === 'function') {
+    const list = changesSince(hb);
+    recordDeltaHistory(list, opts && opts.inWizard ? { noRebase: true } : null);
+    if (list && list.length && opts && opts.onRecord) opts.onRecord(list);
+  }
+  return done;
 }
 
 // いまの状態から「次の一手」を決める
@@ -6766,7 +6799,8 @@ function computeNextStep() {
   // ① ボタン1つで直せる問題は、作る前でも後でも最優先で出す
   const fixable = hard.find(r => r.act);
   if (fixable) {
-    return S('先に直すところがあります', fixable.text,
+    // スキルの枠は、なぜそのボタンで直るか（だれが何を持っていないか）を文の下に1回だけ添える（理由の文には直し方を入れていない）
+    return S('先に直すところがあります', fixable.text + (fixable.kind === 'skill-slot' && fixable.fix ? '\n' + fixable.fix : ''),
              { danger: true, act: fixable.act, btn: fixable.act.label,
                more: hard.length - 1,
                why: 'このままだと、どう並べても必ずエラーが残ります。' });
@@ -6907,10 +6941,11 @@ function showGenerateWizard() {
   const WZ_KINDS = ['requests', 'fixedShifts', 'dailyRequirements', 'dailyRequirementsCast', 'paid'];
   // 控えで丸ごと戻す。C12: 控えに当てた変更の履歴の組を戻したあとの値に付け替え、表があれば違反を数え直す。
   // 返り値: 余の解消・余の使い道の変更を残したか
-  const restore = (o, rec) => {
+  const restore = (o, rec, own) => {
     if (!o) return false;
     SNAP_KEYS.forEach(k => { AppState[k] = JSON.parse(JSON.stringify(o[k])); });
     const kept = _retargetSnapHistory(WZ_KINDS, rec);
+    _dropHistoryDeltas(own);   // この画面の直すボタン（applyNextAct）で積んだ組は、控えで戻したので履歴から外す
     if (AppState.shifts && Object.keys(AppState.shifts).length) AppState.violations = checkViolations(AppState.shifts);
     autoSave(); refreshAllUI();
     return kept;
@@ -6921,7 +6956,9 @@ function showGenerateWizard() {
   const openRec = _newSnapRec();
   let stepSnap = snap();            // いまのページに入った時点
   let stepRec = _newSnapRec();
-  const newStepSnap = () => { stepSnap = snap(); stepRec = _newSnapRec(); };
+  const openOwn = new Set();        // この画面の直すボタンで積んだ履歴の組（開いてから・いまのページに入ってから）
+  let stepOwn = new Set();
+  const newStepSnap = () => { stepSnap = snap(); stepRec = _newSnapRec(); stepOwn = new Set(); };
   const wzRebase = (list, dir) => {
     if (!modal.isConnected) { _snapRebasers.delete(wzRebase); return; }
     _rebaseSnapWith(list, dir, openSnap, WZ_KINDS, openRec);
@@ -7000,7 +7037,7 @@ function showGenerateWizard() {
       });
       if (diff.length) rowsOut.push(`<div style="padding:6px 10px;border-bottom:1px solid var(--border)"><b>${d}日(${wdOf(d)})</b> ${diff.join('')}</div>`);
     }
-    const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound() : null;
+    const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound({ noFix: true }) : null;
     const notes = (lb && lb.notes || []).map(n =>
       `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--accent) 10%, var(--surface))">
          ${uiIcon('info')} ${escapeHtml(n.text)}<div class="hint">${escapeHtml(n.fix || '')}</div></div>`).join('');
@@ -7061,7 +7098,8 @@ function showGenerateWizard() {
     const html = hard.map((r, i) => `
       <div style="padding:10px 12px;border:1px solid color-mix(in srgb, var(--danger) 35%, transparent);border-radius:8px;margin:8px 0">
         <div>${escapeHtml(r.text)}</div>
-        ${r.act ? `<button class="btn btn-primary" data-wzfix="${i}" style="margin-top:8px">${escapeHtml(r.act.label)}</button>`
+        ${r.act ? (r.kind === 'skill-slot' && r.fix ? `<div class="hint" style="margin-top:4px">${escapeHtml(r.fix)}</div>` : '')
+                  + `<button class="btn btn-primary" data-wzfix="${i}" style="margin-top:8px">${escapeHtml(r.act.label)}</button>`
                 : `<div class="hint" style="margin-top:4px">${escapeHtml(r.fix || '手で直してください')}</div>`}
       </div>`).join('');
     return { html: `<p>${uiIcon('must')} <b>直すところが ${hard.length}件 あります。</b>
@@ -7087,7 +7125,7 @@ function showGenerateWizard() {
   // 「入れたつもり」を潰すのが目的なので、全部チェックしないと生成へ進めない。
   let checkState = {};
   const body5 = () => {
-    const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound() : null;
+    const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound({ noFix: true }) : null;
     const floor = lb ? lb.minErrors : 0;
     const hard = (lb && lb.reasons) || [];
     const d = days();
@@ -7208,14 +7246,14 @@ function showGenerateWizard() {
     const $ = (id) => modal.querySelector('#' + id);
     if ($('wzPrev')) $('wzPrev').addEventListener('click', () => {
       // このページでやったことは取り消してから戻る
-      if (!same(stepSnap, snap())) restoredMsg('このページでの変更を取り消しました', restore(stepSnap, stepRec));
+      if (!same(stepSnap, snap())) restoredMsg('このページでの変更を取り消しました', restore(stepSnap, stepRec, stepOwn));
       step--; newStepSnap(); render();
     });
     if ($('wzUndo')) $('wzUndo').addEventListener('click', () => {
-      restoredMsg('このページでの変更を取り消しました', restore(stepSnap, stepRec)); render();
+      restoredMsg('このページでの変更を取り消しました', restore(stepSnap, stepRec, stepOwn)); render();
     });
     if ($('wzReset')) $('wzReset').addEventListener('click', () => {
-      const kept = restore(openSnap, openRec); newStepSnap();
+      const kept = restore(openSnap, openRec, openOwn); newStepSnap();
       restoredMsg('ウィザードを開く前の状態に戻しました', kept); render();
     });
     if ($('wzClose')) $('wzClose').addEventListener('click', () => {
@@ -7237,7 +7275,7 @@ function showGenerateWizard() {
     }));
     modal.querySelectorAll('[data-wzfix]').forEach(btn => btn.addEventListener('click', () => {
       const r = (b.fixes || [])[parseInt(btn.dataset.wzfix)];
-      if (r && r.act && applyNextAct(r.act)) { autoSave(); refreshAllUI(); toast('直しました', 'success'); render(); }
+      if (r && r.act && applyNextAct(r.act, { inWizard: true, onRecord: (l) => { stepOwn.add(l); openOwn.add(l); } })) { autoSave(); refreshAllUI(); toast('直しました', 'success'); render(); }
     }));
     if (b.after) b.after();
   };
