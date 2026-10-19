@@ -8,7 +8,7 @@
 // アプリを、作り物のデータ（tools/suite/cases。本物のデータは使わない）でいろいろな状態にして、
 // 画面に出た文字を集め、手引きの名前と突き合わせる。状態：6つの画面、開いた小窓（実現性チェック・
 // エラー解消プラン・余の使い道・見込み・順番に確認して生成する・余の解消・途中から作り直す・まとめて固定・
-// 自動修正の案・シフト編集・人手が足りない理由の枠・余り・不足の内訳）、計算中、確認の文、知らせ、月の切り替え、1分生成のあとの知らせ。
+// 自動修正の案・シフト編集・人手が足りない理由の枠・余り・不足の内訳と表の一言）、計算中、確認の文、知らせ、月の切り替え、1分生成のあとの知らせ。
 // 実際に出せなかった名前は、JS の文字列と CSS の content でも探し、そうと分かるように出す。
 //
 // 使い方（リポジトリの一番上で）:
@@ -132,6 +132,20 @@ const norm = s => String(s || '').replace(/\s+/g, '');
                             await p.evaluate(() => { (AppState.skills || []).forEach(sk => { sk.min = 9; sk.req = 9; }); AppState.violations = checkViolations(AppState.shifts); renderResultTable(); });
                             await p.click('[data-band-open="short"], [data-band-open="sur"]'); await p.waitForTimeout(800);
                             const t = await p.$('#shpBody [data-rc-toggle]'); if (t) { await t.click(); await p.waitForTimeout(200); } },
+    // 余り・不足の表の一言（v267）: この状態の中だけ（作り物のデータの写し）、7日はほとんどの人を休みの希望にし（全体の行の
+    // 「月の合計では足りますが…」）、出られる日数0の人を、ふだん0人で3日だけ1人のシフトに決める（「希望・固定で、休み・有給を削った…」）。
+    // 表の見方の折りたたみも開く
+    bandnote:  async p => { await p.click('.tab[data-tab="result"]');
+                            await p.evaluate(() => {
+                              const days = getDaysInMonth(AppState.settings.targetMonth);
+                              AppState.staff.forEach((s, i) => { if (i >= 2) { AppState.requests[s.id] = AppState.requests[s.id] || {}; AppState.requests[s.id][7] = '休'; } });
+                              AppState.shiftTypes.push({ key: 'SH9', sym: '夜', label: '夜間', color: '#e2e8f0', category: 'B', countForStaff: true, isTraining: false, isNight: false, workHours: 8 });
+                              AppState.roleRequirements.SH9 = 0; AppState.dailyRequirements = AppState.dailyRequirements || {}; AppState.dailyRequirements.SH9 = { 3: 1 };
+                              const s = AppState.staff[0]; s.allowedShifts = (s.allowedShifts || []).concat('SH9'); s.maxOff = days;
+                              AppState.requests[s.id] = AppState.requests[s.id] || {}; AppState.requests[s.id][3] = 'SH9';
+                              AppState.violations = checkViolations(AppState.shifts); renderResultTable(); });
+                            await p.click('[data-band-open="short"], [data-band-open="sur"]'); await p.waitForTimeout(800);
+                            const h = await p.$('#shpBody details.rc-help > summary'); if (h) { await h.click(); await p.waitForTimeout(200); } },
     shortwhy:  async p => { await p.click('.tab[data-tab="result"]');
                             const bt = await p.$('#shortageNote:not([hidden]) .sn-why') || await p.$('.short-why');
                             if (bt) { await bt.click(); await p.waitForTimeout(800); } },

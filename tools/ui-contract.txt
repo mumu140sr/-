@@ -247,6 +247,7 @@ class	nav-link	HTML	1	ui.v6.js
 class	open	JS	0	app.v6.js,ui-shell.v6.js
 class	range-sel	JS	0	ui.v6.js
 class	range-select-mode	JS	0	ui.v6.js
+class	rc-help	JS	0	ui.v6.js
 class	req-alert	JS	0	ui.v6.js
 class	resizable-cols	JS	0	ui.v6.js
 class	result-table	HTML	1	ui.v6.js
