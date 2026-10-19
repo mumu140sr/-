@@ -478,7 +478,7 @@ function renderRoleCapacityHtml(pre) {
   const comp = (lb.reasons || []).filter(x => x.kind === 'comp-days');
   return `<div class="rc-wrap"><h4>できることごとの余り・不足（この月の見込み）</h4>${html}`
     + `<p class="rc-note">同じ人がいくつもの役をできるので、出られるコマは役どうしで取り合いになります。余りがプラスでも、足りない日に出ている日は足りません。</p>`
-    + `<p class="hint">必要は、その月の必要人数の合計です（スキルは最低ラインの合計）。出られるは、その役ができる人の出られる日数の合計で、公休の予定・有給・研修・休みの希望・ほかの役に決まっている日を引いています。足りない日は、その日に出られる「できる人」が必要より少ない日です（「合わせて」は、まとめた役を合わせると足りない日、「枠」は、できる人はいても入れる枠が足りない日）。</p>`
+    + `<p class="hint">必要は、その月の必要人数の合計です（スキルは最低ラインの合計）。出られるは、その役ができる人ごとに、出られる日数（公休の予定・有給・研修・休みの希望・ほかの役に決まっている日を引いた日数）と、その役が必要な日のうち入れる日の数の、小さいほうを足したものです。足りない日は、その日に出られる「できる人」が必要より少ない日です（「合わせて」は、まとめた役の枠に、1人1つずつ入れていくと埋まらない日、「枠」は、できる人はいても入れる枠が足りない日）。</p>`
     + (comp.length ? `<p class="hint">6連勤を作らずに出せる日数で見ると、次の期間も足りません（作る前の見込みと同じ）：</p><ul class="sp-list rc-comp">${comp.slice(0, 8).map(x => `<li>${escapeHtml(x.text)}</li>`).join('')}${comp.length > 8 ? `<li class="hint">ほか${comp.length - 8}件</li>` : ''}</ul>` : '')
     + '</div>';
 }
@@ -497,8 +497,15 @@ function bandBreakdown(pre) {
     if (!roles.has(id)) roles.set(id, { label: (x.cast ? 'キャストの' : '') + (nm || shiftNameText(x.role)), combined: !!nm, n: 0, days: [] });
     const r = roles.get(id); r.n += x.n; r.days.push(x);
   });
+  // 同じ日の役（まとめた行の早責・遅責など）は1つにまとめ、「ほか◯日」は日の数で数える（v267 の直し。件の数を「日」と書いていた）
   const underList = [...roles.values()].sort((a, b) => b.n - a.n).map(r => {
-    const ds = r.days.sort((a, b) => a.day - b.day).map(x => `${x.day}日${r.combined ? 'の「' + shiftSym(x.role) + '」' : ''}${x.n > 1 ? `（${x.n}人）` : ''}`);
+    const byDay = new Map();
+    r.days.forEach(x => { if (!byDay.has(x.day)) byDay.set(x.day, []); byDay.get(x.day).push(x); });
+    const ds = [...byDay.keys()].sort((a, b) => a - b).map(d => {
+      const xs = byDay.get(d);
+      return r.combined ? `${d}日の${xs.map(x => `「${shiftSym(x.role)}」${x.n > 1 ? `（${x.n}人）` : ''}`).join('と')}`
+        : `${d}日${xs[0].n > 1 ? `（${xs[0].n}人）` : ''}`;
+    });
     return `${r.label} ${r.n}コマ（${ds.slice(0, 8).join('・')}${ds.length > 8 ? ` ほか${ds.length - 8}日` : ''}）`;
   });
   // スキル（不足の数には入れない）

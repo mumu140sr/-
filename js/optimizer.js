@@ -5880,6 +5880,27 @@ function roleRowName(k) {
   const r = lab.replace(/早番|遅番/g, '').replace(/[（(]\s*[）)]/g, '').trim();
   return r || null;
 }
+/**
+ * その日の役の枠（[役, 人数]）に、入れる人（who。1人は1日に1つの役）を何人まで割り当てられるか（v267 の直し）。
+ * 「合わせて足りない日」の判定に使う。人数だけで比べると、ある役しかできない人が、ほかの役の枠を埋めたように数えていた
+ * （責任者の行に、責任者ではない「遅番責任者」のシフトがまとまった月など）。小さな二部グラフの最大マッチング。
+ */
+function _fillSlots(who, slotsSpec) {
+  const slots = [];
+  slotsSpec.forEach(([k, n]) => { for (let i = 0; i < n; i++) slots.push(k); });
+  const owner = new Array(slots.length).fill(-1);
+  const tryAssign = (p, seen) => {
+    for (let j = 0; j < slots.length; j++) {
+      if (seen[j] || !who[p].keys.includes(slots[j])) continue;
+      seen[j] = true;
+      if (owner[j] < 0 || tryAssign(owner[j], seen)) { owner[j] = p; return true; }
+    }
+    return false;
+  };
+  let n = 0;
+  for (let p = 0; p < who.length && n < slots.length; p++) if (tryAssign(p, new Array(slots.length).fill(false))) n++;
+  return n;
+}
 function roleCapacityTable() {
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const res = { days, groups: [], skills: [] };
@@ -5888,22 +5909,14 @@ function roleCapacityTable() {
   const groups = getDepartmentGroups(AppState.staff);
   const caps = {};
   AppState.staff.forEach(s => { caps[s.id] = staffCapacity(s, days); });
-  // その人がその月に keys のどれかとして出られる日数（1人ずつの出られる日数から、ほかの役に決まっている日と、
-  // その日に要るスキルを持たずに入れない日を引く。担当外でも、keys に決まっている日は数える）
-  const availFor = (s, keys) => {
+  // その人の出られる日数のうち、keys に使える分（1人ずつの出られる日数から、ほかの役に決まっている日を引く）。
+  // 表の「出られる」は、これと「その行のどれかが必要で、その人が入れる日の数」（canDays）の小さいほう（v267 の直し）。
+  // 前は、必要の無い日（ふだん0人のシフトの、人数の入っていない日）まで数えていて、まとめた行で本当の不足を隠していた。
+  // また、日ごとに要るスキルで入れない日を、予定の公休を引いた数からさらに引いていた（休みを2回引いていた）。
+  const personAvail = (s, keys) => {
     const c = caps[s.id];
-    const can = (s.allowedShifts || []).filter(k => keys.includes(k));
-    if (!can.length) {
-      let n = 0; Object.keys(c.fixedWork).forEach(d => { if (keys.includes(c.fixedWork[d])) n++; });
-      return n;
-    }
     let n = c.avail;
-    for (let d = 1; d <= days; d++) {
-      const f = c.fixedWork[d];
-      if (f) { if (!keys.includes(f)) n--; continue; }
-      if (staffDayState(s, d) !== 'free') continue;
-      if (!can.some(k => hasDaySkill(s, k, d))) n--;
-    }
+    Object.keys(c.fixedWork).forEach(d => { if (!keys.includes(c.fixedWork[d])) n--; });
     return Math.max(0, n);
   };
   groups.forEach(g => {
@@ -5913,18 +5926,24 @@ function roleCapacityTable() {
     const statOf = (keys) => {
       let need = 0;
       const short = [];   // { day, keys: 足りない役, union: 合わせると足りない }
+      const canDays = {};   // 人 → その行のどれかが必要な日のうち、入れる日の数
       for (let d = 1; d <= days; d++) {
         const nk = keys.map(k => dayReq(k, d));
         const nAll = nk.reduce((a, b) => a + b, 0);
         need += nAll;
         if (!nAll) continue;
+        const needK = keys.filter((k, i) => nk[i] > 0);   // その日に必要なシフトだけ
         const ks = keys.filter((k, i) => nk[i] > 0 && av[d].cap[k] < nk[i]);   // 見込みの「役割の不足」と同じ日
-        const can = av[d].who.filter(w => w.keys.some(k => keys.includes(k))).length;   // 1人は1日に1つの役
+        const ws = av[d].who.filter(w => w.keys.some(k => needK.includes(k)));   // 1人は1日に1つの役
+        ws.forEach(w => { canDays[w.s.id] = (canDays[w.s.id] || 0) + 1; });
         if (ks.length) short.push({ day: d, keys: ks, union: false });
-        else if (keys.length > 1 && can < nAll) short.push({ day: d, keys: [], union: true });
+        else if (keys.length > 1 && _fillSlots(ws, needK.map(k => [k, dayReq(k, d)])) < nAll) short.push({ day: d, keys: [], union: true });
       }
       let avail = 0, people = 0;
-      g.staff.forEach(s => { const n = availFor(s, keys); if ((s.allowedShifts || []).some(k => keys.includes(k))) people++; avail += n; });
+      g.staff.forEach(s => {
+        if ((s.allowedShifts || []).some(k => keys.includes(k))) people++;
+        if (canDays[s.id]) avail += Math.min(personAvail(s, keys), canDays[s.id]);
+      });
       return { keys, need, avail, diff: avail - need, people, short };
     };
     const keys = shiftKeys.filter(k => { for (let d = 1; d <= days; d++) if (dayReq(k, d) > 0) return true; return false; });
@@ -5965,11 +5984,21 @@ function roleCapacityTable() {
       if (bandKeys.length) { const r = daySkillSlotMax(groups, sk, bandKeys, d); if (r.max < min) short.push({ day: d, have: r.max, min, slot: true }); }
     }
     if (!minSum && !needSum) return;
+    // 出られる: 保有者ごとに、出られる日数（ほかの時間帯に決まっている日を引く）と、スキルの要る日のうちその時間帯に入れる日の数の小さいほう
     let avail = 0, people = 0;
     AppState.staff.forEach(s => {
       if (!(s.skills || []).includes(sk.name)) return;
       if ((s.allowedShifts || []).some(k => bandKeys.includes(k))) people++;
-      avail += availFor(s, bandKeys);
+      let cd = 0;
+      for (let d = 1; d <= days; d++) {
+        const { need, min } = getDaySkillReq(sk, d);
+        if (!(min > 0) && !(need > 0)) continue;
+        const st = staffDayState(s, d);
+        if (st === 'off' || st === 'training') continue;
+        const ks = (st.indexOf('fixed:') === 0) ? [st.slice(6)] : (s.allowedShifts || []);
+        if (ks.some(k => bandKeys.includes(k))) cd++;
+      }
+      if (cd) avail += Math.min(personAvail(s, bandKeys), cd);
     });
     res.skills.push({ name: sk.name, band: early ? 'early' : 'late', need: minSum, target: needSum, avail, diff: avail - minSum, people, short });
   });
