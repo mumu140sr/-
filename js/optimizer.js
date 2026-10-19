@@ -5872,6 +5872,9 @@ function analyzeLowerBound() {
  * 数え方は作る前の見込みと同じ部品を使う: 1人ずつの出られる日数＝staffCapacity（全員を足すと calcCapacity の avail）、
  * その日入れる人＝dayRoleAvail（見込みの「役割の不足」と同じ）、スキルの保有者＝daySkillHave・daySkillSlotMax。
  * 6連勤を避けると出られない日（見込みの区間の数え方）は、ここでは数えない。
+ * 行の余り・不足は、人を日と枠に割り当てて埋められる数（fill。_maxFlow）で決める: 埋まらない枠があれば 不足＝必要−fill、
+ * 全部埋まれば 余り＝出られる−必要。出られるの合計から引くだけでは、ある日しか入れない人を何日ぶんにも数えたり、
+ * だれも入れない日の枠を、ほかの日に余っている人で埋めたように数えたりした（v267 の直し）。全体の行は calcCapacity のまま。
  */
 function roleRowName(k) {
   const t = (typeof getShiftType === 'function') ? getShiftType(k) : null;
@@ -5901,6 +5904,46 @@ function _fillSlots(who, slotsSpec) {
   for (let p = 0; p < who.length && n < slots.length; p++) if (tryAssign(p, new Array(slots.length).fill(false))) n++;
   return n;
 }
+/**
+ * 最大流（Dinic）。edges は [from, to, cap]。できることごとの表で、人（出られる日数）→ 人×日（1日1つ）→ 日×枠（必要人数）に
+ * 何コマ流せるか（＝埋められる枠の数）を数える（v267 の直し）。頂点は多くても 30人×31日 ほど。
+ */
+function _maxFlow(n, edges, s, t) {
+  const head = new Array(n).fill(-1), to = [], cap = [], nxt = [];
+  const add = (u, v, c) => {
+    to.push(v); cap.push(c); nxt.push(head[u]); head[u] = to.length - 1;
+    to.push(u); cap.push(0); nxt.push(head[v]); head[v] = to.length - 1;
+  };
+  edges.forEach(([u, v, c]) => { if (c > 0) add(u, v, c); });
+  const level = new Array(n), it = new Array(n);
+  const bfs = () => {
+    level.fill(-1); level[s] = 0;
+    const q = [s];
+    for (let i = 0; i < q.length; i++) {
+      const u = q[i];
+      for (let e = head[u]; e >= 0; e = nxt[e]) if (cap[e] > 0 && level[to[e]] < 0) { level[to[e]] = level[u] + 1; q.push(to[e]); }
+    }
+    return level[t] >= 0;
+  };
+  const dfs = (u, f) => {
+    if (u === t) return f;
+    for (; it[u] >= 0; it[u] = nxt[it[u]]) {
+      const e = it[u], v = to[e];
+      if (cap[e] > 0 && level[v] === level[u] + 1) {
+        const d = dfs(v, Math.min(f, cap[e]));
+        if (d > 0) { cap[e] -= d; cap[e ^ 1] += d; return d; }
+      }
+    }
+    return 0;
+  };
+  let flow = 0;
+  while (bfs()) {
+    for (let i = 0; i < n; i++) it[i] = head[i];
+    let f;
+    while ((f = dfs(s, Infinity)) > 0) flow += f;
+  }
+  return flow;
+}
 function roleCapacityTable() {
   const days = getDaysInMonth(AppState.settings.targetMonth);
   const res = { days, groups: [], skills: [] };
@@ -5913,20 +5956,27 @@ function roleCapacityTable() {
   // 表の「出られる」は、これと「その行のどれかが必要で、その人が入れる日の数」（canDays）の小さいほう（v267 の直し）。
   // 前は、必要の無い日（ふだん0人のシフトの、人数の入っていない日）まで数えていて、まとめた行で本当の不足を隠していた。
   // また、日ごとに要るスキルで入れない日を、予定の公休を引いた数からさらに引いていた（休みを2回引いていた）。
-  const personAvail = (s, keys) => {
+  // used(k, d): その日のそのシフトが、この行の必要に役立つか。行の外のシフトと、必要人数0の日のこの行のシフトに決まっている日は
+  // 出勤日を使ってしまうので引く（v267 の直し。必要0の日に希望・🔒で入っている日を引いていなかった）。
+  const personAvail = (s, used) => {
     const c = caps[s.id];
     let n = c.avail;
-    Object.keys(c.fixedWork).forEach(d => { if (!keys.includes(c.fixedWork[d])) n--; });
+    Object.keys(c.fixedWork).forEach(d => { if (!used(c.fixedWork[d], +d)) n--; });
     return Math.max(0, n);
   };
+  // 最大流で枠に割り当てるときの、空いている日に出られる日数（決まっている出勤は先に枠へ入れるので、全部引く）
+  const freeAvail = (s) => { const c = caps[s.id]; return Math.max(0, c.avail - Object.keys(c.fixedWork).length); };
   groups.forEach(g => {
     const dayReq = (k, d) => { const n = Math.ceil(Number(getDayReq(g.reqs, g.dailyReqs || {}, k, d))); return Number.isFinite(n) && n > 0 ? n : 0; };
     const av = [null];
     for (let d = 1; d <= days; d++) av[d] = dayRoleAvail(g, d, shiftKeys);
     const statOf = (keys) => {
-      let need = 0;
+      let need = 0, prefill = 0;
       const short = [];   // { day, keys: 足りない役, union: 合わせると足りない }
       const canDays = {};   // 人 → その行のどれかが必要な日のうち、入れる日の数
+      // 最大流: 源 → 人（空いている日に出られる日数）→ 人×日（1日1つ）→ 日×シフトの枠（必要人数から、決まって入っている人を引いた数）→ 終
+      const pIdx = new Map(), edges = [];
+      let nNode = 2;
       for (let d = 1; d <= days; d++) {
         const nk = keys.map(k => dayReq(k, d));
         const nAll = nk.reduce((a, b) => a + b, 0);
@@ -5938,13 +5988,30 @@ function roleCapacityTable() {
         ws.forEach(w => { canDays[w.s.id] = (canDays[w.s.id] || 0) + 1; });
         if (ks.length) short.push({ day: d, keys: ks, union: false });
         else if (keys.length > 1 && _fillSlots(ws, needK.map(k => [k, dayReq(k, d)])) < nAll) short.push({ day: d, keys: [], union: true });
+        const slot = {};
+        needK.forEach(k => {
+          const f = Math.min(av[d].fixedIn[k], dayReq(k, d));
+          prefill += f;
+          if (dayReq(k, d) > f) { slot[k] = nNode++; edges.push([slot[k], 1, dayReq(k, d) - f]); }
+        });
+        ws.forEach(w => {
+          if (w.fixed) return;
+          const to = w.keys.filter(k => slot[k] != null);
+          if (!to.length) return;
+          if (!pIdx.has(w.s.id)) { pIdx.set(w.s.id, nNode); edges.push([0, nNode++, freeAvail(w.s)]); }
+          const pd = nNode++;
+          edges.push([pIdx.get(w.s.id), pd, 1]);
+          to.forEach(k => edges.push([pd, slot[k], 1]));
+        });
       }
+      const fill = prefill + (edges.length ? _maxFlow(nNode, edges, 0, 1) : 0);
+      const used = (k, d) => keys.includes(k) && dayReq(k, d) > 0;
       let avail = 0, people = 0;
       g.staff.forEach(s => {
         if ((s.allowedShifts || []).some(k => keys.includes(k))) people++;
-        if (canDays[s.id]) avail += Math.min(personAvail(s, keys), canDays[s.id]);
+        if (canDays[s.id]) avail += Math.min(personAvail(s, used), canDays[s.id]);
       });
-      return { keys, need, avail, diff: avail - need, people, short };
+      return { keys, need, avail, fill, diff: fill < need ? fill - need : avail - need, people, short };
     };
     const keys = shiftKeys.filter(k => { for (let d = 1; d <= days; d++) if (dayReq(k, d) > 0) return true; return false; });
     const rows = [], byName = {};
@@ -5984,23 +6051,50 @@ function roleCapacityTable() {
       if (bandKeys.length) { const r = daySkillSlotMax(groups, sk, bandKeys, d); if (r.max < min) short.push({ day: d, have: r.max, min, slot: true }); }
     }
     if (!minSum && !needSum) return;
-    // 出られる: 保有者ごとに、出られる日数（ほかの時間帯に決まっている日を引く）と、スキルの要る日のうちその時間帯に入れる日の数の小さいほう
+    // 出られる: 保有者ごとに、出られる日数（ほかの時間帯に決まっている日と、スキルの要らない日に決まっている日を引く）と、
+    // スキルの要る日のうちその時間帯に入れる日の数の小さいほう
+    const skDay = d => { const { need, min } = getDaySkillReq(sk, d); return min > 0 || need > 0; };
+    const used = (k, d) => bandKeys.includes(k) && skDay(d);
     let avail = 0, people = 0;
+    // 埋められる数（最大流）: 源 → 保有者（空いている日に出られる日数）→ 日（最低ラインの人数。枠に置ける人数まで。
+    // その時間帯に決まって入っている保有者を先に引く）→ 終
+    const dayNode = {}, dayRem = {}, pIdx = new Map(), edges = [];
+    let nNode = 2, prefill = 0;
+    for (let d = 1; d <= days; d++) {
+      const { min } = getDaySkillReq(sk, d);
+      if (!(min > 0)) continue;
+      const cap = bandKeys.length ? Math.min(min, daySkillSlotMax(groups, sk, bandKeys, d).max) : 0;
+      let fixedHolders = 0;
+      AppState.staff.forEach(s => {
+        if (!(s.skills || []).includes(sk.name)) return;
+        const st = staffDayState(s, d);
+        if (st.indexOf('fixed:') === 0 && bandKeys.includes(st.slice(6))) fixedHolders++;
+      });
+      const f = Math.min(fixedHolders, cap);
+      prefill += f;
+      if (cap > f) { dayNode[d] = nNode++; dayRem[d] = cap - f; edges.push([dayNode[d], 1, cap - f]); }
+    }
     AppState.staff.forEach(s => {
       if (!(s.skills || []).includes(sk.name)) return;
       if ((s.allowedShifts || []).some(k => bandKeys.includes(k))) people++;
       let cd = 0;
       for (let d = 1; d <= days; d++) {
-        const { need, min } = getDaySkillReq(sk, d);
-        if (!(min > 0) && !(need > 0)) continue;
+        if (!skDay(d)) continue;
         const st = staffDayState(s, d);
         if (st === 'off' || st === 'training') continue;
         const ks = (st.indexOf('fixed:') === 0) ? [st.slice(6)] : (s.allowedShifts || []);
-        if (ks.some(k => bandKeys.includes(k))) cd++;
+        if (ks.some(k => bandKeys.includes(k))) {
+          cd++;
+          if (st === 'free' && dayNode[d] != null) {
+            if (!pIdx.has(s.id)) { pIdx.set(s.id, nNode); edges.push([0, nNode++, freeAvail(s)]); }
+            edges.push([pIdx.get(s.id), dayNode[d], 1]);
+          }
+        }
       }
-      if (cd) avail += Math.min(personAvail(s, bandKeys), cd);
+      if (cd) avail += Math.min(personAvail(s, used), cd);
     });
-    res.skills.push({ name: sk.name, band: early ? 'early' : 'late', need: minSum, target: needSum, avail, diff: avail - minSum, people, short });
+    const fill = prefill + (edges.length ? _maxFlow(nNode, edges, 0, 1) : 0);
+    res.skills.push({ name: sk.name, band: early ? 'early' : 'late', need: minSum, target: needSum, avail, fill, diff: fill < minSum ? fill - minSum : avail - minSum, people, short });
   });
   return res;
 }
