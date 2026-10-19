@@ -134,6 +134,7 @@ const norm = s => String(s || '').replace(/\s+/g, '');
                             const t = await p.$('#shpBody [data-rc-toggle]'); if (t) { await t.click(); await p.waitForTimeout(200); } },
     // 余り・不足の表の一言（v267）: この状態の中だけ（作り物のデータの写し）、7日はほとんどの人を休みの希望にし（全体の行の
     // 「月の合計では足りますが…」）、出られる日数0の人を、ふだん0人で3日だけ1人のシフトに決める（「希望・固定で、休み・有給を削った…」）。
+    // 目標だけのスキルを足す（「最低ラインはありません…」）。
     // 表の見方の折りたたみも開く
     bandnote:  async p => { await p.click('.tab[data-tab="result"]');
                             await p.evaluate(() => {
@@ -143,6 +144,7 @@ const norm = s => String(s || '').replace(/\s+/g, '');
                               AppState.roleRequirements.SH9 = 0; AppState.dailyRequirements = AppState.dailyRequirements || {}; AppState.dailyRequirements.SH9 = { 3: 1 };
                               const s = AppState.staff[0]; s.allowedShifts = (s.allowedShifts || []).concat('SH9'); s.maxOff = days;
                               AppState.requests[s.id] = AppState.requests[s.id] || {}; AppState.requests[s.id][3] = 'SH9';
+                              AppState.skills.push({ name: '目標だけ', target: 'early', req: 1, min: 0 });   // 最低ラインの無いスキルの行の一言
                               AppState.violations = checkViolations(AppState.shifts); renderResultTable(); });
                             await p.click('[data-band-open="short"], [data-band-open="sur"]'); await p.waitForTimeout(800);
                             const h = await p.$('#shpBody details.rc-help > summary'); if (h) { await h.click(); await p.waitForTimeout(200); } },

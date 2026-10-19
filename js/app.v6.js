@@ -1313,29 +1313,24 @@ function setupGeneratePanel() {
 
 /**
  * 生成後の案内ポップアップ。
- *  - コマ不足（必要コマ合計 > 出せるコマ合計、または人員不足の違反あり）→ 不足の案内
+ *  - コマ不足（月の合計で必要コマ > 出せるコマ（calcCapacity）、または人員不足の違反あり）→ 不足の案内
  *  - 人員余り（「余」がある）→ 余りの案内
  * を1つのポップアップで表示する。
  */
 function showSurplusPopup() {
   if (!AppState.generated) return;
   const days   = getDaysInMonth(AppState.settings.targetMonth);
-  const groups = getDepartmentGroups();
+  const groups = getDepartmentGroups(AppState.staff);
 
-  // 出せるコマ合計（各人の 月日数 − 公休 − 有給）と 必要コマ合計（定数×日）
-  let availableWork = 0;
-  AppState.staff.forEach(s => {
-    availableWork += Math.max(0, days - (s.maxOff || 0) - (s.paidLeave || 0));
-  });
-  const workKeys = AppState.shiftTypes.filter(t => t.countForStaff && !t.isTraining).map(t => t.key);
-  let requiredWork = 0;
+  // 月の合計で見た 必要コマ と 出せるコマ。⑤の表の「全体」の行・AI診断レポートと同じ数え方（calcCapacity。v267 の直し:
+  // 各人の 月日数 − 公休 − 有給 で数えていて、同じ画面に違う数が出ていた）。部門ごとの不足を足す
+  let availableWork = 0, requiredWork = 0, shortageComa = 0;
+  const capParts = [];
   groups.forEach(g => {
-    workKeys.forEach(key => {
-      if (!(g.reqs[key] > 0)) return;
-      for (let d = 1; d <= days; d++) requiredWork += getDayReq(g.reqs, g.dailyReqs || {}, key, d);
-    });
+    const cc = calcCapacity(g, days);
+    availableWork += cc.avail; requiredWork += cc.required; shortageComa += Math.max(0, -cc.surplus);
+    capParts.push(`${g.label}：必要 ${cc.required}・出せる ${cc.avail}`);
   });
-  const shortageComa = requiredWork - availableWork; // 正なら不足
 
   // 余りコマ（公休が目標より多い分 ＋ 手動「余」）
   const surplusItems = [];
@@ -1470,11 +1465,12 @@ function showSurplusPopup() {
       .filter(Boolean);
 
     title = shortageComa > 0
-      ? `コマ数が ${shortageComa}コマ 足りません`
+      ? `月の合計で、コマ数が ${shortageComa}コマ 足りません`
       : `人手が足りない日があります`;
     body = `${causeHtml}
-      <p>必要コマ合計 <b>${requiredWork}</b> に対して、出せるコマ合計は <b>${availableWork}</b> です。
-      ${shortageComa > 0 ? `<b style="color:var(--lv-must)">${shortageComa}コマ不足</b>しています。` : '合計は足りていますが、特定の日・シフトで埋められていません。'}</p>
+      <p>月の合計で見ると、必要なコマ数 <b>${requiredWork}</b> に対して、出せるコマ数は <b>${availableWork}</b> です${groups.length > 1 ? `（${escapeHtml(capParts.join('、'))}）` : ''}。
+      ${shortageComa > 0 ? `<b style="color:var(--lv-must)">${shortageComa}コマ不足</b>しています。` : '月の合計は足りていますが、特定の日・シフトで埋められていません。'}
+      数え方は、⑤「実現性チェック（生成前）」の表の「全体」の行と同じです。シフト表の帯の「不足」は、いまの表で実際に足りないコマの数なので、この数とは違うことがあります。</p>
       ${shortDays ? `<div style="margin:8px 0"><b>埋まっていない主な箇所：</b><ul style="margin:4px 0;padding-left:20px;line-height:1.7">${shortDays}</ul></div>` : ''}
       ${offShort.length ? `<p>公休が足りていない人：<b>${escapeHtml(offShort.join('・'))}</b></p>` : ''}
       <div class="note-must" style="padding:10px 12px;border-radius:6px">
