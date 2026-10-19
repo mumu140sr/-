@@ -440,14 +440,18 @@ function _rcDays(list, combined) {
   const head = list.slice(0, 8).map(f).join('・');
   return list.length > 8 ? `${head} ほか${list.length - 8}日` : head;
 }
-const _rcDiff = (n) => n >= 0 ? `<span class="rc-plus">余り ${n}</span>` : `<span class="rc-minus">不足 ${-n}</span>`;
+const _rcDiff = (n) => n >= 0 ? `<span class="rc-plus">余り ${capNum(n)}</span>` : `<span class="rc-minus">不足 ${capNum(-n)}</span>`;
 let _rcHelpOpen = false;   // 表の見方の折りたたみ。描き直しても開いたまま
 document.addEventListener('toggle', (e) => { if (e.target && e.target.matches && e.target.matches('details.rc-help')) _rcHelpOpen = e.target.open; }, true);
 /** 読みまちがえやすい行の一言。数の欄でなく行の名前の下に出す（v267 の直し: 数の欄では細く何行にも折り返していた） */
 function _rcWhy(x, total, skill) {
   let why = '';
-  if (skill && !x.need) why = '最低ラインはありません。目標に届かない日は「できれば」のエラーになります';
-  else if (x.overFixed) why = '希望・固定で、休み・有給を削った出勤が入っています';
+  if (skill && !x.need) {
+    // 目標に届かない日のエラーの重さは、①の「ルールごとの強弱」の「スキル目標に不足」で決まる（v267 の直し: いつも「できれば」と書いていた）
+    const lv = (typeof getRuleLevel === 'function') ? getRuleLevel('skill-short') : 'should';
+    why = lv === 'off' ? '最低ラインはありません。目標に届かなくてもエラーにはなりません'
+      : `最低ラインはありません。目標に届かない日は「${lv === 'must' ? '絶対' : 'できれば'}」のエラーになります`;
+  } else if (x.cut > 0) why = `希望・固定のとおりにすると、休み・有給を${capNum(x.cut)}日削って埋めることになります`;
   else if (total && x.diff >= 0 && x.short.length) {
     const ds = x.short.map(y => y.day + '日');
     why = `月の合計では足りますが、${ds.slice(0, 3).join('・')}${ds.length > 3 ? ` ほか${ds.length - 3}日` : ''}は足りません`;
@@ -465,17 +469,18 @@ function renderRoleCapacityHtml(pre) {
   if (!t.groups.length) return '';
   const multi = t.groups.length > 1;
   const lb = (typeof analyzeLowerBound === 'function') ? analyzeLowerBound() : { reasons: [] };
+  // 「余り・不足」は行の名前のすぐ右（v267 の直し: スマホの幅では画面の外から始まり、横に送ると名前の横で数が半分切れていた）
   const head = '<thead><tr><th rowspan="2" scope="col">できること</th><th colspan="4" scope="colgroup" class="rc-unit">数は、1人が1日入る分＝1</th><th rowspan="2" scope="col">足りない日</th></tr>'
-    + '<tr><th scope="col">必要</th><th scope="col">出られる</th><th scope="col">埋められる</th><th scope="col">余り・不足</th></tr></thead>';
+    + '<tr><th scope="col">余り・不足</th><th scope="col">必要</th><th scope="col">出られる</th><th scope="col">埋められる</th></tr></thead>';
   const name = (label, btn, why) => `<th scope="row"><span class="rc-name">${label}</span>${btn || ''}${why}</th>`;
-  const cells = (x) => `<td>${x.need}</td><td>${x.avail}</td><td>${x.fill}</td><td>${_rcDiff(x.diff)}</td>`;
+  const cells = (x) => `<td class="rc-diff">${_rcDiff(x.diff)}</td><td>${capNum(x.need)}</td><td>${capNum(x.avail)}</td><td>${capNum(x.fill)}</td>`;
   let html = '';
   t.groups.forEach(g => {
     const rows = [];
     const tot = g.total;
-    rows.push(`<tr class="rc-total"${tot.forcedExcess > 0 ? ` title="${escapeHtml(`必要には、必要人数を超えて希望・固定で決まっている出勤 ${tot.forcedExcess}コマ（${tot.forcedText}）を含みます`)}"` : ''}>`
-      + name('全体（どのシフトでも）', '', _rcWhy(tot, true, false)) + `<td>${tot.need}</td><td>${tot.avail}</td>`
-      + `<td class="rc-na" title="全体の行は、人の数と日数の合計だけで比べます">―</td><td>${_rcDiff(tot.diff)}</td><td>${escapeHtml(_rcDays(tot.short, false))}</td></tr>`);
+    rows.push(`<tr class="rc-total"${tot.forcedExcess > 0 ? ` title="${escapeHtml(`必要には、必要人数を超えて希望・固定で決まっている出勤 ${capNum(tot.forcedExcess)}コマ（${tot.forcedText}）を含みます`)}"` : ''}>`
+      + name('全体（どのシフトでも）', '', _rcWhy(tot, true, false)) + `<td class="rc-diff">${_rcDiff(tot.diff)}</td><td>${capNum(tot.need)}</td><td>${capNum(tot.avail)}</td>`
+      + `<td class="rc-na" title="全体の行は、人の数と日数の合計だけで比べます">―</td><td>${escapeHtml(_rcDays(tot.short, false))}</td></tr>`);
     g.rows.forEach(r => {
       const id = `${g.key}:${r.name || r.keys[0]}`;
       const open = _rcOpen.has(id);
@@ -489,8 +494,9 @@ function renderRoleCapacityHtml(pre) {
     // 最低ラインが無い（目標だけの）スキルは、埋められる・余り不足の代わりに「最低ラインなし」（v267 の直し: 出られる0・余り0 で、
     // だれも持っていないように見えた）
     const rows = t.skills.map(k => `<tr>${name(escapeHtml(`${k.band === 'early' ? '早番' : '遅番'}の「${k.name}」`), '', _rcWhy(k, false, true))}`
-      + `<td>${k.need}${k.target !== k.need ? `<span class="hint">（目標 ${k.target}）</span>` : ''}</td><td>${k.avail}</td>`
-      + (k.need ? `<td>${k.fill}</td><td>${_rcDiff(k.diff)}</td>` : `<td class="rc-na">―</td><td><span class="rc-plus">最低ラインなし</span></td>`)
+      + (k.need ? `<td class="rc-diff">${_rcDiff(k.diff)}</td>` : '<td class="rc-diff"><span class="rc-plus">最低ラインなし</span></td>')
+      + `<td>${capNum(k.need)}${k.target !== k.need ? `<span class="hint">（目標 ${capNum(k.target)}）</span>` : ''}</td><td>${capNum(k.avail)}</td>`
+      + (k.need ? `<td>${capNum(k.fill)}</td>` : '<td class="rc-na">―</td>')
       + `<td>${escapeHtml(_rcDays(k.short, false))}</td></tr>`);
     html += `<h5 class="rc-dept">スキル${multi ? '（社員とキャストを合わせて数えます）' : ''}</h5><div class="rc-scroll"><table class="rc-table">${head}<tbody>${rows.join('')}</tbody></table></div>`;
   }
@@ -498,16 +504,16 @@ function renderRoleCapacityHtml(pre) {
   const comp = (lb.reasons || []).filter(x => x.kind === 'comp-days');
   const roleShort = t.groups.some(g => g.rows.some(r => r.diff < 0 || (r.sub || []).some(u => u.diff < 0))) || t.skills.some(k => k.diff < 0);
   const shortTot = t.groups.filter(g => g.total.diff < 0);
-  const forced = shortTot.filter(g => g.total.forcedExcess > 0).map(g => `${multi ? g.label + '：' : ''}${g.total.forcedExcess}コマ（${g.total.forcedText}）`);
+  const forced = shortTot.filter(g => g.total.forcedExcess > 0).map(g => `${multi ? g.label + '：' : ''}${capNum(g.total.forcedExcess)}コマ（${g.total.forcedText}）`);
   const rule = '①基本設定の「詳しい設定」の中の「必要人数のルール」';
   return `<div class="rc-wrap"><h4>できることごとの余り・不足（この月の見込み）</h4>${html}`
     + (roleShort ? `<p class="rc-todo"><b>不足の行があるときは</b>、次のどれかをします：その役を担当できる人を増やす（③スタッフ管理の「担当シフト」。スキルの行は「スキル」）・足りない日の休みの希望や有給を動かす（④希望休入力）・必要人数を見直す（②シフト種別、${rule}）。</p>` : '')
     + (shortTot.length ? `<p class="rc-todo"><b>全体の行が不足のときは</b>、人の数と日数の合計が足りません。担当を増やしたり、休みの希望を別の日へ動かしたりしても、この数は変わりません。必要人数を見直す（②シフト種別、${rule}）か、公休数・有給の日数を見直します（③スタッフ管理の「公休数（月の休み数）」「有給（月の有給数）」）。`
-      + (forced.length ? `必要には、必要人数を超えて希望・固定で決まっている出勤（${escapeHtml(forced.join('、'))}）が入っています。その希望・固定を見直しても減ります。` : '') + '</p>' : '')
+      + (forced.length ? `必要には、必要人数を超えて希望・固定で決まっている出勤（${escapeHtml(forced.join('、'))}）が入っています。その希望・固定を見直すと、不足が減ります。` : '') + '</p>' : '')
     + (comp.length ? `<p class="hint">6連勤を作らずに出せる日数で見ると、次の期間も足りません（作る前の見込みと同じ）：</p><ul class="sp-list rc-comp">${comp.slice(0, 8).map(x => `<li>${escapeHtml(x.text)}</li>`).join('')}${comp.length > 8 ? `<li class="hint">ほか${comp.length - 8}件</li>` : ''}</ul>` : '')
     + `<details class="rc-help"${_rcHelpOpen ? ' open' : ''}><summary class="calc-view-only">表の見方（数の意味と、不足が多く出るわけ）</summary>`
-    + `<p class="hint">必要：その役に、この月に入る人の数の合計です（スキルは最低ラインの合計）。出られる：その役ができる人が、この月に出られる日数の合計です（公休の予定・有給・研修・休みの希望と、ほかの役や、その役が要らない日、必要人数より多く決まっている日の出勤を引き、その役が要る日に入れる日数までにしています）。スキルの行は、その時間帯に希望・固定で入っている保有者を、シフト表のエラーと同じく、必要人数を超えていても、研修や人数に数えないシフトでも数えます。目標だけの日も数えます。埋められる：その役が要る日に、できる人を1人1日1つずつ当てはめてみて、埋まる数です（希望・固定で決まっている人は先に入れます）。余り・不足：全部埋まれば「余り」（出られる − 必要。0より小さければ0）、埋まらない所があれば「不足」（必要 − 埋められる）です。</p>`
-    + `<p class="hint">不足が「必要 − 出られる」より多くなるのは、足りない枠が、だれも入れない日にあったり、出られる人が同じ日に重なっていたりするときです。たとえば、ある1日にしか入れない人が2人いても、その日に要るのが1人なら、入れるのは1人だけです。埋められるが出られるより多いのは、希望・固定で、休み・有給を削った出勤が入っているときです。</p>`
+    + `<p class="hint">必要：その役に、この月に入る人の数の合計です（スキルは最低ラインの合計）。出られる：その役ができる人が、この月に出られる日数の合計です（公休の予定・有給・研修・休みの希望と、ほかの役や、その役が要らない日、必要人数より多く決まっている日の出勤を引き、その役が要る日に入れる日数までにしています）。スキルの行は、その時間帯に希望・固定で入っている保有者を、シフト表のエラーと同じく、必要人数を超えていても、研修や人数に数えないシフトでも数えます。目標だけの日も数えます。埋められる：その役が要る日に、できる人を1人1日1つずつ当てはめてみて、埋まる数です。1人が埋めるのは、その人の出られる日数までです（希望・固定で決まっている人は先に入れますが、その人の出られる日数の中でだけ数えます）。余り・不足：休み・有給を削らずに全部埋まれば「余り」（出られる − 必要。0より小さければ0）、埋まらない所があれば「不足」（必要 − 埋められる）です。</p>`
+    + `<p class="hint">不足が「必要 − 出られる」より多くなるのは、足りない枠が、だれも入れない日にあったり、出られる人が同じ日に重なっていたりするときです。たとえば、ある1日にしか入れない人が2人いても、その日に要るのが1人なら、入れるのは1人だけです。希望・固定で、その人の出られる日数より多く出勤が決まっているときも、超えた分は埋められるに数えず、不足に残します（予定どおり休みと有給を取らせると足りないため。シフト表の帯の「不足」と同じ考え方です）。その行の名前の下に、休み・有給を何日削ることになるかが出ます。</p>`
     + `<p class="hint">全体の行は、だれが何をできるかを見ずに、人の数と日数の合計だけで比べます（AI診断レポートの「人手が◯人日 足りません」と同じ数え方）。足りない日があるときは「月の合計では足りますが、…は足りません」と添えます。</p>`
     + `<p class="hint">足りない日：その日に出られる「できる人」が必要より少ない日です（「合わせて」は、まとめた役のどれにも1人ずつ入れきれない日、「枠」は、できる人はいても入れる枠が足りない日）。足りない日が「なし」でも、月全体で出られる日数が足りなければ不足になります。</p>`
     + `<p class="rc-note">同じ人がいくつもの役をできるので、出られる日数は役どうしで取り合いになります。行ごとに見て足りていても、全部の役を同時に埋められるとは限りません。</p>`

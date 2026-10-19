@@ -133,7 +133,7 @@ const norm = s => String(s || '').replace(/\s+/g, '');
                             await p.click('[data-band-open="short"], [data-band-open="sur"]'); await p.waitForTimeout(800);
                             const t = await p.$('#shpBody [data-rc-toggle]'); if (t) { await t.click(); await p.waitForTimeout(200); } },
     // 余り・不足の表の一言（v267）: この状態の中だけ（作り物のデータの写し）、7日はほとんどの人を休みの希望にし（全体の行の
-    // 「月の合計では足りますが…」）、出られる日数0の人を、ふだん0人で3日だけ1人のシフトに決める（「希望・固定で、休み・有給を削った…」）。
+    // 「月の合計では足りますが…」）、出られる日数0の人を、ふだん0人で3日だけ1人のシフトに決める（「希望・固定のとおりにすると、休み・有給を…削って…」）。
     // 目標だけのスキルを足す（「最低ラインはありません…」）。
     // 表の見方の折りたたみも開く
     bandnote:  async p => { await p.click('.tab[data-tab="result"]');

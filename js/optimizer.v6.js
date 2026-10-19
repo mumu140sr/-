@@ -3851,16 +3851,16 @@ function analyzeRootCauses() {
     }
   }
 
-  // (3) 人手の過不足（必要コマ vs 出せるコマ）。⑤の表の「全体」の行・人手の余裕と同じ数え方（calcCapacity。部門ごとの不足を足す。
-  // v267 の直し: 各人の 月日数 − 公休 − 有給 で数えていて、同じ画面の「全体」の行と違う数が出ていた）
-  const groups   = getDepartmentGroups(staff);
-  let requiredWork = 0, availableWork = 0, shortWork = 0;
-  groups.forEach(g => { const cc = calcCapacity(g, days); requiredWork += cc.required; availableWork += cc.avail; shortWork += Math.max(0, -cc.surplus); });
-  if (shortWork > 0) {
+  // (3) 人手の過不足（必要コマ vs 出られるコマ）。⑤の表の「全体」の行・人手の余裕と同じ数え方（calcCapacity。部門ごとの不足を足す。
+  // v267 の直し: 各人の 月日数 − 公休 − 有給 で数えていて、同じ画面の「全体」の行と違う数が出ていた）。
+  // 部門が2つのときは本文も部門ごとに出す（社員とキャストは互いの枠を埋められない。合計を出すと、題名は不足なのに
+  // 出られるほうが多く見えた）
+  const cap = capacityByDept(days);
+  if (cap.short > 0) {
     causes.push({
-      weight: shortWork + 8,
-      title: `そもそも人手が足りない（月の合計で${shortWork}コマ不足）`,
-      detail: `月の合計で、必要コマ合計 ${requiredWork} に対して、出せるコマ合計は ${availableWork} です（⑤「実現性チェック（生成前）」の表の「全体」の行と同じ数え方）。物理的に足りないため、公休不足や人員不足が必ず発生します。`,
+      weight: cap.short + 8,
+      title: `そもそも人手が足りない（${cap.titleText}）`,
+      detail: `${cap.detailText}数え方は、⑤「実現性チェック（生成前）」の表の「全体」の行と同じです。物理的に足りないため、公休不足や人員不足が必ず発生します。`,
       fix: `必要人数（定数）を下げる／公休・有給を減らす／スタッフを増やす のいずれかが必要です。`,
     });
   }
@@ -4480,6 +4480,35 @@ function calcCapacity(g, days) {
            totalMaxOff, totalPaid, totalTrain, totalOtherOff, excessDaily,
            baseRequired: required, forcedExcess, forcedByKey };
 }
+/** 画面に出す人日・コマの数。必要人数に小数があると 251.09999999999988 のように出るので、出すときだけ小数1けたまでにする
+ *  （v267。calcCapacity などの数そのものは変えない） */
+function capNum(n) {
+  const x = Math.round((Number(n) || 0) * 10) / 10;
+  return String(x === 0 ? 0 : x);
+}
+/**
+ * 月の合計で見た、部門ごとの必要と出られる（calcCapacity。⑤の表の「全体」の行と同じ数）。生成のあとの知らせと、
+ * AIレポートの根本原因で使う（v267）。社員とキャストは互いの枠を埋められないので、合計どうしでは比べない。
+ *  short: 部門ごとの不足を足したもの
+ *  titleText: 「月の合計で22コマ不足」／部門が2つなら「月の合計で、社員が24コマ不足」
+ *  detailText: 本文。部門が2つなら部門ごとに出し、互いの枠を埋められないことも書く
+ */
+function capacityByDept(days) {
+  const groups = getDepartmentGroups(AppState.staff);
+  const multi = groups.length > 1;
+  const parts = groups.map(g => { const cc = calcCapacity(g, days); return { label: g.label, required: cc.required, avail: cc.avail, surplus: cc.surplus }; });
+  const short = parts.reduce((a, x) => a + Math.max(0, -x.surplus), 0);
+  if (!parts.length) return { multi, parts, short: 0, titleText: '', detailText: '' };
+  const diffText = x => x.surplus < 0 ? `${capNum(-x.surplus)}コマ不足` : (x.surplus > 0 ? `${capNum(x.surplus)}コマ余り` : 'ちょうど');
+  const titleText = multi
+    ? `月の合計で、${parts.filter(x => x.surplus < 0).map(x => `${x.label}が${capNum(-x.surplus)}コマ`).join('・')}不足`
+    : `月の合計で${capNum(short)}コマ不足`;
+  const detailText = multi
+    ? `月の合計で見ると、${parts.map(x => `${x.label}：必要 ${capNum(x.required)}・出られる ${capNum(x.avail)}（${diffText(x)}）`).join('、')}です。`
+      + `${parts.map(x => x.label).join('と')}は、互いの枠を埋められません（片方の余りで、もう片方の不足は埋まりません）。`
+    : `月の合計で見ると、必要なコマ数 ${capNum(parts[0].required)} に対して、出られるコマ数は ${capNum(parts[0].avail)} です（${diffText(parts[0])}）。`;
+  return { multi, parts, short, titleText, detailText };
+}
 /** 「必要人数を超えて決まっている出勤」の内訳の文（深夜 2人日・遅 1人日）。無ければ '' */
 function forcedExcessText(cap) {
   if (!cap || !(cap.forcedExcess > 0)) return '';
@@ -4854,23 +4883,36 @@ function _skillInBand(sk) {
   const early = (sk.target || 'late') === 'early';
   return k => !!k && isWork(k) && (early ? isEarlyCategory(k) : isLate(k));
 }
-/** その時間帯の枠に、保有者を最大何人まで置けるか（店全体。部門ごとの枠に置ける人数を足す）。blocker は最初に見つかった部門のもの */
+/** 直し方の案を並べる順: 置ける保有者がいちばん増える案 → 同じなら id の順 → 同じ人なら、移す案（出勤のまま）を外す案より先 */
+function _blockerBetter(a, b) {
+  if (!b) return true;
+  if (a.gain !== b.gain) return a.gain > b.gain;
+  const c = String(a.id).localeCompare(String(b.id), 'en', { numeric: true });
+  if (c) return c < 0;
+  return !!a.alt && !b.alt;
+}
+/**
+ * その時間帯の枠に、保有者を最大何人まで置けるか（店全体。部門ごとの枠に置ける人数を足す）。
+ * blocker は、全部の部門の案のうち、置ける保有者がいちばん増えるもの（_blockerBetter。無ければ null）
+ */
 function daySkillSlotMax(groups, sk, bandKeys, d) {
   let max = 0, blocker = null;
-  groups.forEach(g => { const r = maxSkillInBand(g, sk, bandKeys, d); max += r.max; if (!blocker && r.blocker) blocker = r.blocker; });
+  groups.forEach(g => { const r = maxSkillInBand(g, sk, bandKeys, d); max += r.max; if (r.blocker && _blockerBetter(r.blocker, blocker)) blocker = r.blocker; });
   return { max, blocker };
 }
 /**
  * その日、指定した時間帯（早番帯/遅番帯）の枠に、スキル保有者を最大何人置けるかを数える。
  * 枠は役割ごとに必要人数ぶんあり、1人は1枠まで。出勤希望・固定で確定している人は
- * その枠を先に埋める。保有者でない人が枠を塞いでいる場合は、その人（blocker）と、
- * 代わりに入れる役割（alt）も返す。
- * 小さな二部マッチング（人 ≦ 数十、役割 ≦ 数個）なので素朴な増加路法で十分。
+ * その枠を先に埋める。小さな二部マッチング（人 ≦ 数十、役割 ≦ 数個）なので素朴な増加路法（_fillSlots）で十分。
+ * blocker: 保有者でない人の希望・固定が枠を塞いでいるとき、その人を同じ時間帯の空いている役割へ移す（alt）か、
+ * 外す（alt: null）と、置ける保有者が何人増えるか（gain）を、決まっている保有者でない人を全員について数え、
+ * いちばん増える案（_blockerBetter）。増える案が無ければ null（v267 の直し: いちばん前の人を確かめずに名指ししたり、
+ * 同じ役に必要より多く決まっていて1人移しても枠が空かないのに「収まります」と言ったりしていた）
  */
 function maxSkillInBand(g, sk, bandKeys, d) {
-  const slots = {};                 // 役割 → 残り枠数
-  const pinned = [];                // その日、役割が確定している人
-  bandKeys.forEach(k => { slots[k] = getDayReq(g.reqs, g.dailyReqs || {}, k, d); });
+  const need = {}, fixedCnt = {};   // 役割 → 必要人数・希望/固定で決まっている人数
+  const pinned = [];                // その日、役割が確定している保有者でない人
+  bandKeys.forEach(k => { need[k] = getDayReq(g.reqs, g.dailyReqs || {}, k, d); fixedCnt[k] = 0; });
 
   const pool = [];                  // まだ役割が決まっていない保有者
   let fixedHolders = 0;             // すでに枠が確定している保有者（この人数はそのまま数える）
@@ -4882,8 +4924,8 @@ function maxSkillInBand(g, sk, bandKeys, d) {
     if (st !== 'free') {
       const k = getFixedShiftAt(s.id, d);
       // 枠の無いシフト（研修・人数に数えないシフト）や別の時間帯に決まっている人。検査と同じく、その時間帯の保有者なら数える（v267 の直し）
-      if (slots[k] == null) { if (has && inBand(k)) fixedHolders++; return; }
-      slots[k] = Math.max(0, slots[k] - 1);
+      if (need[k] == null) { if (has && inBand(k)) fixedHolders++; return; }
+      fixedCnt[k]++;
       if (has) fixedHolders++;
       else pinned.push({ staff: s, key: k });
       return;
@@ -4894,31 +4936,31 @@ function maxSkillInBand(g, sk, bandKeys, d) {
   // 増加路法で「保有者を何人まで枠に入れられるか」を求める（v267 の直し: 前は入れる役割が少ない人から順に当てはめていて、
   // P が遅責か遅・Q が遅責か遅総務（遅総務は0人）の日に、P を遅責へ入れて Q が入れず、2人入れるのに1人と数えていた）
   const who = pool.map(s => ({ keys: bandKeys.filter(k => (s.allowedShifts || []).includes(k)) }));
-  const count = (avail) => _fillSlots(who, bandKeys.map(k => [k, Math.max(0, avail[k] || 0)]));
-  const max = fixedHolders + count(slots);
+  const count = (cnt) => _fillSlots(who, bandKeys.map(k => [k, Math.max(0, need[k] - cnt[k])]));
+  const max = fixedHolders + count(fixedCnt);
 
-  // 保有者でない人が枠を塞いでいるなら、その人が別の役割に移れば直るかを調べる
   let blocker = null;
-  for (const p of pinned) {
-    const others = bandKeys.filter(k => k !== p.key && (p.staff.allowedShifts || []).includes(k));
-    for (const alt of others) {
-      // 移し先に残りの枠があるときだけ（v267 の直し: 埋まっているシフトへ移すようにすすめていた。移すと定数オーバーになる）
-      if (!(slots[alt] > 0)) continue;
-      const trial = Object.assign({}, slots);
-      trial[p.key]++; trial[alt] = Math.max(0, trial[alt] - 1);
-      if (fixedHolders + count(trial) > max) { blocker = { id: p.staff.id, name: p.staff.name, key: p.key, alt }; break; }
-    }
-    if (blocker) break;
-    // 移し先が無くても「塞いでいる本人」は伝える
-    if (!blocker && bandKeys.some(k => k !== p.key)) blocker = { id: p.staff.id, name: p.staff.name, key: p.key, alt: null };
-  }
+  const tryOpt = (p, alt) => {
+    const cnt = Object.assign({}, fixedCnt);
+    cnt[p.key]--;                 // 同じ役に必要より多く決まっていれば、1人抜けても枠は空かない（count が数える）
+    if (alt) cnt[alt]++;
+    const gain = fixedHolders + count(cnt) - max;
+    const o = { id: p.staff.id, name: p.staff.name, key: p.key, alt: alt || null, gain };
+    if (gain > 0 && _blockerBetter(o, blocker)) blocker = o;
+  };
+  pinned.forEach(p => {
+    // 移し先は、同じ時間帯で担当していて、まだ枠が空いている役割だけ（埋まっている役へ移すと定数オーバーになる）
+    bandKeys.filter(k => k !== p.key && (p.staff.allowedShifts || []).includes(k) && need[k] - fixedCnt[k] > 0).forEach(alt => tryOpt(p, alt));
+    tryOpt(p, null);
+  });
   return { max, blocker };
 }
 
 /**
  * 日ごとの人数の余裕（生成前チェック 3-1①）。計算はせず、希望・固定・担当できるシフトだけで数える。
  *   全体・早番帯・遅番帯: 出られる人数 − 必要人数。0 なら、出られる人は全員その日（その時間帯）に出勤になる。
- *   スキル: その時間帯に入れる保有者の人数 − 目標人数（最低ラインを下回ると必ずエラー）。
+ *   スキル: その時間帯に入れる保有者の人数 − 目標人数（最低ラインを下回ると必ずエラー）。店全体で数え、最初の部門の行にだけ出す
+ *   （skillsAll。表・見込みと同じ数え方。v267）。
  * 休み・有給・半休の希望、休みの🔒固定、研修の日は「出られない」に数える。
  * @returns {Array<{label, days: Array<{day, total, early, late, skills}>}>}
  *   total/early/late: { avail, need, margin, ids }（ids は出られる人。余裕0の日に「必ず出勤」の人として出す）
@@ -4933,7 +4975,22 @@ function analyzeDayMargins() {
     return t && !t.isTraining;
   });
   const inBand = (k, band) => band === 'early' ? isEarlyCategory(k) : isLate(k);
-  getDepartmentGroups(AppState.staff).forEach(g => {
+  const groups = getDepartmentGroups(AppState.staff);
+  // スキルは、できることごとの表・作る前の見込み（daySkillHave）と同じ数え方（v267 の直し）: 店全体（社員とキャストを合わせる）で、
+  // 希望・🔒でその時間帯のシフトに決まっている保有者は、検査と同じく研修・人数に数えないシフトでも数える。
+  // 前は部門ごとに、研修の日と人数に数えないシフトに決まっている日を数えず、表と見込みが足りるとする日を「足りない」と出していた。
+  // 部門が2つでも、スキルは最初の部門の行にだけ出す（同じ数を2回出さない）
+  const skillHolders = (sk, d) => {
+    const fixedIn = _skillInBand(sk), band = (sk.target || 'late') === 'early' ? 'early' : 'late';
+    return AppState.staff.filter(s => {
+      if (!(s.skills || []).includes(sk.name)) return false;
+      const st = staffDayState(s, d);
+      if (st === 'off') return false;
+      if (st !== 'free') return fixedIn(getFixedShiftAt(s.id, d));
+      return (s.allowedShifts || []).some(k => shiftKeys.includes(k) && inBand(k, band));
+    }).map(s => s.id);
+  };
+  groups.forEach((g, gi) => {
     const rows = [];
     for (let d = 1; d <= days; d++) {
       // その人がその日に入れるシフト（出られなければ空）
@@ -4951,16 +5008,16 @@ function analyzeDayMargins() {
       };
       const row = { day: d, total: count(() => true),
                     early: count(k => inBand(k, 'early')), late: count(k => inBand(k, 'late')), skills: [] };
-      (AppState.skills || []).forEach(sk => {
+      if (gi === 0) (AppState.skills || []).forEach(sk => {
         const { need, min } = getDaySkillReq(sk, d);
         if (!(need > 0) && !(min > 0)) return;
         const band = (sk.target || 'late') === 'early' ? 'early' : 'late';
-        const ids = g.staff.filter(s => (s.skills || []).includes(sk.name) && ks[s.id].some(k => inBand(k, band))).map(s => s.id);
+        const ids = skillHolders(sk, d);
         row.skills.push({ name: sk.name, band, avail: ids.length, need, min, margin: ids.length - need, ids });
       });
       rows.push(row);
     }
-    out.push({ label: g.label, days: rows });
+    out.push({ label: g.label, days: rows, skillsAll: groups.length > 1 && gi === 0 });
   });
   return out;
 }
@@ -5086,29 +5143,31 @@ function analyzeLowerBound() {
         let fix = '';
         // C6: 塞いでいる人のその日が固定（🔒）なら、④の希望を書いても効かない（B1 で🔒を先に読む）。
         // ボタンは出さず、手で直してもらう（表があれば⑥の表で、無ければ固定を外してから）
-        const locked = !!(r.blocker && ((AppState.fixedShifts || {})[r.blocker.id] || {})[d]);
+        const b = r.blocker;   // 移す（alt）か外すと、置ける保有者が b.gain 人増える人。増える人がいなければ null（名指ししない）
+        const locked = !!(b && ((AppState.fixedShifts || {})[b.id] || {})[d]);
         const hasTable = !!(AppState.generated && Object.keys(AppState.shifts || {}).length);
-        if (r.blocker && locked) {
-          const alt = r.blocker.alt;
-          fix = `${r.blocker.name}さんの${d}日は「${shiftSym(r.blocker.key)}」に固定されているため、ボタンでは直せません。`
+        // 直したあとに最低ラインに届くなら「収まります」、届かなければ何人増えるか（v267 の直し: 届かなくても「収まります」と言っていた）
+        const after = b ? (r.max + b.gain >= min ? '収まります' : `、置ける保有者が${b.gain}人増えます（まだ最低 ${min}人 には届きません）`) : '';
+        if (b && locked) {
+          fix = `${b.name}さんの${d}日は「${shiftSym(b.key)}」に固定されているため、ボタンでは直せません。`
               + (hasTable
-                  ? `「シフト表」でこのマスを${alt ? `「${shiftSym(alt)}」に` : ''}直してください`
-                  : `「シフト表」の「その他の操作」にある「固定をすべて解除」で固定を外してから、${alt ? `希望を「${shiftSym(alt)}」に変えてください` : '直してください'}`);
-        } else if (r.blocker) {
-          const alt = r.blocker.alt;
-          fix = alt
-            ? `${r.blocker.name}さんの${d}日の希望を「${shiftSym(r.blocker.key)}」から「${shiftSym(alt)}」に変えると収まります`
-            : `${r.blocker.name}さんは「${sk.name}」を持っていないため、${d}日の希望「${shiftSym(r.blocker.key)}」がこの枠を塞いでいます`;
+                  ? `「シフト表」でこのマスを${b.alt ? `「${shiftSym(b.alt)}」に直す` : '別のシフトか休みに直す'}と${after}`
+                  : `「シフト表」の「その他の操作」にある「固定をすべて解除」で固定を外してから、${b.alt ? `希望を「${shiftSym(b.alt)}」に変える` : 'この日の希望を外す'}と${after}`);
+        } else if (b) {
+          fix = b.alt
+            ? `${b.name}さんの${d}日の希望を「${shiftSym(b.key)}」から「${shiftSym(b.alt)}」に変えると${after}`
+            : `${b.name}さんは「${sk.name}」を持っていないため、${d}日の希望「${shiftSym(b.key)}」がこの枠を塞いでいます。この希望を外すと${after}`;
         } else {
           fix = `「${sk.name}」を持つ人を増やすか、${early ? '早番' : '遅番'}帯の必要人数を見直してください`;
         }
         slotShort += 1;   // C9: 1日・1スキルで1件（画面と同じ数え方）
         res.reasons.push({
           kind: 'skill-slot', day: d, skill: sk.name, need: min, have: r.max, fix,
-          // ボタン1つで直せる操作。null なら手で直してもらう
-          act: (r.blocker && r.blocker.alt && !locked)
-            ? { type: 'request', staffId: r.blocker.id, day: d, to: r.blocker.alt,
-                label: `${r.blocker.name}さんの${d}日を「${shiftSym(r.blocker.alt)}」に変える` } : null,
+          // ボタン1つで直せる操作（移すか、希望を外す）。null なら手で直してもらう
+          act: (b && !locked)
+            ? (b.alt
+              ? { type: 'request', staffId: b.id, day: d, to: b.alt, label: `${b.name}さんの${d}日を「${shiftSym(b.alt)}」に変える` }
+              : { type: 'request', staffId: b.id, day: d, to: '', label: `${b.name}さんの${d}日の希望「${shiftSym(b.key)}」を外す` }) : null,
           text: `${d}日: スキル「${sk.name}」は最低 ${min}人 必要ですが、`
               + `${early ? '早番' : '遅番'}の枠に置けるのは最大 ${r.max}人 です。${fix}`,
         });
@@ -5940,7 +5999,9 @@ function _maxFlow(n, edges, s, t) {
  * その日入れる人＝dayRoleAvail（見込みの「役割の不足」と同じ）。
  * 6連勤を避けると出られない日（見込みの区間の数え方）は、ここでは数えない。
  * 行の余り・不足は、人を日と枠に割り当てて埋められる数（fill。_maxFlow）で決める: 埋まらない枠があれば 不足＝必要−fill、
- * 全部埋まれば 余り＝出られる−必要（0より小さければ0）。出られるの合計から引くだけでは、ある日しか入れない人を何日ぶんにも数えたり、
+ * 全部埋まれば 余り＝出られる−必要（0より小さければ0）。1人が埋める数は、その人の出られる日数（公休・有給の予定を引いたもの）を
+ * 超えない。希望・🔒で決まっている出勤も、その中でだけ数え、超えた分（cut）は休み・有給を削って埋める日として不足に残す
+ * （帯の「不足」と同じく、予定どおり休みと有給を取らせたときに足りるか）。出られるの合計から引くだけでは、ある日しか入れない人を何日ぶんにも数えたり、
  * だれも入れない日の枠を、ほかの日に余っている人で埋めたように数えたりした（v267 の直し）。全体の行は calcCapacity のまま。
  * スキルの行も同じ形の割り当て（保有者 → 保有者×日 → (部門, 日, シフト) の枠 → 日の最低ライン）。足りない日もこの形で数えるので、
  * 作る前の見込み（daySkillHave・daySkillSlotMax）の日に加えて、日ごとに要るスキルや必要人数0のシフトで入れない日も出る。
@@ -5988,7 +6049,7 @@ function roleCapacityTable() {
   });
   gInfo.forEach(({ g, dayReq, av, usedFix }) => {
     const statOf = (keys) => {
-      let need = 0, prefill = 0;
+      let need = 0;
       const short = [];   // { day, keys: 足りない役, union: 合わせると足りない }
       const canDays = {};   // 人 → その行のどれかが必要な日のうち、入れる日の数
       // 最大流: 源 → 人（空いている日に出られる日数）→ 人×日（1日1つ）→ 日×シフトの枠（必要人数から、決まって入っている人を引いた数）→ 終
@@ -6009,7 +6070,6 @@ function roleCapacityTable() {
         const slot = {};
         needK.forEach(k => {
           const f = Math.min(av[d].fixedIn[k], dayReq(k, d));
-          prefill += f;
           if (dayReq(k, d) > f) { slot[k] = nNode++; edges.push([slot[k], 1, dayReq(k, d) - f]); }
         });
         ws.forEach(w => {
@@ -6022,16 +6082,27 @@ function roleCapacityTable() {
           to.forEach(k => edges.push([pd, slot[k], 1]));
         });
       }
-      const fill = prefill + (edges.length ? _maxFlow(nNode, edges, 0, 1) : 0);
       const used = (id, d, k) => keys.includes(k) && has(usedFix, id, d);
+      // 希望・🔒で決まっている出勤で埋める分は、その人の出られる日数（公休・有給の予定を引いたもの）の中でだけ数える
+      // （v267 の直し: 予定の休み・有給を削って埋める分まで埋められるに数え、「余り0」と出ていた。帯の「不足」と同じく、
+      // 予定どおり休みと有給を取らせたときに足りるかで決める）。超えた分（cut）は、休み・有給を削らないと入れない日
+      let prefill = 0, cut = 0;
+      g.staff.forEach(s => {
+        const fw = caps[s.id].fixedWork;
+        let n = 0;
+        Object.keys(fw).forEach(d => { if (used(s.id, +d, fw[d])) n++; });
+        if (!n) return;
+        const c = Math.min(n, personAvail(s, used));
+        prefill += c; cut += n - c;
+      });
+      const fill = prefill + (edges.length ? _maxFlow(nNode, edges, 0, 1) : 0);
       let avail = 0, people = 0;
       g.staff.forEach(s => {
         if ((s.allowedShifts || []).some(k => keys.includes(k))) people++;
         if (canDays[s.id]) avail += Math.min(personAvail(s, used), canDays[s.id]);
       });
-      // 全部埋まれば不足にしない（v267 の直し）。埋められる数が出られるより多いのは、希望・🔒で、その人の出られる日数より多く
-      // 出勤が決まっている（公休を削って出勤している）とき（overFixed。表に一言出す）
-      return { keys, need, avail, fill, diff: fill < need ? fill - need : Math.max(0, avail - need), overFixed: fill > avail, people, short };
+      // 埋められるは出られるを超えない。全部埋まれば不足にしない
+      return { keys, need, avail, fill, diff: fill < need ? fill - need : Math.max(0, avail - need), cut, people, short };
     };
     const keys = shiftKeys.filter(k => { for (let d = 1; d <= days; d++) if (dayReq(k, d) > 0) return true; return false; });
     const rows = [], byName = {};
@@ -6052,7 +6123,9 @@ function roleCapacityTable() {
     }
     res.groups.push({
       key: g.key, label: g.label,
-      total: { need: cc.required, avail: cc.avail, diff: cc.surplus, forcedExcess: cc.forcedExcess || 0, forcedText: forcedExcessText(cc), short: totalShort },
+      // 内訳はコマで（表は「1人が1日入る分＝1」。forcedExcessText の「人日」とまぜない。v267 の直し）
+      total: { need: cc.required, avail: cc.avail, diff: cc.surplus, forcedExcess: cc.forcedExcess || 0,
+               forcedText: Object.keys(cc.forcedByKey || {}).map(k => `${shiftSym(k)} ${capNum(cc.forcedByKey[k])}`).join('・'), short: totalShort },
       rows: rows.map(r => Object.assign(statOf(r.keys), { name: r.name, sub: r.keys.length > 1 ? r.keys.map(k => statOf([k])) : null })),
     });
   });
@@ -6075,9 +6148,9 @@ function roleCapacityTable() {
     if (!minSum && !needSum) return;
     const holders = AppState.staff.filter(s => (s.skills || []).includes(sk.name));
     const hOrder = byRoom(holders);
-    const short = [], usedSk = {}, usedTrain = {}, canDays = {};
+    const short = [], usedSk = {}, usedTrain = {}, canDays = {}, preCount = {};
     const pIdx = new Map(), edges = [];
-    let nNode = 2, prefill = 0;
+    let nNode = 2;
     for (let d = 1; d <= days; d++) {
       const { need, min } = getDaySkillReq(sk, d);
       const want = Math.max(min > 0 ? min : 0, need > 0 ? need : 0);
@@ -6089,6 +6162,7 @@ function roleCapacityTable() {
         if (st === 'off' || st === 'free') return;
         if (!inBand(getFixedShiftAt(s.id, d))) return;
         if (fh < want) { mark(usedSk, s.id, d); if (st === 'training') mark(usedTrain, s.id, d); canDays[s.id] = (canDays[s.id] || 0) + 1; }
+        if (min > 0 && fh < min) preCount[s.id] = (preCount[s.id] || 0) + 1;   // 最低ラインを先に埋める人（下で出られる日数の中だけ数える）
         fh++;
       });
       const free = [];   // 空いている保有者と、その日に入れるシフト（担当・部門・必要人数・日ごとに要るスキル）
@@ -6102,7 +6176,6 @@ function roleCapacityTable() {
       });
       if (!(min > 0)) continue;   // ここから下（埋められる・足りない日）は最低ラインで決める
       const pre = Math.min(fh, min);
-      prefill += pre;
       const slotRem = new Map();   // 部門|シフト → 空いている枠
       gInfo.forEach(x => bandKeys.forEach(k => {
         const r = x.dayReq(k, d) - x.av[d].fixedIn[k];
@@ -6135,17 +6208,26 @@ function roleCapacityTable() {
         to.forEach(t => edges.push([pd, t, 1]));
       });
     }
-    const fill = prefill + (edges.length ? _maxFlow(nNode, edges, 0, 1) : 0);
     // 出られる: 保有者ごとに、出られる日数（スキルに数える日のほかに決まっている出勤を引き、スキルに数える研修の日を足す）と、
     // 最低ラインか目標のある日のうちその時間帯の枠に入れる日の数の小さいほう
     const used = (id, d) => has(usedSk, id, d);
+    const budget = s => personAvail(s, used) + (usedTrain[s.id] ? usedTrain[s.id].size : 0);
+    // 決まって入っている保有者で埋める分も、役の行と同じく、その人の出られる日数の中でだけ数える（v267 の直し）
+    let prefill = 0, cut = 0;
+    holders.forEach(s => {
+      const n = preCount[s.id] || 0;
+      if (!n) return;
+      const c = Math.min(n, budget(s));
+      prefill += c; cut += n - c;
+    });
+    const fill = prefill + (edges.length ? _maxFlow(nNode, edges, 0, 1) : 0);
     let avail = 0, people = 0;
     holders.forEach(s => {
       if ((s.allowedShifts || []).some(k => bandKeys.includes(k))) people++;
-      if (canDays[s.id]) avail += Math.min(personAvail(s, used) + (usedTrain[s.id] ? usedTrain[s.id].size : 0), canDays[s.id]);
+      if (canDays[s.id]) avail += Math.min(budget(s), canDays[s.id]);
     });
     res.skills.push({ name: sk.name, band: early ? 'early' : 'late', need: minSum, target: needSum, avail, fill,
-      diff: fill < minSum ? fill - minSum : Math.max(0, avail - minSum), overFixed: fill > avail, people, short });
+      diff: fill < minSum ? fill - minSum : Math.max(0, avail - minSum), cut, people, short });
   });
   return res;
 }

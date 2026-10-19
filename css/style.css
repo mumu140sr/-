@@ -436,7 +436,7 @@ a { color: var(--link); }
   border-top: 3px solid var(--lv-must); border-radius: var(--r-lg) var(--r-lg) 0 0; box-shadow: var(--shadow); }
 .short-panel .sp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 8px 16px;
   border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; background: var(--surface);
-  z-index: 3; }   /* 中の表の見出し（th は z-index 2）が、送ったときに題名と ✕ の上に重なって ✕ を押せなかった（v267） */
+  z-index: 4; }   /* 中の表の見出し（th は z-index 2、左上のマスは 3）が、送ったときに題名と ✕ の上に重なって ✕ を押せなかった（v267） */
 .short-panel .sp-head h3 { margin: 0; font-size: var(--fs-md); color: var(--text); }
 .short-panel .sp-head h3:focus { outline: none; }
 .short-panel .modal-close { border: none; background: transparent; font-size: 20px; cursor: pointer; color: var(--text-soft);
@@ -462,7 +462,11 @@ button.lv-chip-btn:focus-visible { outline: 2px solid var(--link); outline-offse
 .rc-table thead th.rc-unit { text-align: center; font-weight: 500; font-size: var(--fs-xs); }
 /* 行の名前の列: 言葉の途中で折れないように（keep-all）、最低の幅を持たせ、狭い幅で横に送っても左に残す（v267） */
 .rc-table th[scope="row"] { min-width: 10em; word-break: keep-all; overflow-wrap: anywhere; position: sticky; left: 0; z-index: 1; background: var(--surface); }
-.rc-table thead tr:first-child th:first-child { position: sticky; left: 0; z-index: 2; }
+/* 左上のマスは、ほかの見出し（th は z-index 2）より上に。横に送ると「人が1日入る分＝1」などが重なって読めなかった（v267） */
+.rc-table thead tr:first-child th:first-child { position: sticky; left: 0; z-index: 3; }
+/* 行の名前の列の右に区切りの線（横に送ったとき、名前の横の数が名前の続きに見えないように。sticky でも動く影で引く） */
+.rc-table th[scope="row"], .rc-table thead tr:first-child th:first-child { box-shadow: inset -2px 0 0 var(--border); }
+.rc-table td.rc-diff { white-space: nowrap; }
 .rc-table .rc-why { display: block; margin-top: 2px; font-size: var(--fs-xs); font-weight: 400; color: var(--text-soft); white-space: normal; text-align: left; }
 .rc-table td.rc-na { color: var(--text-soft); }
 .rc-table tr.rc-total th, .rc-table tr.rc-total td { font-weight: 700; background: var(--surface-2); }
