@@ -50,6 +50,9 @@ document.addEventListener('DOMContentLoaded', () => {
     addSampleStaff();
   }
 
+  // ①「ルールごとの強弱」の既定が、検査・生成の既定と食い違っていないか（食い違えば console.warn。v268）
+  if (typeof checkRuleLevelMeta === 'function') checkRuleLevelMeta();
+
   // UI初期化
   setupTabs();
   setupSettingsPanel();
@@ -968,7 +971,7 @@ function showFeasibilityModal() {
 }
 
 /**
- * 生成結果が「数学的に最良と証明できた」のか「時間切れで打ち切った」のかを表示する。
+ * 生成結果が「大事な順に、これ以上減らせないと確かめられた」のか「時間切れで打ち切った」のかを表示する。
  * 打ち切りだった場合は、時間を延ばして再計算するボタンを出す（＝まだ減る可能性がある）。
  */
 // info: 🎯 じっくり生成（newTiering）の結果の内訳（optimalityInfo）。時間切れ・案Bで戻した・案Dで1分生成の答えを採った、を分けて出す
@@ -983,17 +986,17 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
   box.style.cssText = 'padding:12px 14px;border-radius:10px;margin-bottom:12px;font-size:13px;line-height:1.7';
 
   if (wasFast) {
-    // 速い生成: 証明していないので「最良とは限らない」と正直に出し、証明ありへの導線を置く
+    // 速い生成: いちばん良い表かどうかは確かめていないので「最良とは限らない」と正直に出し、じっくり生成への導線を置く
     box.style.background = 'color-mix(in srgb, var(--accent) 12%, var(--surface))';
     box.style.border = '1px solid color-mix(in srgb, var(--accent) 32%, transparent)';
-    box.innerHTML = `${uiIcon('gen-fast')} <b>1分生成（証明なし）で完了しました（${elapsed}秒）</b>：` +
+    box.innerHTML = `${uiIcon('gen-fast')} <b>1分生成で完了しました（${elapsed}秒）</b>：` +
       (vioCount === 0
         ? 'エラー0件です。<b>0件なのでこれ以上良くなりようがありません</b>。このまま使えます。'
-        : `エラー ${vioCount}件。<b>これが最良とは限りません</b>（60秒で打ち切ったため、証明していません）。<br>
+        : `エラー ${vioCount}件。<b>これが最良とは限りません</b>（60秒で打ち切ったため、いちばん良い表かどうかは確かめていません）。<br>
            じっくり生成にすると<b>さらに減ることがあります</b>。人手がぎりぎりの月ほど差が大きくなる傾向があります。
            最終確定の前に、一度は下のボタンで解き直すことをおすすめします。`) +
       (vioCount > 0
-        ? '<br><button id="btnProofOptimize" class="btn btn-primary" style="margin-top:8px">' + uiIcon('gen-deep') + 'じっくり生成で解き直す（証明あり・最大約11分）</button>'
+        ? '<br><button id="btnProofOptimize" class="btn btn-primary" style="margin-top:8px">' + uiIcon('gen-deep') + 'じっくり生成で解き直す（最大約11分）</button>'
         : '');
   } else if (cutOff && info && (info.pickedFast || (!info.timedOut && info.screenRejected > 0))) {
     // 時間切れではない理由で「確かめ済み」にならなかったとき。設定を緩めるすすめは出さない
@@ -1015,7 +1018,7 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
       : info.timedOut
       ? `<br>じっくり生成の側には、時間内に最後まで計算しきれない段がありました。` + (vioCount > 0
           ? `残り ${vioCount}件は<b>「避けられない」とは限りません</b>。
-             ⑤自動生成の「実現性チェック」で人手の不足を確認し、有給日数・日別必要人数・公休数のいずれかを緩めてください。`
+             まず⑤自動生成の「詳しい機能」→「実現性チェック（生成前）」で、人手が足りているかを確かめてください。足りているのに残るときは、もう一度じっくり生成すると良くなることがあります。`
           : `エラーは0件なので、このまま使えます。`)
       : (info.pickedFast ? `時間切れではありません。` : '') + (info.screenRejected > 0
           ? `<br>答えを外した段があるため、「これ以上良い組み合わせは無い」とまでは確認していません。`
@@ -1025,8 +1028,10 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
     box.style.background = 'color-mix(in srgb, var(--success) 14%, var(--surface))';
     box.style.border = '1px solid color-mix(in srgb, var(--success) 35%, transparent)';
     box.innerHTML = vioCount === 0
-      ? `${uiIcon('ok')} <b>計算完了（${elapsed}秒）</b>：エラー0件。数学的にこれが最良と確認できました。`
-      : `${uiIcon('ok')} <b>計算完了（${elapsed}秒）</b>：残った ${vioCount}件は、<b>今の設定では避けられません</b>（これ以上良い組み合わせが存在しないことを確認済み）。<br>
+      ? `${uiIcon('ok')} <b>計算完了（${elapsed}秒）</b>：エラー0件です。0件なので、これ以上良くなりようがありません。`
+      // 「確かめた」のは大事な順に1つずつ（6連勤以上 → 人員不足 → …）。件数の合計がいちばん少ないことまでは確かめていない（v268）
+      : `${uiIcon('ok')} <b>計算完了（${elapsed}秒）</b>：残り ${vioCount}件。大事な順に（6連勤以上 → 人員不足 → …）1つずつ、
+         <b>今の設定ではこれ以上減らせない</b>ことを計算の上で確かめました（大事な順に確かめたので、件数の合計がいちばん少ないとは限りません）。<br>
          減らすには、必要人数・公休数・担当シフト・希望休などの設定を見直してください。`;
   } else {
     box.style.background = 'color-mix(in srgb, var(--warning) 16%, var(--surface))';
@@ -1044,7 +1049,7 @@ function showOptimalityNotice(cutOff, vioCount, elapsed, wasDeep, usedGap, wasFa
       これが最良だとは確認できていません。<br>
       ${canRetry
         ? '<button id="btnDeepOptimize" class="btn btn-primary" style="margin-top:8px">' + uiIcon('recalc') + '妥協なしで再計算（早期停止を無効・最大約11分）</button>'
-        : '上限いっぱいまで計算しても解ききれませんでした。⑤自動生成の「実現性チェック」で人手の不足を確認し、有給日数・日別必要人数・公休数のいずれかを緩めてください。'}`;
+        : '上限いっぱいまで計算しても解ききれませんでした。まず⑤自動生成の「詳しい機能」→「実現性チェック（生成前）」で、人手が足りているかを確かめてください。足りているのに残るときは、もう一度じっくり生成すると良くなることがあります。'}`;
   }
   // 段階最適化の結果（どのルールを何件まで抑えられたか）を表示する
   if (tierLog && tierLog.length) {
@@ -1122,10 +1127,10 @@ function keepWorseMessage(what, sNew, sCur, res, info, opts) {
 
 // ⑤ 自動生成パネル
 function setupGeneratePanel() {
-  const btn = document.getElementById('btnGenerate');          // 🎯 じっくり生成（証明あり）
-  const btnFast = document.getElementById('btnGenerateFast');  // ⚡ 速い生成（証明なし）
+  const btn = document.getElementById('btnGenerate');          // 🎯 じっくり生成
+  const btnFast = document.getElementById('btnGenerateFast');  // ⚡ 1分生成
   // じっくり生成は中で1分生成も作って比べるので、最大で約11分
-  const BTN_LABEL = { proof: 'じっくり生成（証明あり・最大約11分）', fast: '1分生成（証明なし・最大60秒）' };
+  const BTN_LABEL = { proof: 'じっくり生成（最大約11分）', fast: '1分生成（最大60秒）' };   // index.html のボタンの文字と同じ
   const setBusy = (busy) => {
     [btn, btnFast].forEach(b => { if (b) b.disabled = busy; });
     if (busy) { if (btn) btn.textContent = '計算中...'; if (btnFast) btnFast.textContent = '計算中...'; }
@@ -1222,11 +1227,11 @@ function setupGeneratePanel() {
       const cutOff = (res.allOptimal === false);   // 時間切れで打ち切られた＝最良解とは限らない
       const notTimeout = info && cutOff && !info.timedOut;
       $text.textContent = `完了！ 違反 ${res.violations.length}件（${elapsed}秒）` +
-                          (opts.fastMode ? '｜1分生成（証明なし）'
+                          (opts.fastMode ? '｜1分生成（60秒で打ち切った答え）'
                                          : (info && info.pickedFast) ? '｜1分生成の答えのほうが良かったので、そちらを採りました'
                                          : notTimeout ? '｜画面の検査で悪くなる答えを外して、良いほうを採りました（時間切れではありません）'
                                          : cutOff ? '｜時間内でいちばん良い答え（最良とは確認できていません）'
-                                                  : '｜これ以上良い組み合わせは無いと確認済み');
+                                                  : '｜大事な順に、これ以上減らせないことを確かめました');
       // 生成する前の表を元に戻すの履歴に積む（何回か作り直して、良い表へ ↩ で戻れるように）。
       // 前の表が無い（初めて作った・別の月）ときは、今までどおり履歴を空にする。
       if (typeof pushGenHistory === 'function') pushGenHistory(preGen);
@@ -1274,7 +1279,7 @@ function setupGeneratePanel() {
       try { if (typeof syncGenerateResult === 'function') syncGenerateResult(); } catch (_) {}
     }
   };
-  window._runGenerate = runGenerate;   // 「証明ありで解き直す」等から呼ぶ
+  window._runGenerate = runGenerate;   // 「じっくり生成で解き直す」等から呼ぶ
   // 🎯 じっくり生成: 新しいしくみ（newTiering）を使う。ほかの呼び出しは本番 v239 と同じ計算
   btn.addEventListener('click', () => runGenerate({ newTiering: true }));
   if (btnFast) btnFast.addEventListener('click', () => runGenerate({ fastMode: true }));
@@ -1352,35 +1357,37 @@ function showSurplusPopup() {
   if (!hasShortage && !hasSurplus && !hasErrors) return; // 何もなければ出さない
 
   // ── 今回のエラーの原因まとめ（種類ごとに件数と原因・対処を表示）──
+  // 種類 → [原因, 対処]。名前は getViolationLabel から引く（①の「ルールごとの強弱」・エラーの一覧と同じ名前。v268。
+  // 前はここにも別の名前があり、「個人ルール: 切替時2連休」「4連休以上」「副店長・責任者の不在」などと出ていた）
   const CAUSE = {
-    'understaff':         ['人員不足',              'その日その担当に人が足りない',           '定数を下げる／人を増やす'],
-    'off-count':          ['公休不足',              'その人が働きすぎで公休が取りきれない',   '担当できる人を増やして負担を分散'],
-    'consecutive':        ['連勤超過',              '休みの配置が偏って連勤が長い',           '連勤の間に休みを挟む'],
-    'category-switch':    ['連勤中の時間帯切替',    '連勤の中で早番⇔遅番が混ざっている',     '連勤は同じ時間帯で揃える'],
-    'band-switch':        ['早遅の切り替え回数',    '早番⇔遅番の切り替えが1人・月の上限を超えている', '時間帯をまとめて、切り替える日を減らす'],
-    'bad-rest':           ['遅→休→早（リズム）',   '休みの前後で時間帯がちぐはぐ',           '休みの前後の時間帯を揃える'],
-    'pair-rest':          ['個人ルール: 切替時2連休', '遅→早の間の休みが1日しかない',         '休みを2連休以上にする'],
-    'weekend-pref':       ['個人希望: 土日休み',      '土日休み（絶対）の人が土日に出勤',       'その日を休みにして平日と入れ替える'],
-    'rest-style':         ['個人希望: 休み方',        '連休/分散の希望（絶対）に反する配置',     '休みの位置を調整する'],
-    'single-work':        ['単発出勤',              '前後が休みで1日だけ出勤',               '出勤日を連続させる'],
-    'late-early':         ['遅→早',                '退勤から翌出勤までが短い',               '順序を入れ替える'],
-    'long-rest':          ['4連休以上',            '連休が長すぎる（余は除く）',             '休みを分散する'],
-    'hierarchy':          ['責任者の順位',          '上位者がいるのに下位者が責任者',         '責任者を入れ替える'],
-    'skill-late':         ['スキル不足',            '必要スキルの人がその時間帯に足りない',   'スキル保有者を配置／スキル設定を見直す'],
-    'vicemanager-absent': ['副店長・責任者の不在',  'その日カバーできていない',               '副店長かチーフ責任者を配置'],
-    'resp-duplicate':     ['責任者の重複',          '同じ時間帯に責任者が過剰',               'どちらかを通常シフトに'],
-    'role-mismatch':      ['担当外シフト',          '入れないシフトに配置されている',         '担当を見直す／担当を広げる'],
-    'day-skill':          ['日ごとに要るスキル',    'その日そのシフトに要るスキルを持たない人が入っている', 'スキルを持つ人と入れ替える／その日の要るスキルを見直す'],
-    'pref-mismatch':      ['早遅希望と不一致',      '早可/遅可の希望に反している',             '希望に合うよう入れ替える'],
-    'event-absent':       ['行事日の欠勤',          '行事の対象者が休みになっている',         'その日を出勤に'],
-    'balance-diff':       ['早遅バランスのずれ',    '早番多め／遅番多めの目標比率から外れている', '担当シフトを見直す／許容幅を広げる'],
-    'overstaff':          ['定数オーバー',          'その日その担当に必要より多く入っている',   '余った人を休み・有給に回す／必要人数を見直す'],
-    'single-off':         ['単発休み',              '前後が出勤で1日だけの休み',               '休みを2連休にまとめる'],
-    'pair-rest-count':    ['連休の回数不足',        '2連休のかたまりが目安より少ない',         '休みをまとめて連休にする'],
-    'night-after-work':   ['夜勤明けの出勤',        '夜勤の翌日に出勤している',                 '夜勤翌日を休みにする'],
-    'special-day':        ['特別日の配置',          '入れ替え日・新装日に副店長が入っていない', '副店長をその役割に配置する'],
-    'skill-short':        ['スキル目標に不足',      '必要スキルの人が目標人数に届かない',       'スキル保有者を増やす／目標を見直す'],
-    'paid':               ['有給が消化できない',    '設定した有給日数を置く空きがない',         '有給日数を減らす／希望休を調整する'],
+    'understaff':         ['その日その担当に人が足りない',           '定数を下げる／人を増やす'],
+    'off-count':          ['その人が働きすぎで公休が取りきれない',   '担当できる人を増やして負担を分散'],
+    'consecutive':        ['休みの配置が偏って連勤が長い',           '連勤の間に休みを挟む'],
+    'category-switch':    ['連勤の中で早番⇔遅番が混ざっている',     '連勤は同じ時間帯で揃える'],
+    'band-switch':        ['早番⇔遅番の切り替えが1人・月の上限を超えている', '時間帯をまとめて、切り替える日を減らす'],
+    'bad-rest':           ['休みの前後で時間帯がちぐはぐ',           '休みの前後の時間帯を揃える'],
+    'pair-rest':          ['遅→早の間の休みが1日しかない',         '休みを2連休以上にする'],
+    'weekend-pref':       ['土日休み（絶対）の人が土日に出勤',       'その日を休みにして平日と入れ替える'],
+    'rest-style':         ['連休/分散の希望（絶対）に反する配置',     '休みの位置を調整する'],
+    'single-work':        ['前後が休みで1日だけ出勤',               '出勤日を連続させる'],
+    'late-early':         ['退勤から翌出勤までが短い',               '順序を入れ替える'],
+    'long-rest':          ['連休が長すぎる（余は除く）',             '休みを分散する'],
+    'hierarchy':          ['上位者がいるのに下位者が責任者',         '責任者を入れ替える'],
+    'skill-late':         ['必要スキルの人がその時間帯に足りない',   'スキル保有者を配置／スキル設定を見直す'],
+    'vicemanager-absent': ['その日カバーできていない',               '副店長かチーフ責任者を配置'],
+    'resp-duplicate':     ['同じ時間帯に責任者が過剰',               'どちらかを通常シフトに'],
+    'role-mismatch':      ['入れないシフトに配置されている',         '担当を見直す／担当を広げる'],
+    'day-skill':          ['その日そのシフトに要るスキルを持たない人が入っている', 'スキルを持つ人と入れ替える／その日の要るスキルを見直す'],
+    'pref-mismatch':      ['早可/遅可の希望に反している',             '希望に合うよう入れ替える'],
+    'event-absent':       ['行事の対象者が休みになっている',         'その日を出勤に'],
+    'balance-diff':       ['早番多め／遅番多めの目標比率から外れている', '担当シフトを見直す／許容幅を広げる'],
+    'overstaff':          ['その日その担当に必要より多く入っている',   '余った人を休み・有給に回す／必要人数を見直す'],
+    'single-off':         ['前後が出勤で1日だけの休み',               '休みを2連休にまとめる'],
+    'pair-rest-count':    ['2連休のかたまりが目安より少ない',         '休みをまとめて連休にする'],
+    'night-after-work':   ['夜勤の翌日に出勤している',                 '夜勤翌日を休みにする'],
+    'special-day':        ['入れ替え日・新装日に副店長が入っていない', '副店長をその役割に配置する'],
+    'skill-short':        ['必要スキルの人が目標人数に届かない',       'スキル保有者を増やす／目標を見直す'],
+    'paid':               ['表の「有」の日数が、設定した有給日数と違う', '有給日数か、希望休・表の「有」を見直す'],
   };
   const typeCount = {};
   allVios.forEach(v => { typeCount[v.type] = (typeCount[v.type] || 0) + 1; });
@@ -1389,7 +1396,7 @@ function showSurplusPopup() {
     .map(([type, cnt]) => {
       // 一覧に無い種類でも、内部名（balance-diff など）を画面に出さない
       const jp = (typeof getViolationLabel === 'function') ? getViolationLabel(type) : '';
-      const c = CAUSE[type] || [jp || 'その他のルール', '', ''];
+      const c = [jp || 'その他のルール'].concat(CAUSE[type] || ['', '']);
       return `<tr>
         <td style="padding:3px 8px;font-weight:700;white-space:nowrap">${escapeHtml(c[0])}</td>
         <td style="padding:3px 8px;text-align:center;color:var(--lv-must);font-weight:700">${cnt}件</td>

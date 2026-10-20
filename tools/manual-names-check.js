@@ -10,6 +10,7 @@
 // エラー解消プラン・余の使い道・見込み・順番に確認して生成する・余の解消・途中から作り直す・まとめて固定・
 // 自動修正の案・シフト編集・人手が足りない理由の枠・余り・不足の内訳と表の一言）、計算中、確認の文、知らせ、月の切り替え、1分生成のあとの知らせ。
 // 実際に出せなかった名前は、JS の文字列と CSS の content でも探し、そうと分かるように出す。
+// あわせて、①「ルールごとの強弱」の名前がエラーの名前（VIOLATION_LABEL）と同じか、既定（def）が検査・生成の既定と同じかも確かめる（v268）。
 //
 // 使い方（リポジトリの一番上で）:
 //   node tools/manual-names-check.js [作り物のデータ（既定: tools/suite/cases/case01.json）]
@@ -132,6 +133,12 @@ const norm = s => String(s || '').replace(/\s+/g, '');
                             await p.evaluate(() => { (AppState.skills || []).forEach(sk => { sk.min = 9; sk.req = 9; }); AppState.violations = checkViolations(AppState.shifts); renderResultTable(); });
                             await p.click('[data-band-open="short"], [data-band-open="sur"]'); await p.waitForTimeout(800);
                             const t = await p.$('#shpBody [data-rc-toggle]'); if (t) { await t.click(); await p.waitForTimeout(200); } },
+    // ①で「スキル不足」を OFF にしたときの、スキルの行の一言（v268）。band と同じく、この状態の中だけで最低ラインを上げる
+    skilloff:  async p => { await p.click('.tab[data-tab="result"]');
+                            await p.evaluate(() => { (AppState.skills || []).forEach(sk => { sk.min = 9; sk.req = 9; });
+                              AppState.settings.ruleLevels = Object.assign({}, AppState.settings.ruleLevels, { 'skill-late': 'off' });
+                              AppState.violations = checkViolations(AppState.shifts); renderResultTable(); });
+                            await p.click('[data-band-open="short"], [data-band-open="sur"]'); await p.waitForTimeout(800); },
     // 余り・不足の表の一言（v267）: この状態の中だけ（作り物のデータの写し）、7日はほとんどの人を休みの希望にし（全体の行の
     // 「月の合計では足りますが…」）、出られる日数0の人を、ふだん0人で3日だけ1人のシフトに決める（「希望・固定のとおりにすると、休み・有給を…削って…」）。
     // 目標だけのスキルを足す（「最低ラインはありません…」）。
@@ -180,6 +187,25 @@ const norm = s => String(s || '').replace(/\s+/g, '');
     await ctx.close();
   }
 
+  // ①「ルールごとの強弱」の名前がエラーの名前と同じか（または、エラーの名前で始まるか）・既定（def）が検査・生成の既定と同じか（v268）
+  let ruleBad = [];
+  {
+    const { ctx, p } = await fresh();
+    ruleBad = await p.evaluate(() => {
+      document.getElementById('settingsMore').open = true; toggleRuleLevelsPanel();
+      const rows = [...document.querySelectorAll('#ruleLevelsInputs .form-row')];
+      const out = (typeof checkRuleLevelMeta === 'function') ? checkRuleLevelMeta() : ['checkRuleLevelMeta がありません'];
+      RULE_LEVEL_META.forEach((r, i) => {
+        const lab = rows[i] && rows[i].querySelector('label');
+        const nm = lab ? ((lab.querySelector('.rl-name') || lab).textContent || '').trim() : '';
+        const err = getViolationLabel(r.t);
+        if (!(nm === err || nm.startsWith(err))) out.push(`${r.t}: ①「${nm}」／エラー「${err}」`);
+      });
+      return out;
+    });
+    await ctx.close();
+  }
+
   // CSS の content の文字（③の詳細の項目名など）と、JS の文字列
   const css = fs.readFileSync(path.join(ROOT, 'css', 'style.css'), 'utf8');
   const cssC = new Set([...css.matchAll(/content:\s*"([^"]+)"/g)].map(m => norm(m[1])));
@@ -212,7 +238,9 @@ const norm = s => String(s || '').replace(/\s+/g, '');
   const bad = rows.filter(r => !r.how), jsOnly = rows.filter(r => /JS/.test(r.how));
   console.log(`手引きの名前 ${rows.length}種類（${names.length}か所）／ 一致しない ${bad.length} ／ JSの文字列でだけ一致 ${jsOnly.length}`);
   bad.forEach(r => console.log('  一致しない:', r.cls, r.pat || r.t));
+  console.log(`①のルールの名前・既定がエラーの名前・検査の既定と食い違うもの ${ruleBad.length}`);
+  ruleBad.forEach(r => console.log('  食い違い:', r));
   jsOnly.forEach(r => console.log('  JSだけ:', r.cls, r.pat || r.t));
   await b.close(); srv.close();
-  process.exit(bad.length ? 1 : 0);
+  process.exit(bad.length || ruleBad.length ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(2); });

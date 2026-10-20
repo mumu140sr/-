@@ -7,11 +7,11 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=267" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=267" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=267" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=267">
-<link rel="stylesheet" href="css/style.css?v=267" />
+<link rel="icon" href="favicon.svg?v=268" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=268" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=268" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=268">
+<link rel="stylesheet" href="css/style.css?v=268" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -72,7 +72,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v267</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v268</span>
   </div>
   <div class="header-actions">
     <!-- 「データ」メニュー：今のボタンそのものを中に置く（id はそのまま。開閉は js/ui-shell.v6.js） -->
@@ -326,7 +326,7 @@
 
   <!-- ④ 希望休入力 -->
   <section class="tab-panel" id="panel-calendar">
-    <div class="page-head"><div class="page-step">手順 4 / 6</div><h2>希望休・固定シフト入力</h2></div>
+    <div class="page-head"><div class="page-step">手順 4 / 6</div><h2>希望休入力</h2><p class="hint page-sub">休みの希望と、出勤を決めておくシフトを入れます。</p></div>
     <div class="card mark-card">
       <div id="requestMode" class="calendar-mode">
         <div class="mark-bar">
@@ -370,12 +370,13 @@
         <div class="mk-choices" role="radiogroup" aria-label="作り方">
           <label class="mk-choice"><input type="radio" name="genMode" value="fast" checked />
             <span class="mk-text"><span class="mk-name"><svg class="ic" aria-hidden="true"><use href="#i-gen-fast"/></svg>1分生成（おためし）<span class="mk-time">最大60秒</span></span>
-            <span class="mk-desc">設定を直しながら何度も試すとき。1部門あたり最大60秒で打ち切り、その時点のいちばん良い表を返します（証明なし）。</span></span></label>
+            <span class="mk-desc">設定を直しながら何度も試すとき。1部門あたり最大60秒で打ち切り、その時点のいちばん良い表を返します（いちばん良い表かどうかは確かめません）。</span></span></label>
           <label class="mk-choice"><input type="radio" name="genMode" value="deep" />
             <span class="mk-text"><span class="mk-name"><svg class="ic" aria-hidden="true"><use href="#i-gen-deep"/></svg>じっくり生成（本番）<span class="mk-time">最大約11分</span></span>
-            <span class="mk-desc">最終確定はこちら。時間をかけて、より良い組み合わせを探します（証明あり）。</span></span></label>
+            <span class="mk-desc">最終確定はこちら。時間をかけて、より良い組み合わせを探します。時間内に最後まで解ききれないこともあり、どうだったかは終わったあとに出ます。</span></span></label>
         </div>
         <button type="button" id="btnMakeShift" class="btn btn-primary btn-make">シフトを作る</button>
+        <p class="hint mk-note">計算のあいだは、ほかのアプリや重いページを閉じてください。パソコンが混むと、同じ時間で探せる量が減り、表が悪くなることがあります。</p>
         <div class="mk-stop"><button id="btnCancelGenerate" class="btn btn-large btn-stop" style="display:none"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>中止</button></div>
       </div>
     </section>
@@ -410,12 +411,12 @@
         </p>
         <h4 class="fold-h">生成のボタン（個別に実行する）</h4>
         <div class="genmode adv-pad">
-          <div class="genmode-row"><b>1分生成（証明なし）</b><span>1部門あたり最大60秒で打ち切り、その時点の最良の表を返します。設定を直しながら何度も試す段階はこちらが快適です。</span></div>
-          <div class="genmode-row"><b>じっくり生成（証明あり）</b><span>「これ以上良い組み合わせは存在しない」と数学的に確かめるまで解きます。1部門あたり最大約11分（中で1分生成の答えも作り、良いほうを採るため）。<b>最終確定はこちら</b>で。条件が厳しい月ほど、1分生成との差が大きくなります。</span></div>
+          <div class="genmode-row"><b>1分生成（最大60秒）</b><span>1部門あたり最大60秒で打ち切り、その時点のいちばん良い表を返します。いちばん良い表かどうかは確かめません。設定を直しながら何度も試す段階はこちらが快適です。</span></div>
+          <div class="genmode-row"><b>じっくり生成（最大約11分）</b><span>時間をかけて、より良い組み合わせを探します。1部門あたり最大約11分（中で1分生成の答えも作り、良いほうを採るため）。最後まで解ききれたときは「これ以上良い組み合わせは無い」と確かめられます（大事な順に1つずつ確かめるので、件数の合計がいちばん少ないとは限りません）。時間内に解ききれないこともあり、そのときは終わったあとにそう出ます。<b>最終確定はこちら</b>で。条件が厳しい月ほど、1分生成との差が大きくなります。</span></div>
         </div>
         <div class="adv-btns">
-          <button id="btnGenerateFast" class="btn">1分生成（証明なし・最大60秒）</button>
-          <button id="btnGenerate" class="btn">じっくり生成（証明あり・最大約11分）</button>
+          <button id="btnGenerateFast" class="btn">1分生成（最大60秒）</button>
+          <button id="btnGenerate" class="btn">じっくり生成（最大約11分）</button>
         </div>
       </div>
     </details>
@@ -510,13 +511,13 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=267"></script>
-<script src="js/optimizer.v6.js?v=267"></script>
-<script src="js/worker-client.v6.js?v=267"></script>
-<script src="js/ai-explain.v6.js?v=267"></script>
-<script src="js/ui.v6.js?v=267"></script>
-<script src="js/milp.v6.js?v=267"></script>
-<script src="js/app.v6.js?v=267"></script>
-<script src="js/ui-shell.v6.js?v=267"></script>
+<script src="js/data.v6.js?v=268"></script>
+<script src="js/optimizer.v6.js?v=268"></script>
+<script src="js/worker-client.v6.js?v=268"></script>
+<script src="js/ai-explain.v6.js?v=268"></script>
+<script src="js/ui.v6.js?v=268"></script>
+<script src="js/milp.v6.js?v=268"></script>
+<script src="js/app.v6.js?v=268"></script>
+<script src="js/ui-shell.v6.js?v=268"></script>
 </body>
 </html>

@@ -301,19 +301,21 @@ function getRuleLevel(type) {
 }
 // エラーの種類 → 画面に出す日本語名。内部名（balance-diff など）を
 // そのまま表示してしまうことがあったので、一か所にまとめて引けるようにする。
+// 1つのルールに1つの名前（v268）: ①の「ルールごとの強弱」・エラーの原因まとめ・エラー解消プラン・AI診断も、
+// この表から名前を引く（前は①とエラーで15組の名前が違い、エラーを見ても①で同じルールを探せなかった）。
 const VIOLATION_LABEL = {
   'understaff':        '人員不足',
   'overstaff':         '定数オーバー',
   'off-count':         '公休数不足',
   'offShort':          '公休の不足日数',
-  'paid':              '有給が消化できない',
+  'paid':              '有給の日数のずれ',   // v268: 少ないときも多いときも出る（前は「有給が消化できない」）
   'consecutive':       '連勤超過',
   'band-switch':       '早遅の切り替え回数',
-  'late-early':        '遅→早（インターバル不足）',
+  'late-early':        '遅→早（休みなし）',
   'category-switch':   '連勤中の時間帯切替',
-  'bad-rest':          '遅→休→早（リズム）',
+  'bad-rest':          '遅→休→早',
   'long-rest':         '連休が長すぎる',
-  'pair-rest':         '切替時は2連休（個人ルール）',
+  'pair-rest':         '遅→早は2連休（個人ルール）',
   'pair-rest-count':   '連休の回数不足',
   'single-work':       '単発出勤',
   'single-off':        '単発休み',
@@ -325,8 +327,8 @@ const VIOLATION_LABEL = {
   'pref-mismatch':     '早遅希望と不一致',
   'resp-duplicate':    '責任者・総務の重複',
   'vicemanager-absent': '副店長不在',
-  'special-day':       '特別日の配置',
-  'event-absent':      '行事日の欠勤',
+  'special-day':       '特別日の副店長',
+  'event-absent':      '行事日に対象者が休み',
   'night-after-work':  '夜勤明けの出勤',
   'day-skill':         '日ごとに要るスキル',
   'rest-style':        '休み方の希望',
@@ -2876,7 +2878,7 @@ function checkViolations(shifts) {
         if (!isCast && settings.forbidLateEarly && isLate(prevShift)) {
           violations.push({
             staffId: s.id, day: d, type: 'late-early',
-            message: `🚨 遅→半休（インターバル不足・半休は早番扱い）`,
+            message: `🚨 遅→半休（休みなし・半休は早番扱い）`,
             action:  '順序を入れ替えてください',
           });
         }
@@ -2917,7 +2919,7 @@ function checkViolations(shifts) {
         if (!isCast && settings.forbidLateEarly && isLate(prevShift) && isEarlyCategory(cur)) {
           violations.push({
             staffId: s.id, day: d, type: 'late-early',
-            message: `🚨 ${isTraining(cur) ? '遅→' + _trainSym(cur) : '遅→早'}（インターバル不足）`,
+            message: `🚨 ${isTraining(cur) ? '遅→' + _trainSym(cur) : '遅→早'}（休みなし）`,
             action:  '順序を入れ替えてください',
           });
         }
@@ -3041,7 +3043,7 @@ function checkViolations(shifts) {
           if (workedOn(pv) && workedOn(nx) && isLate(pv) && earlySide(nx)) {
             violations.push({
               staffId: s.id, day: d, type: 'pair-rest',
-              message: `🚨 遅→休1日→早（個人ルール: 切替時は2連休以上）${d === 1 ? '・前月末から継続' : ''}`,
+              message: `🚨 遅→休1日→早（個人ルール: 遅→早は2連休）${d === 1 ? '・前月末から継続' : ''}`,
               action:  '休みを2連休以上にするか、時間帯を揃えてください',
             });
           }
@@ -3330,7 +3332,7 @@ function checkViolations(shifts) {
           const shouldBe = moreCapable[0];
           violations.push({
             staffId: respEarlyPerson.id, day: d, type: 'hierarchy',
-            message: `👑 ${d}日 ${shiftSym('早責')}ヒエラルキー違反: ${shouldBe.name}が${shiftSym('早責')}であるべき`,
+            message: `👑 ${d}日 責任者の順位（${shiftSym('早責')}）: ${shouldBe.name}が${shiftSym('早責')}であるべき`,
             action:  `${shouldBe.name}（${POSITION_TYPES[shouldBe.positionType]?.label || shouldBe.positionType}）と${respEarlyPerson.name}のシフトを入れ替えてください`,
           });
         }
@@ -3349,7 +3351,7 @@ function checkViolations(shifts) {
           const shouldBe = moreCapable[0];
           violations.push({
             staffId: respLatePerson.id, day: d, type: 'hierarchy',
-            message: `👑 ${d}日 ${shiftSym('遅責')}ヒエラルキー違反: ${shouldBe.name}が${shiftSym('遅責')}であるべき`,
+            message: `👑 ${d}日 責任者の順位（${shiftSym('遅責')}）: ${shouldBe.name}が${shiftSym('遅責')}であるべき`,
             action:  `${shouldBe.name}（${POSITION_TYPES[shouldBe.positionType]?.label || shouldBe.positionType}）と${respLatePerson.name}のシフトを入れ替えてください`,
           });
         }
@@ -3961,7 +3963,7 @@ function runAIDiagnosis() {
         title: `${pfx}🚨 人手が ${shortage}人日 足りません（このままではエラーが必ず出ます）`,
         detail:
           capLines + `\n` +
-          `不足: ${shortage}人日 → 全員に目標どおり休みを与えつつ必要人数を満たすことは数学的に不可能です。\n` +
+          `不足: ${shortage}人日 → 全員に目標どおり休みを与えつつ必要人数を満たすことは、人数と日数の合計の上でできません。\n` +
           `※ 公休不足・連勤超過・リズム違反（遅→早など）は、この不足が原因で必ず発生します。`,
         suggestion:
           `次のいずれかで解消できます（数字は必要量の目安）：` +
@@ -3986,7 +3988,7 @@ function runAIDiagnosis() {
     } else if (dailyRequired > 0) {
       results.push({
         level: 'ok',
-        title: `${pfx}公休数は数学的に実現可能`,
+        title: `${pfx}公休数は人数と日数の合計の上では足ります`,
         detail:
           capLines + `\n` +
           `余裕: +${gSurplus}人日/月 → スタッフ ${gStaff.length}人 で目標どおりの休みを全員に与えられます。`,
@@ -4010,7 +4012,7 @@ function runAIDiagnosis() {
       if (vmTotalOff > maxAllowableOff) {
         results.push({
           level: 'error',
-          title: `${pfx}副店長の毎日出勤が数学的に不可能`,
+          title: `${pfx}副店長が毎日出勤するのは、人数と日数の合計の上でできません`,
           detail:
             `副店長 ${vms.length}人 の公休合計 ${vmTotalOff}日 が上限 ${maxAllowableOff}日 を超えています。\n` +
             `（毎日1人出勤させるには、公休合計を (人数−1)×${days}日 = ${maxAllowableOff}日 以内にする必要があります）`,
@@ -4168,29 +4170,6 @@ function runAIDiagnosis() {
     const cnt = {};
     violations.forEach(v => { cnt[v.type] = (cnt[v.type] || 0) + 1; });
 
-    const typeLabels = {
-      'consecutive':     '連勤超過',
-      'late-early':      '遅→早インターバル不足',
-      'category-switch': '連勤中の時間帯切替',
-      'bad-rest':        '遅→休→早パターン',
-      'single-work':     '単発出勤',
-      'role-mismatch':   '担当外シフト',
-      'day-skill':       '日ごとに要るスキル',
-      'pref-mismatch':   '早遅希望不一致',
-      'off-count':       '公休数不足',
-      'understaff':      '人員不足',
-      'overstaff':       '定数オーバー',
-      'resp-duplicate':  '責任者・総務の重複',
-      'hierarchy':       '責任者ヒエラルキー違反',
-      'event-absent':    '行事日の休み',
-      'vicemanager-absent': '副店長不在の日',
-      'balance-diff':    '早遅バランスのずれ',
-      'pair-rest-count': '連休回数が目安に不足',
-      'special-day':     '特別日に副店長が責任者不在',
-      'weekend-pref':    '土日休み希望',
-      'rest-style':      '休み方の希望',
-    };
-
     // どのエラーも「誰の何日か」を並べる。件数だけでは直しようがない。
     const whoWhen = (type) => violations.filter(v => v.type === type).map(v => {
       const s = staff.find(m => m.id === v.staffId);
@@ -4200,7 +4179,7 @@ function runAIDiagnosis() {
     // 遅→休→早
     if (cnt['bad-rest']) {
       const cause = surplus < 0
-        ? '公休数の数学的制約により、休みを最適な位置に配置できない日が発生'
+        ? '人数と日数の合計が足りないため、休みを良い位置に置けない日が出る'
         : 'シフトの並びの最適化が収束しきれていない';
       results.push({
         level: 'info',
@@ -4238,7 +4217,7 @@ function runAIDiagnosis() {
       results.push({
         level: surplus < 0 ? 'error' : 'warning',
         title: `公休数不足 ${cnt['off-count']} 件`,
-        detail: detail + (surplus < 0 ? '\n\n→ 数学的制約（上記参照）が主因です。' : ''),
+        detail: detail + (surplus < 0 ? '\n\n→ 人数と日数の合計が足りないこと（上を参照）が主な原因です。' : ''),
         suggestion: surplus < 0
           ? 'スタッフ増員・必要人数削減・最大公休日数の見直しが根本的な解決策です。'
           : '再度「シフト作成」を実行するか、対象スタッフの出勤シフトを1〜2日休みに変更してください。',
@@ -4261,7 +4240,7 @@ function runAIDiagnosis() {
       const days   = vmVios.map(v => `${v.day}日`).join('、');
       results.push({
         level: 'error',
-        title: `副店長不在で${shiftSym('早責')}・${shiftSym('遅責')}もチーフ以上で揃っていない日 ${cnt['vicemanager-absent']} 件`,
+        title: `副店長不在 ${cnt['vicemanager-absent']} 件（副店長が休みで、${shiftSym('早責')}・${shiftSym('遅責')}もチーフ以上で揃っていない日）`,
         detail: `次の日が該当します: ${days}\n毎日、副店長が出勤しているか、${shiftSym('早責')}・${shiftSym('遅責')}の両方がチーフ以上（チーフ or 副店長）で埋まっている必要があります。`,
         suggestion: `副店長を出勤させるか、${shiftSym('早責')}・${shiftSym('遅責')}の両方をチーフ以上に配置してください。「シフト作成」の再実行でも改善します。`,
       });
@@ -4276,7 +4255,7 @@ function runAIDiagnosis() {
       }).filter(Boolean).join('\n');
       results.push({
         level: 'error',
-        title: `行事日に対象スタッフが休み ${cnt['event-absent']} 件`,
+        title: `行事日に対象者が休み ${cnt['event-absent']} 件`,
         detail,
         suggestion: '「シフト作成」を再実行するか、該当日のシフトを手動で出勤に変更してください。',
       });
@@ -4298,7 +4277,7 @@ function runAIDiagnosis() {
     if (cnt['hierarchy']) {
       results.push({
         level: 'warning',
-        title: `責任者ヒエラルキー違反 ${cnt['hierarchy']} 件`,
+        title: `責任者の順位 ${cnt['hierarchy']} 件`,
         detail: '上位役職者が出勤しているのに、下位者が責任者シフトに就いている日があります。\n'
               + `対象: ${whoWhen('hierarchy')}`,
         suggestion: '上の「🔧 具体的な直し方を探す」で、その日の2人を入れ替えれば直ることが多いです。',
@@ -4637,16 +4616,9 @@ function buildRelaxPlans(violations) {
 
   // ── B. 人日は足りているのに残るエラーへの案 ──
   // リズム系・希望系は「ルールの強弱」を下げれば消える（人手は増減しない）。
-  const softenable = [
-    { type: 'category-switch', label: '連勤中の時間帯切替' },
-    { type: 'bad-rest',        label: '遅→休→早' },
-    { type: 'long-rest',       label: '連休が長すぎる' },
-    { type: 'single-work',     label: '単発出勤' },
-    { type: 'weekend-pref',    label: '土日休み希望' },
-    { type: 'rest-style',      label: '休み方（連休/分散）' },
-    { type: 'pair-rest',       label: '遅→早は2連休（個人）' },
-    { type: 'skill-short',     label: 'スキル目標人数に不足' },
-  ];
+  // 名前は VIOLATION_LABEL から引く（①の「ルールごとの強弱」・エラーの一覧と同じ名前。v268）
+  const softenable = ['category-switch', 'bad-rest', 'long-rest', 'single-work', 'weekend-pref', 'rest-style', 'pair-rest', 'skill-short']
+    .map(type => ({ type, label: getViolationLabel(type) }));
   softenable.forEach(r => {
     const n = cnt[r.type] || 0;
     if (!n) return;
@@ -5358,7 +5330,7 @@ function analyzeLowerBound(opts) {
               kind: 'req-pair', day: d, staffId: s.id,
               fix: `${d - 1}日か${d + 1}日の希望を変えるか、${d}日の前後どちらかも休みにしてください`,
               text: `${pfx}${s.name}さん: ${d - 1}日「${shiftSym(a)}」→${d}日 休み→${d + 1}日「${shiftSym(b)}」が希望で確定しています。`
-                  + `この方は「遅→早の切替時は2連休以上」の設定です`,
+                  + `この方は「遅→早は2連休（個人ルール）」の人です（③の「遅→早は連休必須」）`,
             });
           }
         }

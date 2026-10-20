@@ -461,9 +461,13 @@ function _rcWhy(x, total, skill) {
       : `最低ラインはありません。目標に届かない日は「${lv === 'must' ? '絶対' : 'できれば'}」のエラーになります`);
   } else if (x.cut > 0) {
     whys.push(total
-      ? `必要人数を超えて決まっている出勤があり、希望・固定のとおりにすると、休み・有給を${capNum(x.cut)}日削ることになります。${fixCut()}`
-      : `希望・固定のとおりにすると、休み・有給を${capNum(x.cut)}日削って埋めることになります。${fixCut()}`);
+      ? `必要人数を超えている、または必要の無いシフトに決まっている出勤があり、希望・固定のとおりにすると、休み・有給を${capNum(x.cut)}日削ることになります。${fixCut()}`
+      // スキルの行の削る日は、上の部門の表の行（役の行か全体の行）でも同じ日を数えている。足して倍に読まれないように添える（v268）
+      : `希望・固定のとおりにすると、休み・有給を${capNum(x.cut)}日削って埋めることになります${skill ? '（上の部門の表の行と同じ日です）' : ''}。${fixCut()}`);
   }
+  // ①で「スキル不足」を OFF にしていると、最低ラインに足りなくてもシフト表ではエラーにならない（表の数は変えない。v268）
+  if (skill && x.need && typeof getRuleLevel === 'function' && getRuleLevel('skill-late') === 'off')
+    whys.push(`①で「${getViolationLabel('skill-late')}」を OFF にしているので、最低人数に足りなくてもシフト表ではエラーになりません`);
   if (total && x.diff >= 0 && x.short.length) {
     const ds = x.short.map(y => y.day + '日');
     whys.push(`月の合計では足りますが、${ds.slice(0, 3).join('・')}${ds.length > 3 ? ` ほか${ds.length - 3}日` : ''}は足りません`);
@@ -522,14 +526,14 @@ function renderRoleCapacityHtml(pre) {
   const anyCut = t.groups.some(g => g.total.cut > 0 || g.rows.some(r => r.cut > 0)) || t.skills.some(k => k.cut > 0);
   return `<div class="rc-wrap"><h4>できることごとの余り・不足（この月の見込み）</h4>${html}`
     + (roleShort ? `<p class="rc-todo"><b>不足の行があるときは</b>、次のどれかをします：その役を担当できる人を増やす（③スタッフ管理の「担当シフト」。スキルの行は「スキル」）・足りない日の休みの希望や有給を動かす（④希望休入力）・必要人数を見直す（②シフト種別、${rule}）。</p>` : '')
-    + (anyCut ? `<p class="rc-todo"><b>「休み・有給を◯日削って」と出ている行は</b>、その人の出勤の希望・固定が、その人の出られる日数（公休・有給の予定を引いた日数）より多い分です。担当を増やしても、休みの希望を動かしても減りません。行の名前の下に出ている人の出勤の希望・固定を減らす（④希望休入力。固定は⑥シフト表）か、その人の公休数・有給の日数を見直します（③スタッフ管理の「公休数（月の休み数）」「有給（月の有給数）」）。</p>` : '')
+    + (anyCut ? `<p class="rc-todo"><b>「休み・有給を◯日削って」と出ている行は</b>、その人の出勤の希望・固定が、その人の出られる日数（公休・有給の予定と研修の日を引いた日数）より多い分です。担当を増やしても、休みの希望を動かしても減りません。行の名前の下に出ている人の出勤の希望・固定を減らす（④希望休入力。固定は⑥シフト表）か、その人の公休数・有給の日数を見直します（③スタッフ管理の「公休数（月の休み数）」「有給（月の有給数）」）。</p>` : '')
     + (shortTot.length ? `<p class="rc-todo"><b>全体の行が不足のときは</b>、人の数と日数の合計が足りません。担当を増やしたり、休みの希望を別の日へ動かしたりしても、この数は変わりません。必要人数を見直す（②シフト種別、${rule}）か、公休数・有給の日数を見直します（③スタッフ管理の「公休数（月の休み数）」「有給（月の有給数）」）。`
       + (forced.length ? `必要には、必要人数を超えて希望・固定で決まっている出勤（${escapeHtml(forced.join('、'))}）が入っています。その希望・固定を見直すと、不足が減ります。` : '') + '</p>' : '')
     + (comp.length ? `<p class="hint">6連勤を作らずに出せる日数で見ると、次の期間も足りません（作る前の見込みと同じ）：</p><ul class="sp-list rc-comp">${comp.slice(0, 8).map(x => `<li>${escapeHtml(x.text)}</li>`).join('')}${comp.length > 8 ? `<li class="hint">ほか${comp.length - 8}件</li>` : ''}</ul>` : '')
     + `<details class="rc-help"${_rcHelpOpen ? ' open' : ''}><summary class="calc-view-only">表の見方（数の意味と、不足が多く出るわけ）</summary>`
     + `<p class="hint">必要：その役に、この月に入る人の数の合計です（スキルは最低ラインの合計）。出られる：その役ができる人が、この月に出られる日数の合計です（公休の予定・有給・研修・休みの希望と、ほかの役や、その役が要らない日、必要人数より多く決まっている日の出勤を引き、その役が要る日に入れる日数までにしています）。スキルの行は、その時間帯に希望・固定で入っている保有者を、シフト表のエラーと同じく、必要人数を超えていても、研修や人数に数えないシフトでも数えます。目標だけの日も数えます。埋められる：その役が要る日に、できる人を1人1日1つずつ当てはめてみて、埋まる数です。1人が埋めるのは、その人の出られる日数までです（希望・固定で決まっている人は先に入れますが、その人の出られる日数の中でだけ数えます）。余り・不足：休み・有給を削らずに全部埋まれば「余り」（出られる − 必要。0より小さければ0）、埋まらない所があれば「不足」（必要 − 埋められる）です。</p>`
     + `<p class="hint">不足が「必要 − 出られる」より多くなるのは、足りない枠が、だれも入れない日にあったり、出られる人が同じ日に重なっていたりするときです。たとえば、ある1日にしか入れない人が2人いても、その日に要るのが1人なら、入れるのは1人だけです。希望・固定で、その人の出られる日数より多く出勤が決まっているときも、超えた分は埋められるに数えず、不足に残します（予定どおり休みと有給を取らせると足りないため。シフト表の帯の「不足」と同じ考え方です）。その行の名前の下に、休み・有給を何日削ることになるかと、だれの希望・固定かが出ます。</p>`
-    + `<p class="hint">休み・有給を削る日数は、1人ずつ「決まった出勤の日数 − 出られる日数」です。どの日を削るかは、人員不足を防ぐ日（役の枠を埋める日）を先に残し、次にスキルの最低ラインを埋める日（埋めるスキルが多い日から）を残し、同じなら日付の早い日を残して決めます。同じ日・同じシフトに必要人数より多く決まっているときは、削る日に当たらない人で先に枠を埋めます（スキルの最低ラインも同じ）。上の行（部門の表の行と全体の行。スキルの表は入れません）の削る日を足すと、その部門で削る日数の合計になります（どの役の枠も埋めない日は、全体の行に出します。スキルの最低ラインだけを埋める日のときは、スキルの行にも同じ日が出ます）。スキルの行の削る日は、上の行でも同じ日を数えているので、足しません。</p>`
+    + `<p class="hint">休み・有給を削る日数は、1人ずつ「決まった出勤の日数 − 出られる日数」です。どの日を削るかは、人員不足を防ぐ日（役の枠を埋める日。同じ日・同じシフトに必要人数より多く決まっているときは、出られる日数に余裕のある人の日を先に、枠を埋める日とします）を先に残し、次にスキルの最低ラインを埋める日（埋めるスキルが多い日から）を残し、同じなら日付の早い日を残して決めます。同じ日・同じシフトに必要人数より多く決まっているときは、削る日に当たらない人で先に枠を埋めます（スキルの最低ラインも同じ）。上の行（部門の表の行と全体の行。まとめた行の内訳の行と、スキルの表は入れません）の削る日を足すと、その部門で削る日数の合計になります（どの役の枠も埋めない日は、全体の行に出します。スキルの最低ラインだけを埋める日のときは、スキルの行にも同じ日が出ることがあります（その最低ラインを、ほかの削らない保有者が埋めるときは出ません））。スキルの行の削る日は、上の行でも同じ日を数えているので、足しません。</p>`
     + `<p class="hint">全体の行は、だれが何をできるかを見ずに、人の数と日数の合計だけで比べます（AI診断レポートの「人手が◯人日 足りません」と同じ数え方）。足りない日があるときは「月の合計では足りますが、…は足りません」と添えます。</p>`
     + `<p class="hint">足りない日：その日に出られる「できる人」が必要より少ない日です（「合わせて」は、まとめた役のどれにも1人ずつ入れきれない日、「枠」は、できる人はいても入れる枠が足りない日）。足りない日が「なし」でも、月全体で出られる日数が足りないときや、休み・有給を削る日があるときは不足になります。</p>`
     + `<p class="rc-note">同じ人がいくつもの役をできるので、出られる日数は役どうしで取り合いになります。行ごとに見て足りていても、全部の役を同時に埋められるとは限りません。</p>`
@@ -1190,39 +1194,56 @@ function renderEventList() {
 }
 
 // ルールごとの強弱設定 UI ------------------------------------------------
-// t=違反type, l=表示名, g=グループ, def=既定レベル, locked=変更不可
+// t=違反type, d=名前の下に出す短い説明, g=グループ, def=既定レベル, locked=変更不可。
+// 名前は VIOLATION_LABEL（getViolationLabel）から引く（v268。1つのルールに1つの名前。前は l に別の名前を書いていて、
+// エラーの名前と15組が違い、エラーを見ても①で同じルールを探せなかった）。
+// def は getRuleLevel の既定（MUST_TYPES_OPT にあれば 'must'、無ければ 'should'）と同じにする。画面と保存は
+// _ruleDefault（本当の既定）を使い、def が食い違っていれば起動のときに知らせる（checkRuleLevelMeta。v268: 特別日の副店長の
+// def が 'must' で、実際の既定は 'should' だった。画面は「絶対」と出し、「絶対」を選んでも既定と同じとして消され、だれも「絶対」に
+// できなかった）。
 const RULE_LEVEL_META = [
-  { g: '人員・役職', t: 'understaff',        l: '人員不足',              def: 'must', locked: true },
-  { g: '人員・役職', t: 'off-count',         l: '公休数不足',            def: 'must', locked: true },
-  { g: '人員・役職', t: 'consecutive',       l: '連勤超過',              def: 'must', locked: true },
-  { g: '人員・役職', t: 'role-mismatch',     l: '担当外シフト',          def: 'must', locked: true },
-  { g: '人員・役職', t: 'day-skill',         l: '日ごとに要るスキル',    def: 'must', locked: true },
-  { g: '人員・役職', t: 'overstaff',         l: '定数オーバー（必要人数より多い）', def: 'should' },
-  { g: '人員・役職', t: 'vicemanager-absent',l: '副店長不在の日',        def: 'must' },
-  { g: '人員・役職', t: 'resp-duplicate',    l: '責任者・総務の重複',    def: 'must' },
-  { g: '人員・役職', t: 'hierarchy',         l: '責任者ヒエラルキー',    def: 'must' },
-  { g: 'スキル',     t: 'skill-late',        l: 'スキル最低人数割れ',    def: 'must' },
-  { g: 'スキル',     t: 'skill-short',       l: 'スキル目標人数に不足',  def: 'should' },
-  { g: 'リズム',     t: 'late-early',        l: '遅→早（休みなし）',     def: 'must' },
-  { g: 'リズム',     t: 'night-after-work',  l: '夜勤明けの出勤',        def: 'must' },
-  { g: 'リズム',     t: 'single-work',       l: '単発出勤',              def: 'must' },
-  { g: 'リズム',     t: 'category-switch',   l: '連勤中の時間帯切替',    def: 'should' },
-  { g: 'リズム',     t: 'band-switch',       l: '早遅の切り替え回数（1人・月の上限を超える）', def: 'should' },
-  { g: 'リズム',     t: 'bad-rest',          l: '遅→休→早',             def: 'should' },
-  { g: 'リズム',     t: 'long-rest',         l: '連休が長すぎる',        def: 'should',
+  { g: '人員・役職', t: 'understaff',        def: 'must', locked: true },
+  { g: '人員・役職', t: 'off-count',         def: 'must', locked: true },
+  { g: '人員・役職', t: 'consecutive',       def: 'must', locked: true },
+  { g: '人員・役職', t: 'role-mismatch',     def: 'must', locked: true },
+  { g: '人員・役職', t: 'day-skill',         def: 'must', locked: true },
+  { g: '人員・役職', t: 'overstaff',         d: '必要人数より多く入っている', def: 'should' },
+  { g: '人員・役職', t: 'vicemanager-absent', d: '副店長がだれも出勤していない日', def: 'must' },
+  { g: '人員・役職', t: 'resp-duplicate',    def: 'must' },
+  { g: '人員・役職', t: 'hierarchy',         d: '役職が上の人がいるのに、下の人が責任者に入っている', def: 'must' },
+  { g: 'スキル',     t: 'skill-late',        d: '最低人数に足りない', def: 'must' },
+  { g: 'スキル',     t: 'skill-short',       d: '最低人数はいるが、目標人数に届かない', def: 'should' },
+  { g: 'リズム',     t: 'late-early',        d: '遅番の次の日に早番', def: 'must' },
+  { g: 'リズム',     t: 'night-after-work',  def: 'must' },
+  { g: 'リズム',     t: 'single-work',       def: 'must' },
+  { g: 'リズム',     t: 'category-switch',   def: 'should' },
+  { g: 'リズム',     t: 'band-switch',       d: '1人の、早番と遅番の切り替えが月の上限を超える', def: 'should' },
+  { g: 'リズム',     t: 'bad-rest',          d: '遅番→休み1日→早番の並び', def: 'should' },
+  { g: 'リズム',     t: 'long-rest',         def: 'should',
     num: { key: 'maxConsecutiveOff', min: 1, max: 14, def: 3,
            before: '上限', after: '日まで（これを超えるとエラー）' } },
-  { g: '個人希望',   t: 'pref-mismatch',     l: '早遅希望（早可/遅可）', def: 'must' },
-  { g: '個人希望',   t: 'balance-diff',      l: '早遅バランス（早番多め等）', def: 'should',
+  { g: '個人希望',   t: 'pref-mismatch',     d: '③の「早可／遅可」で外した時間帯に入っている', def: 'must' },
+  { g: '個人希望',   t: 'balance-diff',      d: '③の「早遅バランス」（早番多めなど）からずれている', def: 'should',
     num: { key: 'balanceTolerance', min: 0, max: 15, def: 2,
            before: '許容', after: '日までのずれは許す' } },
-  { g: '個人希望',   t: 'weekend-pref',      l: '土日休み希望',          def: 'should' },
-  { g: '個人希望',   t: 'rest-style',        l: '休み方（連休/分散）',   def: 'should' },
-  { g: '個人希望',   t: 'pair-rest',         l: '遅→早は2連休（個人）',  def: 'should' },
-  { g: '個人希望',   t: 'pair-rest-count',   l: '連休回数が目安に不足',  def: 'should' },
-  { g: '行事',       t: 'special-day',       l: '特別日の副店長（入れ替え日/新装日）', def: 'must' },
-  { g: '行事',       t: 'event-absent',      l: '行事日に対象者が休み',  def: 'must' },
+  { g: '個人希望',   t: 'weekend-pref',      def: 'should' },
+  { g: '個人希望',   t: 'rest-style',        d: '③の「休み方」（連休／分散）に合っていない', def: 'should' },
+  { g: '個人希望',   t: 'pair-rest',         d: '③で「遅→早は連休必須」にした人の、遅番→休み1日→早番', def: 'should' },
+  { g: '個人希望',   t: 'pair-rest-count',   d: '2連休の回数が、目安に届かない', def: 'should' },
+  { g: '行事',       t: 'special-day',       d: '入れ替え日・新装日に、副店長が責任者に入っていない', def: 'should' },
+  { g: '行事',       t: 'event-absent',      def: 'must' },
 ];
+// そのルールの本当の既定（getRuleLevel が未設定のときに返すもの）
+function _ruleDefault(t) { return (typeof MUST_TYPES_OPT !== 'undefined' && MUST_TYPES_OPT.has(t)) ? 'must' : 'should'; }
+// RULE_LEVEL_META の def・locked と、本当の既定・RULE_LOCKED が食い違っていないか（食い違いの一覧を返し、あれば console.warn）
+function checkRuleLevelMeta() {
+  const bad = RULE_LEVEL_META.filter(r => r.def !== _ruleDefault(r.t)
+    || (typeof RULE_LOCKED !== 'undefined' && !!r.locked !== RULE_LOCKED.has(r.t))
+    || (typeof VIOLATION_LABEL !== 'undefined' && !VIOLATION_LABEL[r.t]))
+    .map(r => `${r.t}: def=${r.def}・本当の既定=${_ruleDefault(r.t)}${r.locked ? '・固定' : ''}`);
+  if (bad.length) console.warn('ルールごとの強弱（RULE_LEVEL_META）が、検査・生成の既定と食い違っています:', bad.join(' ／ '));
+  return bad;
+}
 
 function toggleRuleLevelsPanel() {
   const panel  = document.getElementById('ruleLevelsPanel');
@@ -1242,9 +1263,10 @@ function renderRuleLevels() {
   let lastG = null;
   RULE_LEVEL_META.forEach(r => {
     if (r.g !== lastG) { html += `<h4 style="margin:12px 0 4px">${r.g}</h4>`; lastG = r.g; }
-    const cur = cfg[r.t] || r.def;
+    const cur = cfg[r.t] || _ruleDefault(r.t);
+    const name = `<span class="rl-name">${escapeHtml(getViolationLabel(r.t))}</span>${r.d ? `<small class="rl-desc">${escapeHtml(r.d)}</small>` : ''}`;
     if (r.locked) {
-      html += `<div class="form-row"><label>${r.l}</label>
+      html += `<div class="form-row"><label>${name}</label>
         <span class="hint"><span class="lv-word lv-must">${uiIcon('must')}絶対</span>（固定・変更不可）</span></div>`;
     } else {
       const opt = (v, lbl) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${lbl}</option>`;
@@ -1258,8 +1280,8 @@ function renderRuleLevels() {
                  min="${r.num.min}" max="${r.num.max}" value="${nv}" style="width:60px" />
           ${r.num.after}</span>`;
       }
-      html += `<div class="form-row"><label>${r.l}</label>
-        <select data-rule="${r.t}" data-def="${r.def}" style="min-width:130px">
+      html += `<div class="form-row"><label>${name}</label>
+        <select data-rule="${r.t}" data-def="${_ruleDefault(r.t)}" style="min-width:130px">
           ${opt('must', '絶対')}${opt('should', 'できれば')}${opt('off', 'OFF（使わない）')}
         </select>${numHtml}</div>`;
     }
@@ -1269,7 +1291,7 @@ function renderRuleLevels() {
   // 両方を絶対にしない使い方にしたので、そうなっているときは知らせる。
   html += '<div id="bsConflictNote" class="hint" style="display:none;margin-top:8px;padding:8px 10px;border-radius:8px;' +
     'background:color-mix(in srgb, var(--warning) 16%, var(--surface));border:1px solid color-mix(in srgb, var(--warning) 40%, transparent)">' +
-    uiIcon('soft') + ' 「早遅バランス」と「早遅の切り替え」が両方とも「絶対」です。この2つはぶつかることがあります。' +
+    uiIcon('soft') + ' 「早遅バランスのずれ」と「早遅の切り替え回数」が両方とも「絶対」です。この2つはぶつかることがあります。' +
     'どちらか一方を「できれば」にしてください。</div>';
   container.innerHTML = html;
   const bsBoth = () => getRuleLevel('balance-diff') === 'must' && getRuleLevel('band-switch') === 'must';
@@ -1284,7 +1306,7 @@ function renderRuleLevels() {
       recheckAfterRuleChange(); // OFF にしたルールは検査で数えないので数え直す（表示中の分類も即反映）
       showBsNote();
       if ((t === 'balance-diff' || t === 'band-switch') && v === 'must' && bsBoth())
-        toast('「早遅バランス」と「早遅の切り替え」が両方「絶対」です。ぶつかることがあるので、どちらか一方を「できれば」にしてください。', 'warning', 8000);
+        toast('「早遅バランスのずれ」と「早遅の切り替え回数」が両方「絶対」です。ぶつかることがあるので、どちらか一方を「できれば」にしてください。', 'warning', 8000);
     });
   });
   container.querySelectorAll('input[data-rulenum]').forEach(el => {
@@ -6880,10 +6902,10 @@ function computeNextStep() {
                why: '配置をどう変えても消えないので、希望休か必要人数のどちらかを動かす必要があります。' });
   }
   return S(`エラー ${vios.length}件 はここまでです`,
-           '設定を緩めても、これ以上は減りません。残りは「シフト表」で手直しするか、'
+           'エラー解消プランの案に、試し計算でいまの表のエラーが減ると分かったものはありませんでした。残りは「シフト表」で手直しするか、'
            + 'このまま運用してください。どうしても減らしたい場合は、希望休や必要人数の見直しが必要です。',
            { goTab: 'result', btn: 'シフト表をひらく',
-             why: 'これ以上は、いまの条件では数学的に減らせないところまで来ています。' });
+             why: 'ボタン1つで変えられる設定では、減らす案が見つかりませんでした。もう一度じっくり生成すると減ることがあります。' });
 }
 
 function renderNextStep() {
@@ -7203,7 +7225,7 @@ function showGenerateWizard() {
         <div style="border:1px solid var(--border);border-radius:8px">${rows}</div>
         <div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--surface-2);line-height:1.9">
           ${floor > 0
-            ? `${uiIcon('soft')} <b>どう並べても ${floor}件 のエラーは残ります</b>（証明済み）。それ以外は並べ方しだいで消せます。`
+            ? `${uiIcon('soft')} <b>どう並べても ${floor}件 のエラーは残ります</b>（人数と日数を数えて確かめたもの）。それ以外は並べ方しだいで消せます。`
             : `${uiIcon('ok')} <b>「どう並べても残るエラー」はありません。</b>並び方のルール（連休の長さ・時間帯の切替など）によるエラーは出ることがあります。`}
           ${best ? `<br>${uiIcon('info')} 前回の表では「${escapeHtml(levelWords(best.title))}」で ${best.measured.gain}件 減りました。` : ''}
         </div>

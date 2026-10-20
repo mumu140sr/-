@@ -81,7 +81,7 @@ function buildAIExplanation() {
     body += `\n・役職マスタで該当シフトの「必要人数」を実情に合わせる`;
     body += `\n・同じ日に休みが集中していないか希望休カレンダーを確認`;
     body += `\n・該当日のシフト表を見て、勤務可能なスタッフを手動で割り当てる`;
-    sections.push({ title: '必要人数の不足', body, severity: 'critical' });
+    sections.push({ title: getViolationLabel('understaff'), body, severity: 'critical' });
   }
 
   // === 2. 連勤超過 ===
@@ -120,7 +120,7 @@ function buildAIExplanation() {
     body += `\n・連勤超過のスタッフの公休を、連勤を分断する位置に手動で移動`;
     body += `\n・スタッフ管理タブで「前月末連勤数」を正しく入力`;
     body += `\n・全体設定の「連勤上限」を実情に合わせる（4日→5日など。6連勤以上はコンプラ違反なので5日まで）`;
-    sections.push({ title: '連勤上限の超過', body, severity: 'critical' });
+    sections.push({ title: getViolationLabel('consecutive'), body, severity: 'critical' });
   }
 
   // === 3. 遅→早禁止 / 遅→研 ===
@@ -138,15 +138,14 @@ function buildAIExplanation() {
       .map(([name, days]) => `${name}（${days.join(', ')}）`).join('\n• ');
 
     let body = `遅番の翌日に早番(または研修)が入っているスタッフが${Object.keys(byStaff).length}名います。`;
-    body += `\nこれは退勤から出勤までのインターバル不足になり、健康・労務面で問題があります。`;
+    body += `\n退勤から次の出勤までの間が短く（休みなし）、健康・労務面で問題があります。`;
     body += `\n• ${detail}`;
     body += `\n\n【解決のヒント】`;
     body += `\n・該当スタッフの翌日のシフトを別の遅番系に変更する`;
     body += `\n・または遅番を別の日に動かす`;
     body += `\n・月初の場合は前月末のシフトを「遅」に正しく設定`;
-    // 見出しの「研」は研修のシフト。研修の種類に表示用の記号が付いていればその記号（v258）
-    const trT = (AppState.shiftTypes || []).find(t => t.isTraining);
-    sections.push({ title: `遅→早(${trT && trT.sym ? trT.sym : '研'})のインターバル不足`, body, severity: 'critical' });
+    // 見出しはエラーの一覧・①の「ルールごとの強弱」と同じ名前（v268）。遅→研修もこの種類に入る
+    sections.push({ title: getViolationLabel('late-early'), body, severity: 'critical' });
   }
 
   // === 4. 役割タイプ違反 ===
@@ -164,11 +163,11 @@ function buildAIExplanation() {
     body += `\n• ${detail}`;
     body += `\n\n【原因として考えられること】`;
     body += `\n• 必要人数を満たすためにやむを得ず代替シフトに入った`;
-    body += `\n• 役割タイプの設定ミス`;
+    body += `\n• 担当シフトの設定ミス`;
     body += `\n\n【解決のヒント】`;
-    body += `\n・スタッフ管理で役割タイプを確認`;
+    body += `\n・スタッフ管理で担当シフトを確認`;
     body += `\n・該当スタッフを別のシフトと交換`;
-    sections.push({ title: '役割タイプの不一致', body, severity: 'critical' });
+    sections.push({ title: getViolationLabel('role-mismatch'), body, severity: 'critical' });
   }
 
   // === 4'. 日ごとに要るスキル（v264） ===
@@ -209,7 +208,7 @@ function buildAIExplanation() {
     body += `\n\n【解決のヒント】`;
     body += `\n・連勤中は同じ時間帯（早系または遅系）で揃える`;
     body += `\n・切替前後の日を別のスタッフと交換`;
-    sections.push({ title: '連勤内の時間帯切替', body, severity: 'warning' });
+    sections.push({ title: getViolationLabel('category-switch'), body, severity: 'warning' });
   }
 
   // === 6. 単発休（遅→休→早） ===
@@ -229,7 +228,7 @@ function buildAIExplanation() {
     body += `\n\n【解決のヒント】`;
     body += `\n・休みを連休にまとめる（前後の勤務日と交換）`;
     body += `\n・休みの前後で時間帯を揃える`;
-    sections.push({ title: '単発休でリズム悪', body, severity: 'warning' });
+    sections.push({ title: getViolationLabel('bad-rest'), body, severity: 'warning' });
   }
 
   // === 7. 早遅希望違反 ===
@@ -248,7 +247,7 @@ function buildAIExplanation() {
     body += `\n\n【解決のヒント】`;
     body += `\n・スタッフ管理で希望の見直し（本当に不可なのか）`;
     body += `\n・別のスタッフと該当日を交換`;
-    sections.push({ title: '早遅希望と不一致', body, severity: 'warning' });
+    sections.push({ title: getViolationLabel('pref-mismatch'), body, severity: 'warning' });
   }
 
   // === 8. 公休数不足/超過 ===
@@ -276,7 +275,7 @@ function buildAIExplanation() {
     body += `\n・公休不足: そのスタッフの勤務日を別の日と交換して休みを作る`;
     body += `\n・公休余剰: 必要人数を増やすか、スタッフ人数を減らすかを検討`;
     sections.push({
-      title: shortage.length > 0 ? '公休数の問題' : '公休数の余剰',
+      title: shortage.length > 0 ? getViolationLabel('off-count') : '公休数の余剰',
       body,
       severity: shortage.length > 0 ? 'critical' : 'info',
     });
