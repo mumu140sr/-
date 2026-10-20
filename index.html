@@ -172,7 +172,7 @@
           <div id="ruleLevelsPanel" style="display:none">
             <p class="hint">
               各ルールを <b class="lv-word lv-must"><svg class="ic" aria-hidden="true"><use href="#i-must"/></svg>絶対</b>（必ず守る）／<b class="lv-word lv-soft"><svg class="ic" aria-hidden="true"><use href="#i-soft"/></svg>できれば</b>（なるべく守る・残ってもOK）／<b>OFF</b>（使わない）で切り替えられます。
-              店舗ごとの運用に合わせてください。<b>人員不足・公休不足・連勤超過・担当外シフト</b>は安全のため固定（変更不可）です。
+              店舗ごとの運用に合わせてください。<b>人員不足・公休数不足・連勤超過・担当外シフト・日ごとに要るスキル</b>は安全のため固定（変更不可）です。
               既定のままなら従来と同じ動作です。
             </p>
             <div id="ruleLevelsInputs"></div>
@@ -370,7 +370,7 @@
         <div class="mk-choices" role="radiogroup" aria-label="作り方">
           <label class="mk-choice"><input type="radio" name="genMode" value="fast" checked />
             <span class="mk-text"><span class="mk-name"><svg class="ic" aria-hidden="true"><use href="#i-gen-fast"/></svg>1分生成（おためし）<span class="mk-time">最大60秒</span></span>
-            <span class="mk-desc">設定を直しながら何度も試すとき。1部門あたり最大60秒で打ち切り、その時点のいちばん良い表を返します（いちばん良い表かどうかは確かめません）。</span></span></label>
+            <span class="mk-desc">設定を直しながら何度も試すとき。1部門あたり最大60秒で探し、見つかったいちばん良い表を返します（いちばん良い表かどうかは確かめません）。</span></span></label>
           <label class="mk-choice"><input type="radio" name="genMode" value="deep" />
             <span class="mk-text"><span class="mk-name"><svg class="ic" aria-hidden="true"><use href="#i-gen-deep"/></svg>じっくり生成（本番）<span class="mk-time">最大約11分</span></span>
             <span class="mk-desc">最終確定はこちら。時間をかけて、より良い組み合わせを探します。時間内に最後まで解ききれないこともあり、どうだったかは終わったあとに出ます。</span></span></label>
@@ -411,7 +411,7 @@
         </p>
         <h4 class="fold-h">生成のボタン（個別に実行する）</h4>
         <div class="genmode adv-pad">
-          <div class="genmode-row"><b>1分生成（最大60秒）</b><span>1部門あたり最大60秒で打ち切り、その時点のいちばん良い表を返します。いちばん良い表かどうかは確かめません。設定を直しながら何度も試す段階はこちらが快適です。</span></div>
+          <div class="genmode-row"><b>1分生成（最大60秒）</b><span>1部門あたり最大60秒で探し、見つかったいちばん良い表を返します。いちばん良い表かどうかは確かめません。設定を直しながら何度も試す段階はこちらが快適です。</span></div>
           <div class="genmode-row"><b>じっくり生成（最大約11分）</b><span>時間をかけて、より良い組み合わせを探します。1部門あたり最大約11分（中で1分生成の答えも作り、良いほうを採るため）。最後まで解ききれたときは「これ以上良い組み合わせは無い」と確かめられます（大事な順に1つずつ確かめるので、件数の合計がいちばん少ないとは限りません）。時間内に解ききれないこともあり、そのときは終わったあとにそう出ます。<b>最終確定はこちら</b>で。条件が厳しい月ほど、1分生成との差が大きくなります。</span></div>
         </div>
         <div class="adv-btns">

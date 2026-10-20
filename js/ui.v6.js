@@ -231,8 +231,8 @@ function _swReasons(p, key, day, fresh) {
         const better = ((group && group.staff) || []).filter(s => s.id !== p.id && isWork(cellOf(s.id, day)) && sameBand(cellOf(s.id, day))
           && (s.allowedShifts || []).includes(key) && getStaffPriority(s) < getStaffPriority(p))
           .sort((a, b) => getStaffPriority(a) - getStaffPriority(b))[0];
-        return better ? `この日は順位が上の${better.name}さんが${bandOf(key)}にいるので、${shiftNameText(key)}は${better.name}さんが入る決まりです（責任者の順番）`
-          : '同じ時間帯に順位が上の人がいるので、責任者の順番の決まりにかかります';
+        return better ? `この日は順位が上の${better.name}さんが${bandOf(key)}にいるので、${shiftNameText(key)}は${better.name}さんが入る決まりです（責任者の順位）`
+          : '同じ時間帯に順位が上の人がいるので、責任者の順位の決まりにかかります';
       }
       case 'role-mismatch': return `${shiftNameText(key)}の担当ではありません`;
       case 'event-absent': return '行事の日に休みになります';
@@ -264,7 +264,7 @@ function _swReasons(p, key, day, fresh) {
   const sayOther = (v, o) => {
     const who = o ? o.name + 'さん' : 'ほかの人';
     if (v.type === 'hierarchy' && o) {
-      return `${who}が${shiftNameText(cellOf(o.id, day))}に入っていて、順位が上の${p.name}さんが同じ時間帯に入ると、責任者の順番の決まりにかかります（2人を入れ替えるとよい）`;
+      return `${who}が${shiftNameText(cellOf(o.id, day))}に入っていて、順位が上の${p.name}さんが同じ時間帯に入ると、責任者の順位の決まりにかかります（2人を入れ替えるとよい）`;
     }
     return `${who}に「${label(v.type)}」のエラーが出ます`;
   };
@@ -1208,9 +1208,10 @@ const RULE_LEVEL_META = [
   { g: '人員・役職', t: 'role-mismatch',     def: 'must', locked: true },
   { g: '人員・役職', t: 'day-skill',         def: 'must', locked: true },
   { g: '人員・役職', t: 'overstaff',         d: '必要人数より多く入っている', def: 'should' },
-  { g: '人員・役職', t: 'vicemanager-absent', d: '副店長がだれも出勤していない日', def: 'must' },
+  // d に記号（早責など）を入れるときは関数にして shiftSym を通す（記号を変えた店でも、その記号で出す。v258）
+  { g: '人員・役職', t: 'vicemanager-absent', d: () => `副店長が2人以上いる店で、副店長がだれも出勤せず、「${shiftSym('早責')}」と「${shiftSym('遅責')}」もチーフ以上でそろっていない日（副店長が1人の店では数えません）`, def: 'must' },
   { g: '人員・役職', t: 'resp-duplicate',    def: 'must' },
-  { g: '人員・役職', t: 'hierarchy',         d: '役職が上の人がいるのに、下の人が責任者に入っている', def: 'must' },
+  { g: '人員・役職', t: 'hierarchy',         d: '同じ時間帯に、責任者を担当できる役職が上の人がいるのに、下の人が責任者に入っている', def: 'must' },
   { g: 'スキル',     t: 'skill-late',        d: '最低人数に足りない', def: 'must' },
   { g: 'スキル',     t: 'skill-short',       d: '最低人数はいるが、目標人数に届かない', def: 'should' },
   { g: 'リズム',     t: 'late-early',        d: '遅番の次の日に早番', def: 'must' },
@@ -1221,16 +1222,18 @@ const RULE_LEVEL_META = [
   { g: 'リズム',     t: 'bad-rest',          d: '遅番→休み1日→早番の並び', def: 'should' },
   { g: 'リズム',     t: 'long-rest',         def: 'should',
     num: { key: 'maxConsecutiveOff', min: 1, max: 14, def: 3,
-           before: '上限', after: '日まで（これを超えるとエラー）' } },
+           before: '上限', after: '日まで（これを超えるとエラー）',
+           msg: v => `「${getViolationLabel('long-rest')}」の上限を ${v}日 に変更しました（${v + 1}連休以上でエラー）` } },
   { g: '個人希望',   t: 'pref-mismatch',     d: '③の「早可／遅可」で外した時間帯に入っている', def: 'must' },
   { g: '個人希望',   t: 'balance-diff',      d: '③の「早遅バランス」（早番多めなど）からずれている', def: 'should',
     num: { key: 'balanceTolerance', min: 0, max: 15, def: 2,
-           before: '許容', after: '日までのずれは許す' } },
+           before: '許容', after: '日までのずれは許す',
+           msg: v => `「${getViolationLabel('balance-diff')}」の許容を ${v}日 に変更しました（${v}日までのずれはエラーにしません）` } },
   { g: '個人希望',   t: 'weekend-pref',      def: 'should' },
   { g: '個人希望',   t: 'rest-style',        d: '③の「休み方」（連休／分散）に合っていない', def: 'should' },
   { g: '個人希望',   t: 'pair-rest',         d: '③で「遅→早は連休必須」にした人の、遅番→休み1日→早番', def: 'should' },
   { g: '個人希望',   t: 'pair-rest-count',   d: '2連休の回数が、目安に届かない', def: 'should' },
-  { g: '行事',       t: 'special-day',       d: '入れ替え日・新装日に、副店長が責任者に入っていない', def: 'should' },
+  { g: '行事',       t: 'special-day',       d: () => `入れ替え日に副店長のだれも「${shiftSym('遅責')}」に入っていない日と、新装日に副店長のだれも「${shiftSym('早責')}」に入っていない日（入れ替え日に「${shiftSym('早責')}」へ入っていてもエラーです）`, def: 'should' },
   { g: '行事',       t: 'event-absent',      def: 'must' },
 ];
 // そのルールの本当の既定（getRuleLevel が未設定のときに返すもの）
@@ -1264,7 +1267,8 @@ function renderRuleLevels() {
   RULE_LEVEL_META.forEach(r => {
     if (r.g !== lastG) { html += `<h4 style="margin:12px 0 4px">${r.g}</h4>`; lastG = r.g; }
     const cur = cfg[r.t] || _ruleDefault(r.t);
-    const name = `<span class="rl-name">${escapeHtml(getViolationLabel(r.t))}</span>${r.d ? `<small class="rl-desc">${escapeHtml(r.d)}</small>` : ''}`;
+    const desc = typeof r.d === 'function' ? r.d() : r.d;
+    const name = `<span class="rl-name">${escapeHtml(getViolationLabel(r.t))}</span>${desc ? `<small class="rl-desc">${escapeHtml(desc)}</small>` : ''}`;
     if (r.locked) {
       html += `<div class="form-row"><label>${name}</label>
         <span class="hint"><span class="lv-word lv-must">${uiIcon('must')}絶対</span>（固定・変更不可）</span></div>`;
@@ -1325,7 +1329,9 @@ function renderRuleLevels() {
         AppState.violations = checkViolations(AppState.shifts);
       }
       renderResultTable();
-      toast(`連休の上限を ${v}日 に変更しました（${v + 1}日以上でエラー）`, 'info');
+      // 知らせは、変えた欄のルールの言葉で出す（前は早遅バランスの許容を変えても「連休の上限を…」と出ていた）
+      const meta = RULE_LEVEL_META.find(r => r.num && r.num.key === key);
+      toast(meta && meta.num.msg ? meta.num.msg(v) : `${v}日 に変更しました`, 'info');
     });
   });
 }
@@ -6901,11 +6907,14 @@ function computeNextStep() {
                skip: 'このまま使う（シフト表をひらく）', skipRun: 'result',
                why: '配置をどう変えても消えないので、希望休か必要人数のどちらかを動かす必要があります。' });
   }
-  return S(`エラー ${vios.length}件 はここまでです`,
-           'エラー解消プランの案に、試し計算でいまの表のエラーが減ると分かったものはありませんでした。残りは「シフト表」で手直しするか、'
-           + 'このまま運用してください。どうしても減らしたい場合は、希望休や必要人数の見直しが必要です。',
+  // 「ここまで」とは言わない（もう一度じっくり生成すると減ることがあるため。v268）
+  return S(`エラー ${vios.length}件 が残っています`,
+           'エラー解消プランの案に、試し計算でいまの表のエラーが減ると分かったものはありませんでした。\n'
+           + '減らすには、「シフト表」で手直しするか、もう一度じっくり生成します（計算のあいだは、ほかのアプリや重いページを閉じてください）。'
+           + 'どうしても減らないときは、希望休や必要人数の見直しが必要です。このままでよければ、そのまま使えます。',
            { goTab: 'result', btn: 'シフト表をひらく',
-             why: 'ボタン1つで変えられる設定では、減らす案が見つかりませんでした。もう一度じっくり生成すると減ることがあります。' });
+             skip: 'じっくり生成で作り直す', skipRun: 'generate',
+             why: 'ボタン1つで変えられる設定では、減らす案が見つかりませんでした。作り直したあとも、「元に戻す」でいまの表に戻せます。' });
 }
 
 function renderNextStep() {
@@ -7225,7 +7234,7 @@ function showGenerateWizard() {
         <div style="border:1px solid var(--border);border-radius:8px">${rows}</div>
         <div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--surface-2);line-height:1.9">
           ${floor > 0
-            ? `${uiIcon('soft')} <b>どう並べても ${floor}件 のエラーは残ります</b>（人数と日数を数えて確かめたもの）。それ以外は並べ方しだいで消せます。`
+            ? `${uiIcon('soft')} <b>どう並べても ${floor}件 のエラーは残ります</b>（作る前の見込みで確かめたもの）。それ以外は並べ方しだいで消せます。`
             : `${uiIcon('ok')} <b>「どう並べても残るエラー」はありません。</b>並び方のルール（連休の長さ・時間帯の切替など）によるエラーは出ることがあります。`}
           ${best ? `<br>${uiIcon('info')} 前回の表では「${escapeHtml(levelWords(best.title))}」で ${best.measured.gain}件 減りました。` : ''}
         </div>

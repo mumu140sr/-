@@ -4128,7 +4128,7 @@ function runAIDiagnosis() {
         level: 'warning',
         title: `🟡【避けられない】${sk.name}が目標${need}人に届かない日 ${belowTarget.length}日`,
         detail: `${bandLabel}に「${sk.name}」を${need}人置きたい日のうち、出られる保有者が${need}人未満なのは:\n${daysStr(belowTarget)}\n` +
-          `→ 最低ライン（${min}人）は満たせるので🟡。人員的な限界なので、この🟡は残っても問題ありません。`,
+          `→ 最低ライン（${min}人）は満たせるので「できれば」のエラーです。人員的な限界なので、残っても問題ありません。`,
         suggestion: `完全に無くすには保有者を増やすか、該当日だけ「日別必要人数」で目標を${Math.max(min, need - 1)}人に下げてください。`,
       });
     }
@@ -4138,7 +4138,7 @@ function runAIDiagnosis() {
         title: `✅ ${sk.name} は人員的には毎日 目標${need}人を出せます`,
         detail: `全${days}日で、${bandLabel}に出られる「${sk.name}」保有者は常に${need}人以上います（＝${sk.name}だけを見れば可能）。\n` +
           `→ それでもスキル不足が出る場合は、保有者が同じ日に他の役割（${shiftSym('早責')}など）や公休と取り合いになるのが原因で、\n` +
-          `　“避けられる”タイプです。案数を増やす・再生成・🛠自動修正で減らせる可能性が高いです。`,
+          `　“避けられる”タイプです。案数を増やす・再生成・「エラーを自動修正」で減らせる可能性が高いです。`,
         suggestion: null,
       });
     }
@@ -4240,8 +4240,8 @@ function runAIDiagnosis() {
       const days   = vmVios.map(v => `${v.day}日`).join('、');
       results.push({
         level: 'error',
-        title: `副店長不在 ${cnt['vicemanager-absent']} 件（副店長が休みで、${shiftSym('早責')}・${shiftSym('遅責')}もチーフ以上で揃っていない日）`,
-        detail: `次の日が該当します: ${days}\n毎日、副店長が出勤しているか、${shiftSym('早責')}・${shiftSym('遅責')}の両方がチーフ以上（チーフ or 副店長）で埋まっている必要があります。`,
+        title: `副店長不在 ${cnt['vicemanager-absent']} 件（副店長がだれも出勤せず、${shiftSym('早責')}・${shiftSym('遅責')}もチーフ以上で揃っていない日）`,
+        detail: `次の日が該当します: ${days}\n副店長が2人以上いる店では、毎日、副店長のだれかが出勤しているか、${shiftSym('早責')}・${shiftSym('遅責')}の両方がチーフ以上（チーフ or 副店長）で埋まっている必要があります（副店長が1人の店では数えません）。`,
         suggestion: `副店長を出勤させるか、${shiftSym('早責')}・${shiftSym('遅責')}の両方をチーフ以上に配置してください。「シフト作成」の再実行でも改善します。`,
       });
     }
@@ -4278,7 +4278,7 @@ function runAIDiagnosis() {
       results.push({
         level: 'warning',
         title: `責任者の順位 ${cnt['hierarchy']} 件`,
-        detail: '上位役職者が出勤しているのに、下位者が責任者シフトに就いている日があります。\n'
+        detail: '同じ時間帯に、責任者を担当できる上位役職者が出勤しているのに、下位者が責任者シフトに就いている日があります。\n'
               + `対象: ${whoWhen('hierarchy')}`,
         suggestion: '上の「🔧 具体的な直し方を探す」で、その日の2人を入れ替えれば直ることが多いです。',
       });
@@ -4629,13 +4629,13 @@ function buildRelaxPlans(violations) {
     plans.push({
       id: 'rule-soften', group: 'rule', pain: 'small',
       gain: eff ? eff.gain : n, count: n, measured: eff,
-      title: `「${r.label}」のルールを ${lv === 'must' ? '🟡できれば に下げる' : 'OFF にする'}`,
+      title: `「${r.label}」のルールを ${lv === 'must' ? '「できれば」に下げる' : 'OFF にする'}`,
       effect: eff ? relaxEffectText(eff) : `${n}件が対象`,
       detail: lv === 'must'
         // 🟡に下げても、そのルールのエラーは画面から消えない。優先順位が下がるだけ。
         // 以前は「件数が減るか警告扱いになります」と書いていたが、実測では
         // 減らないことが多く、設定を変えたのに何も起きないように見えていた。
-        ? `${n}件出ています。🔴絶対 → 🟡できれば に下げても、${r.label}のエラー表示は消えません。`
+        ? `${n}件出ています。「絶対」→「できれば」に下げても、${r.label}のエラー表示は消えません。`
           + `変わるのは優先順位だけで、他のルールを優先して並べ直せるようになります。`
           + `実測では、この変更だけでは件数が変わらないことが多いです。`
           + `確実に消したい場合は OFF にしてください。人手は増減しません。`

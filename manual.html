@@ -339,7 +339,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
         <ul>
           <li>「<span class="m-ui">記号</span>」は、画面と Excel・CSV に出す字です。4文字まで、自由に変えられます。
             <ul>
-              <li>中の名前は変わりません（<span class="m-btn">詳細</span> の中に「<span class="m-msg" data-pat="中の名前：◯（変わりません）">中の名前：早責（変わりません）</span>」と出ます）。決まり（1日1人・責任者の順番など）や、担当シフト・希望・固定・作った表は壊れません。</li>
+              <li>中の名前は変わりません（<span class="m-btn">詳細</span> の中に「<span class="m-msg" data-pat="中の名前：◯（変わりません）">中の名前：早責（変わりません）</span>」と出ます）。決まり（1日1人・責任者の順位など）や、担当シフト・希望・固定・作った表は壊れません。</li>
               <li>空・ほかのシフトや休みの記号と同じ字・「=」「+」「-」「@」で始まる字は使えません。</li>
             </ul>
           </li>
@@ -456,10 +456,10 @@ table.m-table { width: 100%; border-collapse: collapse; }
         <div class="m-tw"><table class="m-table">
           <thead><tr><th>知らせ</th><th>意味</th><th>やること</th></tr></thead>
           <tbody>
-            <tr><td><span class="m-msg" data-pat="1分生成で完了しました">1分生成で完了しました</span></td><td>60秒で打ち切った答えです。いちばん良いとは限りません。</td><td>エラーが残っていれば、<span class="m-btn pri wrap">じっくり生成で解き直す（最大約11分）</span> を押します。</td></tr>
+            <tr><td><span class="m-msg" data-pat="1分生成で完了しました">1分生成で完了しました</span></td><td>最大60秒で探した答えです。いちばん良いかは確かめていません。</td><td>エラーが残っていれば、<span class="m-btn pri wrap">じっくり生成で解き直す（最大約11分）</span> を押します。</td></tr>
             <tr><td><span class="m-msg" data-pat="じっくり生成で完了しました">じっくり生成で完了しました</span></td><td>計算は終わりました。1分生成の答えのほうが良ければ、そちらを使っています。</td><td>そのまま使えます。エラーが残っていれば、設定を見直します。</td></tr>
-            <tr><td><span class="m-msg" data-pat="計算完了">計算完了</span></td><td>最後まで計算しました。大事な順に1つずつ、今の設定ではこれ以上減らせないと確かめました（エラーの件数の合計がいちばん少ないとは限りません）。</td><td>必要人数・公休数・担当シフト・希望休を見直します。</td></tr>
-            <tr><td><span class="m-msg" data-pat="時間内でいちばん良い答えです">時間内でいちばん良い答えです</span></td><td>時間内に計算しきれませんでした。まだ減らせるかもしれません。</td><td><span class="m-btn pri wrap">妥協なしで再計算（早期停止を無効・最大約11分）</span> が出ていれば押します。無ければ、まず <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</span> で人手が足りているかを確かめます。足りているのに残るときは、もう一度じっくり生成すると良くなることがあります。</td></tr>
+            <tr><td><span class="m-msg" data-pat="計算完了">計算完了</span></td><td>最後まで計算しました。大事な順に1つずつ、今の設定ではこれ以上減らせないと確かめました（エラーの件数の合計がいちばん少ないとは限りません）。エラーが0件のときも、この知らせです。</td><td>エラーが残っていれば、必要人数・公休数・担当シフト・希望休を見直します。</td></tr>
+            <tr><td><span class="m-msg" data-pat="時間内でいちばん良い答えです">時間内でいちばん良い答えです</span></td><td>時間内に計算しきれませんでした。まだ減らせるかもしれません。</td><td><span class="m-btn pri wrap">妥協なしで再計算（早期停止を無効・最大約11分）</span> が出ていれば押します。無ければ、まず <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</span> で人手が足りているかを確かめます。足りているのに残るときは、ほかのアプリや重いページを閉じてから、もう一度じっくり生成すると良くなることがあります。妥協なしで再計算のあとは、<span class="m-tab" data-n="6">シフト表</span> の <span class="m-btn pri"><svg class="ic" aria-hidden="true"><use href="#i-repair"/></svg>エラーを自動修正</span> を試すか、手で直します。</td></tr>
           </tbody>
         </table></div>
         <p>妥協なしで再計算・じっくり生成で解き直す の答えが、いまの表より良くなかったときは、表を変えずに知らせます。知らせの中の「<span class="m-msg" data-pat="決め手は">決め手は…です</span>」が、どこで比べていまの表のほうが良かったかです。</p>
@@ -490,7 +490,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>人員不足の行の <span class="m-btn">理由を見る</span> を押すと、表の下の必要人数の行のそのマスへ移り、画面の下に、足りない理由の枠が出ます。必要人数の行で、足りない日の小さな数（入っている人数）もボタンです。押すか、<span class="m-key">Tab</span> で選んで <span class="m-key">Enter</span> を押しても出ます。
             <ul>
               <li>そのシフトができる人が、一人ずつ、なぜ入っていないかが出ます（休みの希望・有給・固定・夜勤明け・ほかのシフトに入っている・連勤の上限・その日に要るスキルが無い・遅→早 など）。入れると困ることは、「早遅の切り替えが、月の上限を超えます」「早番の「営業」が1人足りなくなります」のように、何がどうなるかで書きます。</li>
-              <li>「<span class="m-ui">担当を足せば入れられる人</span>」：その日が空いていて、<span class="m-tab" data-n="3">スタッフ管理</span> でそのシフトを担当に足せば入れられる人です。入れると困ること（責任者の順番など）も書きます。</li>
+              <li>「<span class="m-ui">担当を足せば入れられる人</span>」：その日が空いていて、<span class="m-tab" data-n="3">スタッフ管理</span> でそのシフトを担当に足せば入れられる人です。入れると困ること（責任者の順位など）も書きます。</li>
               <li>「<span class="m-ui">どうすれば</span>」：直し方の候補です。</li>
               <li>表・希望・設定を変えると、枠の中を数え直します。✕ か <span class="m-key">Esc</span> で閉じます。枠を見るだけでは、表は変わりません。</li>
             </ul>
@@ -573,9 +573,9 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <tr><td><span class="m-ui">担当外シフト</span></td><td>担当シフトに無いシフトが入っている。</td><td>担当シフトにチェックを足すか、そのマスを変えます。</td></tr>
           <tr><td><span class="m-ui">日ごとに要るスキル</span></td><td>その日のそのシフトに要るスキルを、持っていない人が入っている（希望・固定・手で直したマス）。</td><td>スキルを持つ人と入れ替えるか、その日の要るスキルを見直します。</td></tr>
           <tr><td><span class="m-ui">定数オーバー</span></td><td>必要人数より多く入っている。</td><td>出勤の固定や希望を減らします。</td></tr>
-          <tr><td><span class="m-ui">副店長不在</span></td><td>副店長がいない日に、早責・遅責もチーフ以上でそろっていない。</td><td>副店長の休みをずらします。</td></tr>
+          <tr><td><span class="m-ui">副店長不在</span></td><td>副店長が2人以上いる店で、副店長がだれも出勤せず、早責・遅責もチーフ以上でそろっていない日。副店長が1人の店では数えません。</td><td>副店長の休みをずらします。</td></tr>
           <tr><td><span class="m-ui">責任者・総務の重複</span></td><td>同じ時間帯に、早責などが2人以上いる。</td><td>片方を、ふつうのシフトにします。</td></tr>
-          <tr><td><span class="m-ui">責任者の順位</span></td><td>上の役職の人が出勤しているのに、下の人が責任者になっている。</td><td>責任者を、上の人と入れ替えます。</td></tr>
+          <tr><td><span class="m-ui">責任者の順位</span></td><td>同じ時間帯に、責任者を担当できる上の役職の人が出勤しているのに、下の人が責任者になっている。</td><td>責任者を、上の人と入れ替えます。</td></tr>
           <tr class="m-grp"><th colspan="3"><span class="m-ui">スキル</span></th></tr>
           <tr><td><span class="m-ui">スキル不足</span></td><td>その時間帯に、スキルのある人が最低人数より少ない。</td><td>スキルのある人の休みをずらします。</td></tr>
           <tr><td><span class="m-ui">スキル目標に不足</span></td><td>最低人数はいるが、目標に届かない。</td><td>困らなければ、そのままでよいです。</td></tr>
@@ -595,7 +595,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <tr><td><span class="m-ui">遅→早は2連休（個人ルール）</span></td><td>遅番から早番になるとき、休みが1日しかない。</td><td>2連休にします。</td></tr>
           <tr><td><span class="m-ui">連休の回数不足</span></td><td>2連休の回数が、目安に届かない。</td><td>休みの位置を変えます。</td></tr>
           <tr class="m-grp"><th colspan="3"><span class="m-ui">行事</span></th></tr>
-          <tr><td><span class="m-ui">特別日の副店長</span></td><td>入れ替え日・新装日に、副店長が遅責・早責に入っていない。はじめは「できれば」です。</td><td>副店長を、その日の責任者にします。</td></tr>
+          <tr><td><span class="m-ui">特別日の副店長</span></td><td>入れ替え日に副店長のだれも遅責に入っていない、または新装日に副店長のだれも早責に入っていない。入れ替え日に早責へ入っていてもエラーです。はじめは「できれば」です。</td><td>副店長を、入れ替え日は遅責に、新装日は早責にします。</td></tr>
           <tr><td><span class="m-ui">行事日に対象者が休み</span></td><td>行事の対象の人が、その日に休みになっている。</td><td>その人の休みをほかの日にずらします。</td></tr>
           <tr class="m-grp"><th colspan="3">そのほか</th></tr>
           <tr><td>有給の日数のずれ</td><td>「有」の日数が、「<span class="m-ui">有給（月の有給数）</span>」と違う。</td><td>有給の日数か、表の「有」を直します。</td></tr>
