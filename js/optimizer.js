@@ -6118,7 +6118,7 @@ function _maxFlow(n, edges, s, t) {
  * スキルの行も同じ形の割り当て（保有者 → 保有者×日 → (部門, 日, シフト) の枠 → 日の最低ライン）。足りない日もこの形で数えるので、
  * 作る前の見込み（daySkillHave・daySkillSlotMax）の日に加えて、日ごとに要るスキルや必要人数0のシフトで入れない日も出る。
  * 希望・🔒で決まっている出勤のうち、どの人の日を枠を埋めるのに使ったことにするか（必要人数より多く決まっているとき）は、
- * 出られる日数に余裕のある人から（同じなら id の順）。スタッフの並び順では変わらない。
+ * 削る日に当たらない人から、同じなら出られる日数に余裕のある人から（同じなら id の順）。スタッフの並び順では変わらない。
  */
 function roleCapacityTable() {
   const days = getDaysInMonth(AppState.settings.targetMonth);
@@ -6148,31 +6148,37 @@ function roleCapacityTable() {
   // （v267 の直し: スタッフの並び順で、出られると「休み・有給を削った出勤」の一言が変わっていた）
   const spare = s => caps[s.id].avail - Object.keys(caps[s.id].fixedWork).length;
   const byRoom = list => list.slice().sort((a, b) => (spare(b) - spare(a)) || String(a.id).localeCompare(String(b.id), 'en', { numeric: true }));
+  // 決まっている出勤のうち、枠を埋めるのに使う日。同じ日・同じシフトに必要人数より多く決まっていれば、必要人数ぶんだけ。
+  // 使う順は、削る日（cutOf）に当たらない人を先に、同じなら出られる日数に余裕のある人から（cutOf が無ければ余裕の順だけ）
+  const pickUsedFix = (x, cutOf) => {
+    const usedFix = {};
+    const order = byRoom(x.g.staff);
+    for (let d = 1; d <= days; d++) shiftKeys.forEach(k => {
+      const q = x.dayReq(k, d);
+      if (!q) return;
+      const fk = order.filter(s => caps[s.id].fixedWork[d] === k);
+      (cutOf ? fk.filter(s => !cutOf(s.id, d)).concat(fk.filter(s => cutOf(s.id, d))) : fk)
+        .slice(0, q).forEach(s => mark(usedFix, s.id, d));
+    });
+    return usedFix;
+  };
   const gInfo = groups.map(g => {
     const dayReq = (k, d) => { const n = Math.ceil(Number(getDayReq(g.reqs, g.dailyReqs || {}, k, d))); return Number.isFinite(n) && n > 0 ? n : 0; };
     const av = [null];
     for (let d = 1; d <= days; d++) av[d] = dayRoleAvail(g, d, shiftKeys);
-    // 決まっている出勤のうち、枠を埋めるのに使う日。同じ日・同じシフトに必要人数より多く決まっていれば、余裕のある人から必要人数ぶんだけ
-    const usedFix = {};
-    const order = byRoom(g.staff);
-    for (let d = 1; d <= days; d++) shiftKeys.forEach(k => {
-      const q = dayReq(k, d);
-      let n = 0;
-      order.forEach(s => { if (n < q && caps[s.id].fixedWork[d] === k) { mark(usedFix, s.id, d); n++; } });
-    });
-    return { g, dayReq, av, usedFix };
+    return { g, dayReq, av, usedFix: null };
   });
-  // 削る日（v267 の直し）: 1人ずつ、希望・🔒で決まっている出勤（研修を除く）のうち、出られる日数ぶんまでを出勤できる日とし、
-  // 残りを、休み・有給を削らないと入れない日とする。先に削るのは、どの枠も埋めない決まった出勤（役の必要人数を超えている・必要0人・
-  // 人数に数えないシフトで、どのスキルの最低ラインも埋めない日）。残りは日付の早い順に使い、遅い日付を削る（枠を埋めない日まで日付の順に
-  // 使っていて、同じ形でも役に立たない日が1日目か6日目かで「不足1」と「余り148」に分かれていた）。1人につき1回だけ決めて各行に配る
-  // （行ごとに「ほかの行の決まった日を先に使った」として数えていたため、同じ人の削る日が行ごとに重なっていた）。並び順・行の順にはよらない
-  const fillFix = {};
-  gInfo.forEach(x => Object.keys(x.usedFix).forEach(id => x.usedFix[id].forEach(d => mark(fillFix, id, d))));
-  // スキルの最低ラインを先に埋める決まった出勤も「枠を埋める日」に数える（下のスキルの行の、最低ラインを先に埋める人と同じ選び方:
-  // 同じ並び（byRoom）・同じ時間帯の判定。研修の日は削る日にならないので入れない）。v267 の8回目: 役の行の枠しか見ておらず、必要人数0の
-  // シフトでスキルの最低ラインを埋めている日を先に削り、ほかの日を削れば足りるのに、スキルの行に不足が出ていた。
-  // 目標だけの日（最低ラインの無い日）は入れない（表の必要に入らない日を守ると、役の枠や最低ラインを埋める日が代わりに削られるため）
+  // 削る日（v267 の9回目）: 1人ずつ、希望・🔒で決まっている出勤（研修を除く）のうち、出られる日数（0より小さければ0）ぶんを残し、
+  // 残りを、休み・有給を削らないと入れない日とする。残す順は ① 役の枠を埋める日（いまの並びで選んだ usedFix）② スキルの最低ラインを
+  // 多く埋める日（下のスキルの行の、最低ラインを先に埋める人と同じ選び方: 同じ並び（byRoom）・同じ時間帯の判定。研修の日は数えない。
+  // 目標だけの日は数えない）③ 日付の早い日。1人につき1回だけ決めて各行に配る。並び順・行の順にはよらない
+  // （8回目までは、役の枠を埋める日とスキルの最低ラインを埋める日を同じ重さで日付の順に残していて、人員不足を防ぐ日を削ることがあった）
+  const roleFill = {};
+  gInfo.forEach(x => {
+    x.usedFix = pickUsedFix(x, null);
+    Object.keys(x.usedFix).forEach(id => x.usedFix[id].forEach(d => mark(roleFill, id, d)));
+  });
+  const skillFill = {};   // 人 → 日 → その日に最低ラインを先に埋めるスキルの数
   (AppState.skills || []).forEach(sk => {
     const inBand = _skillInBand(sk);
     const hOrder = byRoom(AppState.staff.filter(s => (s.skills || []).includes(sk.name)));
@@ -6184,7 +6190,7 @@ function roleCapacityTable() {
         const st = staffDayState(s, d);
         if (st === 'off' || st === 'free') return;
         if (!inBand(getFixedShiftAt(s.id, d))) return;
-        if (fh < min && st !== 'training') mark(fillFix, s.id, d);
+        if (fh < min && st !== 'training') { const m = (skillFill[s.id] = skillFill[s.id] || {}); m[d] = (m[d] || 0) + 1; }
         fh++;
       });
     }
@@ -6192,10 +6198,14 @@ function roleCapacityTable() {
   const cutDays = {};
   AppState.staff.forEach(s => {
     const c = caps[s.id];
-    const ds = Object.keys(c.fixedWork).map(Number).sort((a, b) => a - b);
-    ds.filter(d => has(fillFix, s.id, d)).concat(ds.filter(d => !has(fillFix, s.id, d)))
+    const sf = d => (skillFill[s.id] && skillFill[s.id][d]) || 0;
+    Object.keys(c.fixedWork).map(Number)
+      .sort((a, b) => (+has(roleFill, s.id, b) - +has(roleFill, s.id, a)) || (sf(b) - sf(a)) || (a - b))
       .slice(Math.max(0, c.avail)).forEach(d => mark(cutDays, s.id, d));
   });
+  // 削る日を決めたあとで、枠を埋める人を選び直す（削る日に当たらない人を先に）。削る人は、ほかの人が足りないときだけ数え、
+  // その日は削る日として数える。選び直しても、だれの削る日も変わらない
+  gInfo.forEach(x => { x.usedFix = pickUsedFix(x, (id, d) => has(cutDays, id, d)); });
   gInfo.forEach(({ g, dayReq, av, usedFix }) => {
     const statOf = (keys) => {
       let need = 0;
@@ -6313,15 +6323,16 @@ function roleCapacityTable() {
       const want = Math.max(min > 0 ? min : 0, need > 0 ? need : 0);
       if (!want) continue;   // 最低ラインか目標のある日だけ（出られるは目標だけの日も数える。v267 の直し）
       // 希望・🔒でその時間帯のシフトに決まっている保有者。検査と同じく、研修・人数に数えないシフト・必要人数を超えた人も数える
+      // 削る日に当たらない保有者（研修の人も入れる）を先にする。削る人は、ほかの保有者が足りないときだけ数える（v267 の9回目）
       let fh = 0;
-      hOrder.forEach(s => {
+      const inFix = hOrder.filter(s => { const st = staffDayState(s, d); return st !== 'off' && st !== 'free' && inBand(getFixedShiftAt(s.id, d)); });
+      const cutHere = s => staffDayState(s, d) !== 'training' && has(cutDays, s.id, d);
+      inFix.filter(s => !cutHere(s)).concat(inFix.filter(cutHere)).forEach(s => {
         const st = staffDayState(s, d);
-        if (st === 'off' || st === 'free') return;
-        if (!inBand(getFixedShiftAt(s.id, d))) return;
         if (fh < want) { mark(usedSk, s.id, d); if (st === 'training') mark(usedTrain, s.id, d); canDays[s.id] = (canDays[s.id] || 0) + 1; }
         // 最低ラインを先に埋める人。役の行と同じく、その人の削る日（cutDays）に当たれば埋められるに数えない（研修の日は削る日にならない）
         if (min > 0 && fh < min) {
-          if (st !== 'training' && has(cutDays, s.id, d)) { cut++; cutBy[s.id] = (cutBy[s.id] || 0) + 1; } else prefill++;
+          if (cutHere(s)) { cut++; cutBy[s.id] = (cutBy[s.id] || 0) + 1; } else prefill++;
         }
         fh++;
       });
