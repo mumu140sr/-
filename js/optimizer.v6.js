@@ -6163,12 +6163,32 @@ function roleCapacityTable() {
     return { g, dayReq, av, usedFix };
   });
   // 削る日（v267 の直し）: 1人ずつ、希望・🔒で決まっている出勤（研修を除く）のうち、出られる日数ぶんまでを出勤できる日とし、
-  // 残りを、休み・有給を削らないと入れない日とする。先に削るのは、どの枠も埋めない決まった出勤（必要人数を超えている・必要0人・
-  // 人数に数えないシフト）。残りは日付の早い順に使い、遅い日付を削る（枠を埋めない日まで日付の順に使っていて、同じ形でも
-  // 役に立たない日が1日目か6日目かで「不足1」と「余り148」に分かれていた）。1人につき1回だけ決めて各行に配る
+  // 残りを、休み・有給を削らないと入れない日とする。先に削るのは、どの枠も埋めない決まった出勤（役の必要人数を超えている・必要0人・
+  // 人数に数えないシフトで、どのスキルの最低ラインも埋めない日）。残りは日付の早い順に使い、遅い日付を削る（枠を埋めない日まで日付の順に
+  // 使っていて、同じ形でも役に立たない日が1日目か6日目かで「不足1」と「余り148」に分かれていた）。1人につき1回だけ決めて各行に配る
   // （行ごとに「ほかの行の決まった日を先に使った」として数えていたため、同じ人の削る日が行ごとに重なっていた）。並び順・行の順にはよらない
   const fillFix = {};
   gInfo.forEach(x => Object.keys(x.usedFix).forEach(id => x.usedFix[id].forEach(d => mark(fillFix, id, d))));
+  // スキルの最低ラインを先に埋める決まった出勤も「枠を埋める日」に数える（下のスキルの行の、最低ラインを先に埋める人と同じ選び方:
+  // 同じ並び（byRoom）・同じ時間帯の判定。研修の日は削る日にならないので入れない）。v267 の8回目: 役の行の枠しか見ておらず、必要人数0の
+  // シフトでスキルの最低ラインを埋めている日を先に削り、ほかの日を削れば足りるのに、スキルの行に不足が出ていた。
+  // 目標だけの日（最低ラインの無い日）は入れない（表の必要に入らない日を守ると、役の枠や最低ラインを埋める日が代わりに削られるため）
+  (AppState.skills || []).forEach(sk => {
+    const inBand = _skillInBand(sk);
+    const hOrder = byRoom(AppState.staff.filter(s => (s.skills || []).includes(sk.name)));
+    for (let d = 1; d <= days; d++) {
+      const { min } = getDaySkillReq(sk, d);
+      if (!(min > 0)) continue;
+      let fh = 0;
+      hOrder.forEach(s => {
+        const st = staffDayState(s, d);
+        if (st === 'off' || st === 'free') return;
+        if (!inBand(getFixedShiftAt(s.id, d))) return;
+        if (fh < min && st !== 'training') mark(fillFix, s.id, d);
+        fh++;
+      });
+    }
+  });
   const cutDays = {};
   AppState.staff.forEach(s => {
     const c = caps[s.id];
