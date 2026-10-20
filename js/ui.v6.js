@@ -3415,12 +3415,24 @@ function recordDeltaHistory(list, opts) {
   _redoStack = []; _redoBeforeRecord = null;
   updateHistoryButtons();
 }
-/** 画面の控えで丸ごと戻した変更の組を、元に戻す・やり直すの履歴から外す（戻したあとに ↩・↪ が何もしない・取り消した変更をもう一度入れる、にならないように） */
-function _dropHistoryDeltas(lists) {
+/**
+ * 画面の控えで丸ごと戻した変更の組を、元に戻す・やり直すの履歴から外す（戻したあとに ↩・↪ が何もしない・取り消した変更をもう一度入れる、
+ * にならないように）。redo: その画面で最初に組を積む前の「やり直す」の履歴（_redoSaveForSnap）。外したあと、そのあとにほかの変更が
+ * 履歴に積まれていなければ（元に戻すの履歴が積む前と同じ）、やり直すの履歴を戻す（v267 の直し: 直してから取り消すと ↪ が消えていた）
+ */
+function _dropHistoryDeltas(lists, redo) {
   if (!lists || !lists.size) return;
   _undoStack = _undoStack.filter(st => !(st.delta && lists.has(st.delta)));
   _redoStack = _redoStack.filter(st => !(st.delta && lists.has(st.delta)));
+  if (redo && !_redoStack.length && _undoStack.length === redo.undoLen && (!redo.undoLen || _undoStack[_undoStack.length - 1] === redo.undoTop)) {
+    _redoStack = redo.redo; _redoBeforeRecord = null;
+  }
   updateHistoryButtons();
+}
+/** 画面の中で最初に組を積んだときに、積む前の「やり直す」の履歴と、元に戻すの履歴の形を控える（_dropHistoryDeltas の redo） */
+function _redoSaveForSnap(redoBefore) {
+  const n = _undoStack.length - 1;   // 積んだ組（いちばん上）を除いた数
+  return { redo: redoBefore || [], undoLen: n, undoTop: n > 0 ? _undoStack[n - 1] : null };
 }
 function _afterHistoryApply(touchedStaff) {
   try { _afterHistoryApplyInner(touchedStaff); } finally { syncGenerateResult(); }
@@ -6744,8 +6756,8 @@ let _nextStepAcked = false;
 
 // 指摘に付いている「ボタン1つで直せる操作」を実行する。変えた所だけを元に戻すの履歴に積む（v267 の直し: 積んでいなかったので
 // ↩ で戻せなかった）。順番に確認して生成するの中から押したとき（opts.inWizard）は、その画面の「戻す」の控えには当てない
-// （ページの「このページの変更を取り消す」で、これまでどおり戻せるように）。積んだ組は opts.onRecord に渡す
-// （その画面が控えで戻したら、履歴からも外すため）
+// （ページの「このページの変更を取り消す」で、これまでどおり戻せるように）。積んだ組と、積む前の「やり直す」の履歴を
+// opts.onRecord に渡す（その画面が控えで戻したら、履歴からも外し、やり直すの履歴を戻すため）
 function applyNextAct(act, opts) {
   if (!act) return false;
   const hb = (typeof captureChangeBase === 'function') ? captureChangeBase() : null;
@@ -6775,8 +6787,9 @@ function applyNextAct(act, opts) {
   }
   if (done && hb && typeof changesSince === 'function') {
     const list = changesSince(hb);
+    const redoBefore = _redoStack;   // 積むと「やり直す」の履歴が空になるので、積む前のものを画面に渡す（控えで戻したときに戻せるように）
     recordDeltaHistory(list, opts && opts.inWizard ? { noRebase: true } : null);
-    if (list && list.length && opts && opts.onRecord) opts.onRecord(list);
+    if (list && list.length && opts && opts.onRecord) opts.onRecord(list, redoBefore);
   }
   return done;
 }
@@ -6941,11 +6954,12 @@ function showGenerateWizard() {
   const WZ_KINDS = ['requests', 'fixedShifts', 'dailyRequirements', 'dailyRequirementsCast', 'paid'];
   // 控えで丸ごと戻す。C12: 控えに当てた変更の履歴の組を戻したあとの値に付け替え、表があれば違反を数え直す。
   // 返り値: 余の解消・余の使い道の変更を残したか
-  const restore = (o, rec, own) => {
+  const restore = (o, rec, own, redo) => {
     if (!o) return false;
     SNAP_KEYS.forEach(k => { AppState[k] = JSON.parse(JSON.stringify(o[k])); });
     const kept = _retargetSnapHistory(WZ_KINDS, rec);
-    _dropHistoryDeltas(own);   // この画面の直すボタン（applyNextAct）で積んだ組は、控えで戻したので履歴から外す
+    // この画面の直すボタン（applyNextAct）で積んだ組は、控えで戻したので履歴から外す。ほかの変更が無ければ「やり直す」の履歴も戻す
+    _dropHistoryDeltas(own, redo);
     if (AppState.shifts && Object.keys(AppState.shifts).length) AppState.violations = checkViolations(AppState.shifts);
     autoSave(); refreshAllUI();
     return kept;
@@ -6958,7 +6972,8 @@ function showGenerateWizard() {
   let stepRec = _newSnapRec();
   const openOwn = new Set();        // この画面の直すボタンで積んだ履歴の組（開いてから・いまのページに入ってから）
   let stepOwn = new Set();
-  const newStepSnap = () => { stepSnap = snap(); stepRec = _newSnapRec(); stepOwn = new Set(); };
+  let openRedo = null, stepRedo = null;   // そのとき最初に組を積む前の「やり直す」の履歴（_redoSaveForSnap）
+  const newStepSnap = () => { stepSnap = snap(); stepRec = _newSnapRec(); stepOwn = new Set(); stepRedo = null; };
   const wzRebase = (list, dir) => {
     if (!modal.isConnected) { _snapRebasers.delete(wzRebase); return; }
     _rebaseSnapWith(list, dir, openSnap, WZ_KINDS, openRec);
@@ -7246,14 +7261,14 @@ function showGenerateWizard() {
     const $ = (id) => modal.querySelector('#' + id);
     if ($('wzPrev')) $('wzPrev').addEventListener('click', () => {
       // このページでやったことは取り消してから戻る
-      if (!same(stepSnap, snap())) restoredMsg('このページでの変更を取り消しました', restore(stepSnap, stepRec, stepOwn));
+      if (!same(stepSnap, snap())) restoredMsg('このページでの変更を取り消しました', restore(stepSnap, stepRec, stepOwn, stepRedo));
       step--; newStepSnap(); render();
     });
     if ($('wzUndo')) $('wzUndo').addEventListener('click', () => {
-      restoredMsg('このページでの変更を取り消しました', restore(stepSnap, stepRec, stepOwn)); render();
+      restoredMsg('このページでの変更を取り消しました', restore(stepSnap, stepRec, stepOwn, stepRedo)); stepOwn = new Set(); stepRedo = null; render();
     });
     if ($('wzReset')) $('wzReset').addEventListener('click', () => {
-      const kept = restore(openSnap, openRec, openOwn); newStepSnap();
+      const kept = restore(openSnap, openRec, openOwn, openRedo); openOwn.clear(); openRedo = null; newStepSnap();
       restoredMsg('ウィザードを開く前の状態に戻しました', kept); render();
     });
     if ($('wzClose')) $('wzClose').addEventListener('click', () => {
@@ -7275,7 +7290,11 @@ function showGenerateWizard() {
     }));
     modal.querySelectorAll('[data-wzfix]').forEach(btn => btn.addEventListener('click', () => {
       const r = (b.fixes || [])[parseInt(btn.dataset.wzfix)];
-      if (r && r.act && applyNextAct(r.act, { inWizard: true, onRecord: (l) => { stepOwn.add(l); openOwn.add(l); } })) { autoSave(); refreshAllUI(); toast('直しました', 'success'); render(); }
+      if (r && r.act && applyNextAct(r.act, { inWizard: true, onRecord: (l, redoBefore) => {
+        if (!stepOwn.size) stepRedo = _redoSaveForSnap(redoBefore);
+        if (!openOwn.size) openRedo = _redoSaveForSnap(redoBefore);
+        stepOwn.add(l); openOwn.add(l);
+      } })) { autoSave(); refreshAllUI(); toast('直しました', 'success'); render(); }
     }));
     if (b.after) b.after();
   };

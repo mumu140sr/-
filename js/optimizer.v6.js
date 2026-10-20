@@ -5935,7 +5935,9 @@ function _lbResolveFixes(res, noFix) {
   const byId = (a, b) => String(a).localeCompare(String(b), 'en', { numeric: true });
   const cache = new Map();
   let tries = 0;
-  // 案をその人の希望・🔒に当てる（how: 当て方）。数え直したら、そのマスだけ元の値に戻す
+  // 案をその人の希望・🔒に当てる（how: 当て方）。数え直したら、そのマスだけ元の値に戻す。
+  // 覚えるのは当て方ごとの数え直しの結果（最低件数・新しい理由・その日のスキルごとの置ける保有者）。置ける保有者はスキルごとに引く
+  // （v267 の直し: スキルを入れずに覚えていて、同じ日に足りない2つ目のスキルが1つ目の数を使い、「収まります」とまちがって出ていた）
   const evalOpt = (o, how) => {
     const key = `${o.id}|${o.day}|${how}|${o.alt || ''}`;
     if (cache.has(key)) return cache.get(key);
@@ -5961,9 +5963,10 @@ function _lbResolveFixes(res, noFix) {
       }
       _lbQuick = true;
       const a = analyzeLowerBound();
-      const slot = a.reasons.find(x => x.kind === 'skill-slot' && x.day === d && x.skill === o.skill);
+      const slotHave = {};   // その日のスキルの枠の理由（足りないまま残ったもの）の、置ける保有者の数
+      a.reasons.forEach(x => { if (x.kind === 'skill-slot' && x.day === d) slotHave[x.skill] = x.have; });
       out = { drop: res.minErrors - a.minErrors, fresh: a.reasons.concat(a.notes || []).filter(x => !baseKeys.has(_lbReasonKey(x))).length,
-              have: slot ? slot.have : null };
+              slotHave };
     } finally {
       _lbQuick = false;
       AppState.fixedShifts = allFx;
@@ -5975,21 +5978,35 @@ function _lbResolveFixes(res, noFix) {
     cache.set(key, out);
     return out;
   };
+  // 選ぶ順（v267 の直し）: そのスキルの行が良くなる（置ける保有者が増える。足りるようになれば最低ラインの数）→ 「固定をすべて解除」は
+  // ほかの案より後（ほかの人の固定まで外れるので、最低件数の下がり方にほかの人の分まで入る）→ 最低件数がいちばん下がる →
+  // 「移す」を「外す」より先 → id の順。そのスキルの行が良くならない案は選ばない（ほかの固定が外れて最低件数だけが下がる案を、
+  // 「置ける保有者が−1人増えます」と出していた）
+  const allUnfix = (how) => how === 'unfix-alt' || how === 'unfix-del';
+  const better = (c, b) => {
+    if (c.rowHave !== b.rowHave) return c.rowHave > b.rowHave;
+    if (allUnfix(c.how) !== allUnfix(b.how)) return !allUnfix(c.how);
+    if (c.v.drop !== b.v.drop) return c.v.drop > b.v.drop;
+    if (!!c.o.alt !== !!b.o.alt) return !!c.o.alt;
+    return byId(c.o.id, b.o.id) < 0;
+  };
   pend.forEach(r => {
     const d = r.day;
     let best = null;
     r._optsList.slice().sort((a, b) => (b.gain - a.gain) || ((b.alt ? 1 : 0) - (a.alt ? 1 : 0)) || byId(a.id, b.id)).forEach(o => {
-      o.skill = r.skill;
       const locked = !!((AppState.fixedShifts[o.id] || {})[d]);
       const how = !locked ? (o.alt ? 'req-alt' : 'req-del') : (hasTable ? (o.alt ? 'fix-alt' : 'fix-off') : (o.alt ? 'unfix-alt' : 'unfix-del'));
       const v = evalOpt(o, how);
       if (!v || v.drop <= 0 || v.fresh > 0) return;
-      const c = { o, how, locked, v };
-      if (!best || v.drop > best.v.drop || (v.drop === best.v.drop && ((!!o.alt && !best.o.alt) || (!!o.alt === !!best.o.alt && byId(o.id, best.o.id) < 0)))) best = c;
+      const have = Object.prototype.hasOwnProperty.call(v.slotHave, r.skill) ? v.slotHave[r.skill] : null;   // null: 足りるようになった
+      const rowHave = have == null ? r.need : have;
+      if (rowHave <= r.have) return;
+      const c = { o, how, locked, v, have, rowHave };
+      if (!best || better(c, best)) best = c;
     });
     if (!best) return;   // 文は「…を持つ人を増やすか、…の必要人数を見直してください」のまま
-    const { o, how, locked, v } = best;
-    const after = v.have == null ? '収まります' : `、置ける保有者が${v.have - r.have}人増えます（まだ最低 ${r.need}人 には届きません）`;
+    const { o, how, locked, have } = best;
+    const after = have == null ? '収まります' : `、置ける保有者が${have - r.have}人増えます（まだ最低 ${r.need}人 には届きません）`;
     const k0 = shiftSym(o.key), k1 = o.alt ? shiftSym(o.alt) : '';
     if (locked) {
       const hasReq = !!((AppState.requests[o.id] || {})[d] && isWork(AppState.requests[o.id][d]));
@@ -5997,7 +6014,8 @@ function _lbResolveFixes(res, noFix) {
         + (how === 'fix-alt' ? `「シフト表」でこのマスを「${k1}」に直すと${after}`
           : how === 'fix-off' ? `「シフト表」でこのマスを「休」に直すと${after}`
           : `「シフト表」の「その他の操作」にある「固定をすべて解除」で固定を外`
-            + (how === 'unfix-alt' ? `し、希望を「${k1}」にすると${after}` : (hasReq ? `し、この日の希望も外すと${after}` : `すと${after}`)));
+            + (how === 'unfix-alt' ? `し、希望を「${k1}」にすると${after}` : (hasReq ? `し、この日の希望も外すと${after}` : `すと${after}`))
+            + '。「固定をすべて解除」は、ほかの人の固定もすべて外します');
       r.act = null;
     } else if (o.alt) {
       r.fix = `${o.name}さんの${d}日の希望を「${k0}」から「${k1}」に変えると${after}`;
@@ -6112,14 +6130,6 @@ function roleCapacityTable() {
   AppState.staff.forEach(s => { caps[s.id] = staffCapacity(s, days); });
   const has = (set, id, d) => !!(set[id] && set[id].has(d));
   const mark = (set, id, d) => { (set[id] = set[id] || new Set()).add(d); };
-  // 削る日（v267 の直し）: 1人ずつ、希望・🔒で決まっている出勤（研修を除く）を日付の早い順に、出られる日数ぶんまでを出勤できる日とし、
-  // 残り（遅い日付）を、休み・有給を削らないと入れない日とする。1人につき1回だけ決めて各行に配る（行ごとに「ほかの行の決まった日を
-  // 先に使った」として数えていたため、同じ人の削る日が行ごとに重なっていた）。並び順・行の順にはよらない
-  const cutDays = {};
-  AppState.staff.forEach(s => {
-    const c = caps[s.id];
-    Object.keys(c.fixedWork).map(Number).sort((a, b) => a - b).slice(Math.max(0, c.avail)).forEach(d => mark(cutDays, s.id, d));
-  });
   // その人の出られる日数のうち、この行に使える分＝この行の枠を埋めるのに使う決まった出勤（used。削る日を除く）＋空いている日に出られる日数。
   // 表の「出られる」は、これと「その行のどれかが必要で、その人が入れる日の数」（canDays）の小さいほう
   // （行の外のシフト・必要人数0の日・必要人数を超えて決まっている人の日は、出勤日を使ってしまうが行の必要には役立たない。v267 の直し）。
@@ -6151,6 +6161,20 @@ function roleCapacityTable() {
       order.forEach(s => { if (n < q && caps[s.id].fixedWork[d] === k) { mark(usedFix, s.id, d); n++; } });
     });
     return { g, dayReq, av, usedFix };
+  });
+  // 削る日（v267 の直し）: 1人ずつ、希望・🔒で決まっている出勤（研修を除く）のうち、出られる日数ぶんまでを出勤できる日とし、
+  // 残りを、休み・有給を削らないと入れない日とする。先に削るのは、どの枠も埋めない決まった出勤（必要人数を超えている・必要0人・
+  // 人数に数えないシフト）。残りは日付の早い順に使い、遅い日付を削る（枠を埋めない日まで日付の順に使っていて、同じ形でも
+  // 役に立たない日が1日目か6日目かで「不足1」と「余り148」に分かれていた）。1人につき1回だけ決めて各行に配る
+  // （行ごとに「ほかの行の決まった日を先に使った」として数えていたため、同じ人の削る日が行ごとに重なっていた）。並び順・行の順にはよらない
+  const fillFix = {};
+  gInfo.forEach(x => Object.keys(x.usedFix).forEach(id => x.usedFix[id].forEach(d => mark(fillFix, id, d))));
+  const cutDays = {};
+  AppState.staff.forEach(s => {
+    const c = caps[s.id];
+    const ds = Object.keys(c.fixedWork).map(Number).sort((a, b) => a - b);
+    ds.filter(d => has(fillFix, s.id, d)).concat(ds.filter(d => !has(fillFix, s.id, d)))
+      .slice(Math.max(0, c.avail)).forEach(d => mark(cutDays, s.id, d));
   });
   gInfo.forEach(({ g, dayReq, av, usedFix }) => {
     const statOf = (keys) => {

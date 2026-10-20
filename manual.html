@@ -434,7 +434,12 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>「<span class="m-ui">1分生成（おためし）</span>」は、1部門あたり最大60秒です。設定を直しながら何度も試すときに使います。</li>
           <li>「<span class="m-ui">じっくり生成（本番）</span>」は、最大約11分です。時間をかけて、より良い組み合わせを探します。最後はこちらで仕上げます。</li>
           <li>「<span class="m-ui">はじめての方は</span>」の <span class="m-btn out"><svg class="ic" aria-hidden="true"><use href="#i-wizard"/></svg>順番に確認して生成する</span>：ルール → 必要人数 → 希望の噛み合わせ → 余 → 生成 の順に、確かめながら進みます。</li>
-          <li>この画面の上の「<span class="m-ui">つぎにやること</span>」に「<span class="m-msg">先に直すところがあります</span>」と、直すボタン（例：「Aさんの7日の希望「遅責」を外す」）が出ることがあります（<span class="m-btn out"><svg class="ic" aria-hidden="true"><use href="#i-wizard"/></svg>順番に確認して生成する</span> の「希望の噛み合わせ」のページにも、同じボタンが出ます）。押すと、その人のその日の希望だけを変えます。ボタンにするのは、作る前の見込みで数え直して、必ず残るエラーが減り、新しい問題が出ないと確かめた直し方だけです。押したあとは、<span class="m-tab" data-n="6">シフト表</span> の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> で戻せます。固定したマスはボタンでは直せないので、どう直せばよいかの文だけが出ます。</li>
+          <li>この画面の上の「<span class="m-ui">つぎにやること</span>」に「<span class="m-msg">先に直すところがあります</span>」と、直すボタンが出ることがあります（<span class="m-btn out"><svg class="ic" aria-hidden="true"><use href="#i-wizard"/></svg>順番に確認して生成する</span> の「希望の噛み合わせ」のページにも、同じボタンが出ます）。ボタンは2種類あります。
+            <ul>
+              <li>スキルが足りない日を直すボタン（例：「Aさんの7日の希望「遅責」を外す」「Aさんの7日を「遅」に変える」）：その人のその日の希望だけを変えます。作る前の見込みで数え直して、必ず残るエラーが減り、新しい問題が出ず、そのスキルの人が文のとおりに増えると確かめた直し方だけをボタンにしています。固定したマスはボタンでは直せないので、どう直せばよいかの文だけが出ます。</li>
+              <li>必要人数を直すボタン（例：「12日「早」を 2人 に直す」）：必要人数のルールの数と、その日に直接入れた必要人数が違う日に出ます。押すと、その日の必要人数をルールの数に直します。こちらは数え直して確かめていません。ルールと直接入れた数のどちらが正しいかを確かめてから押してください。</li>
+            </ul>
+            どちらも、押したあとは <span class="m-tab" data-n="6">シフト表</span> の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> で戻せます。</li>
           <li>「<span class="m-ui">詳しい機能</span>」の中の4つ：
             <ul>
               <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</span>：作る前に、人手が足りるかと、必ず残るエラーを調べます。「<span class="m-ui">できることごとの余り・不足（この月の見込み）</span>」の表で、責任者・総務・スキルなど、何ができる人が足りないかも分かります（<a href="#errors">エラーの見方</a> の「不足」）。</li>
