@@ -273,9 +273,9 @@
             if (free(s, d)) nTerms.push(V(si, d, roleIdx[k]));
           });
           if (!nTerms.length && !nConst.length) continue;
-          // 翌日の出勤
-          const wTerms = free(s, d + 1) ? allowRoles(s).map(k => V(si, d + 1, roleIdx[k])) : [];
-          const wConst = isFixWork(s, d + 1) ? 1 : 0;
+          // 翌日の出勤（v269: 夜勤が続くのはよい。翌日の夜勤は数えない。検査と同じ）
+          const wTerms = free(s, d + 1) ? allowRoles(s).filter(k => !nightRoles.includes(k)).map(k => V(si, d + 1, roleIdx[k])) : [];
+          const wConst = (isFixWork(s, d + 1) && !isNight(fx(s, d + 1))) ? 1 : 0;
           if (!wTerms.length && !wConst) continue;
           const v = `na_${si}_${d}`;
           addSlack(v, 1, wNA, 'night-after-work');

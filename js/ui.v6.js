@@ -1229,7 +1229,7 @@ const RULE_LEVEL_META = [
   { g: 'スキル',     t: 'skill-late',        d: '最低人数に足りない', def: 'must' },
   { g: 'スキル',     t: 'skill-short',       d: '最低人数はいるが、目標人数に届かない', def: 'should' },
   { g: 'リズム',     t: 'late-early',        d: '遅番の次の日に早番', def: 'must' },
-  { g: 'リズム',     t: 'night-after-work',  def: 'must' },
+  { g: 'リズム',     t: 'night-after-work',  d: '夜勤の次の日に、夜勤でないシフトで出勤している（夜勤が続くのはよい）', def: 'must' },
   { g: 'リズム',     t: 'single-work',       def: 'must' },
   { g: 'リズム',     t: 'category-switch',   def: 'should' },
   { g: 'リズム',     t: 'band-switch',       d: '1人の、早番と遅番の切り替えが月の上限を超える', def: 'should' },
@@ -1430,7 +1430,7 @@ function showAddShiftModal() {
             <label><input type="radio" name="asNight" value="0" checked> いいえ（ふつうのシフト）</label>
             <label><input type="radio" name="asNight" value="1"> はい、夜勤です</label>
           </div>
-          <p class="hint">夜勤にすると、次の日（夜勤明け）は自動で休みになるように作ります。手で出勤を入れたときは、エラーで知らせます。</p>
+          <p class="hint">夜勤にすると、夜勤の次の日（夜勤明け）は休みになるように作ります。次の日も夜勤なら続けてかまいません。手で出勤を入れたときは、エラーで知らせます。</p>
         </section>
         <section class="as-q">
           <h4>4. 人数に数えますか</h4>

@@ -2924,8 +2924,8 @@ function checkViolations(shifts) {
           });
         }
 
-        // 夜勤翌日は必ず休み
-        if (isNight(prevShift)) {
+        // 夜勤翌日は必ず休み（v269: 次の日も夜勤なら続けてよい。最後の夜勤の翌日は休み）
+        if (isNight(prevShift) && !isNight(cur)) {
           violations.push({
             staffId: s.id, day: d, type: 'night-after-work',
             message: `🚨 夜勤翌日に出勤（夜勤明けは休み必須）`,
@@ -5381,12 +5381,12 @@ function analyzeLowerBound(opts) {
         });
       });
 
-      // (4c) 夜勤の翌日に出勤の希望が入っている（🚨夜勤明けの出勤が確定）
+      // (4c) 夜勤の翌日に出勤の希望が入っている（🚨夜勤明けの出勤が確定）。翌日も夜勤なら続けてよい（v269。検査と同じ）
       g.staff.forEach(s => {
         for (let d = 1; d < days; d++) {
           const a = confirmOf(s, d), b = confirmOf(s, d + 1);
           if (!a || !b || !isWork(a) || !isWork(b)) continue;
-          if (typeof isNight === 'function' && isNight(a)) {
+          if (typeof isNight === 'function' && isNight(a) && !isNight(b)) {
             res.reasons.push({
               kind: 'req-night', day: d, staffId: s.id,
               fix: `${d + 1}日の希望を休みに変えてください（夜勤明けは休みが必須です）`,
