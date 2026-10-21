@@ -118,6 +118,10 @@ const norm = s => String(s || '').replace(/\s+/g, '');
                             await p.evaluate(() => { const n = (AppState.skills[0] || {}).name; if (n) AppState.dailyShiftSkills = { [getWorkShiftKeys()[0]]: { 3: [n] } };
                               toggleDailyReqPanel(); }); await p.waitForTimeout(300); },
     feas:      async p => { await adv(p); await p.click('#btnFeasibility'); await p.waitForTimeout(3000); },
+    // 削る日も足りない役も無い月の「人手の合計」の文（v270）: この状態の中だけ、全員に人数に数えるシフトを全部担当させる
+    feasok:    async p => { await p.evaluate(() => { const ks = AppState.shiftTypes.filter(t => t.countForStaff !== false && !t.isTraining).map(t => t.key);
+                              AppState.staff.forEach(s => { s.allowedShifts = ks.slice(); }); });
+                            await adv(p); await p.click('#btnFeasibility'); await p.waitForTimeout(3000); },
     relax:     async p => { await adv(p); await p.click('#btnRelax'); await p.waitForTimeout(4000); },
     surplan:   async p => { await adv(p); await p.click('#btnSurplusPlan'); await p.waitForTimeout(2000); },
     forecast:  async p => { await adv(p); await p.click('#btnForecast'); await p.waitForTimeout(2000); },

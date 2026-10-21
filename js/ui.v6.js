@@ -533,14 +533,32 @@ function renderRoleCapacityHtml(pre) {
   const rule = '①基本設定の「詳しい設定」の中の「必要人数のルール」';
   // 休み・有給を削る日のある行（担当を増やしても、休みの希望を動かしても減らない。v267 の直し）
   const anyCut = t.groups.some(g => g.total.cut > 0 || g.rows.some(r => r.cut > 0)) || t.skills.some(k => k.cut > 0);
+  // 役ごと・スキルごとの短い表で「足りません」と出る行か（下の status と同じ決め方）
+  const isShortRow = (x) => !(x.need === 0 && x.target != null) && (x.short.length > 0 || x.diff < 0);
+  const skillShort = t.skills.some(isShortRow);   // スキルは店全体で数えるので、どの部門の箱にも添える
   // v270: いちばん上に人手の合計（全体の行）を大きく、役ごと・スキルごとは「足りています／◯日に足りません」だけを出す。
   // 数（必要・出られる・埋められる・余り不足・削る日）は「くわしい数を見る」の中に、前の表のまま入れる（数そのものは変えない）
   const sumHtml = t.groups.map(g => {
     const x = g.total;
     const big = x.diff >= 0 ? `<span class="rc-plus">余り ${capNum(x.diff)}人日</span>` : `<span class="rc-minus">不足 ${capNum(-x.diff)}人日</span>`;
-    const say = x.diff >= 0 ? `全員が予定どおり休んでも、月に${capNum(x.diff)}人日あまります。` : `全員が予定どおり休むと、月に${capNum(-x.diff)}人日足りません。`;
+    // 余りの月でも、休み・有給を削る人がいる・足りない役がある月は「全員が予定どおり休んでも」と言わない（v270 の直し: 同じ箱の中で
+    // 「休み・有給を3日削る」と食い違い、余っている人で足りない役を埋められるように読めた）。削る日数は、上の行（全体の行と
+    // 部門の表の行）を足したもの（スキルの行の削る日は、上の行と同じ日なので足さない）
+    const cutN = x.cut + g.rows.reduce((a, r) => a + (r.cut || 0), 0);
+    const roleShortG = g.rows.some(isShortRow);
+    const buts = [];
+    if (x.diff >= 0 && cutN > 0) buts.push(`ただし、希望・固定のとおりにすると、休み・有給を合わせて${capNum(cutN)}日削ることになります（だれの何日かは、下に出ています）。`);
+    if (x.diff >= 0 && (roleShortG || skillShort)) {
+      const what = roleShortG && skillShort ? '役とスキル' : (roleShortG ? '役' : 'スキル');
+      // 部門が2つの月は、下の表のどの見出しの行かも書く（スキルは店全体の見出し）
+      const where = multi ? [roleShortG ? `「${g.label}」` : '', skillShort ? '「スキル」' : ''].filter(Boolean).join('と') + 'の' : '';
+      buts.push(`${buts.length ? 'また' : 'ただし'}、足りない${what}があります（下の表の${where}「足りません」）。できる人を当てはめても埋まらないので、この余りでは埋められません（余っているのは、それができない人や、その日に出られない人の日です）。`);
+    }
+    const say = x.diff < 0 ? `全員が予定どおり休むと、月に${capNum(-x.diff)}人日足りません。（1人が1日出る分＝1人日。だれが何をできるかは見ずに、人の数と日数の合計で比べた数です）`
+      : (buts.length ? `人の数と日数の合計では、月に${capNum(x.diff)}人日あまります。（1人が1日出る分＝1人日。だれが何をできるかは見ていません）`
+        : `全員が予定どおり休んでも、月に${capNum(x.diff)}人日あまります。（1人が1日出る分＝1人日。だれが何をできるかは見ずに、人の数と日数の合計で比べた数です）`);
     return `<div class="rc-sum">${multi ? `<span class="rc-sum-dept">${escapeHtml(g.label)}</span>` : ''}<span class="rc-sum-big">${big}</span>`
-      + `<span class="rc-sum-say">${escapeHtml(say)}（1人が1日出る分＝1人日。だれが何をできるかは見ずに、人の数と日数の合計で比べた数です）</span>${_rcWhy(x, true, false)}</div>`;
+      + `<span class="rc-sum-say">${escapeHtml(say)}</span>${buts.map(s => `<span class="rc-sum-but">${escapeHtml(s)}</span>`).join('')}${_rcWhy(x, true, false)}</div>`;
   }).join('');
   const status = (x) => {
     if (x.need === 0 && x.target != null) return '<span class="rc-ok">最低ラインなし</span>';
@@ -560,10 +578,10 @@ function renderRoleCapacityHtml(pre) {
       + `<td class="rc-st">${status(k)}</td><td class="rc-ppl" title="その時間帯に入れる人">持っている人 ${k.people}人</td></tr>`));
   }
   return `<div class="rc-wrap"><h4>できることごとの余り・不足（この月の見込み）</h4>`
-    + `<h5 class="rc-dept">人手の合計（この月の本当の余り）</h5>${sumHtml}`
+    + `<h5 class="rc-dept">人手の合計（人の数と日数で見た余り・不足）</h5>${sumHtml}`
     + `<h5 class="rc-dept">役ごと・スキルごとに足りるか</h5>`
     + `<div class="rc-scroll"><table class="rc-table rc-brief"><tbody>${brief.join('')}</tbody></table></div>`
-    + `<p class="rc-note">同じ人がいくつもの役に入れるので、役ごとの数は足し算しません（本当に余っているのは、上の「人手の合計」の数です）。`
+    + `<p class="rc-note">同じ人がいくつもの役に入れるので、役ごとの数は足し算しません（人の数と日数の合計は、上の「人手の合計」で見ます。合計が余っていても、「足りません」の行は埋められません）。`
     + (t.groups.some(g => g.total.diff < 0) ? '人手の合計が足りないときは、役ごとに「足りています」と出ていても、全部の役を同時には埋められません。' : '') + '</p>'
     + (roleShort ? `<p class="rc-todo"><b>不足の行があるときは</b>、次のどれかをします：その役を担当できる人を増やす（③スタッフ管理の「担当シフト」。スキルの行は「スキル」）・足りない日の休みの希望や有給を動かす（④希望休入力）・必要人数を見直す（②シフト種別、${rule}）。</p>` : '')
     + (anyCut ? `<p class="rc-todo"><b>「休み・有給を◯日削って」と出ている行は</b>、その人の出勤の希望・固定が、その人の出られる日数（公休・有給の予定と研修の日を引いた日数）より多い分です。担当を増やしても、休みの希望を動かしても減りません。行の名前の下に出ている人の出勤の希望・固定を減らす（④希望休入力。固定は⑥シフト表）か、その人の公休数・有給の日数を見直します（③スタッフ管理の「公休数（月の休み数）」「有給（月の有給数）」）。</p>` : '')

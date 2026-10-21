@@ -487,6 +487,7 @@ button.lv-chip-btn:focus-visible { outline: 2px solid var(--link); outline-offse
 .rc-sum-big .rc-plus { color: var(--text); }
 .rc-sum-big .rc-minus { color: var(--lv-must); }
 .rc-sum-say { display: block; font-size: var(--fs-sm); color: var(--text); }
+.rc-sum-but { display: block; margin-top: 4px; font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
 .rc-sum .rc-why { display: block; margin-top: 4px; font-size: var(--fs-xs); color: var(--text-soft); }
 .rc-table.rc-brief { min-width: 0; }
 .rc-table.rc-brief td { text-align: left; }
