@@ -374,3 +374,5 @@ disabled	btnRelax	HTML	1	CALC_BUTTONS
 disabled	btnResolveSurplus	HTML	1	CALC_BUTTONS
 disabled	btnUndo	HTML	1	updateHistoryButtons
 disabled	btnRedo	HTML	1	updateHistoryButtons
+id	btnSomuReorder	HTML	1	app.v6.js
+id	somuAutoSwap	HTML	1	ui.v6.js

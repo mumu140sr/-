@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=268" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=268" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=268" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=268">
+<link rel="icon" href="favicon.svg?v=269" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=269" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=269" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=269">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=268" />
+<link rel="stylesheet" href="css/style.css?v=269" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -312,6 +312,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>「<span class="m-ui">遅→早の禁止</span>」：遅番の次の日に、早番を入れません。</li>
           <li>「<span class="m-ui">単発休みのペナルティ</span>」：出勤に挟まれた1日だけの休みを避けます。</li>
           <li>「<span class="m-ui">連休の目安回数（月・全体）</span>」：全員に、月に何回2連休を入れるかの目安です。0は指定なしです。</li>
+          <li>「<span class="m-ui">表を作ったあとに、総務の順番に入れ替える</span>」：はじめは入です。表を作ったあと、総務のシフトに入る人を、<span class="m-tab" data-n="3">スタッフ管理</span> の「<span class="m-ui">総務の順番</span>」の順に入れ替えます（くわしくは <span class="m-tab" data-n="3">スタッフ管理</span> の説明）。エラーが1件でも増える入れ替えはしません。切ると、作った表のままです。</li>
           <li>特別日：「<span class="m-ui">入れ替え日（副店長を遅番固定）</span>」は副店長をその日の遅責に、「<span class="m-ui">新装日（副店長を早番固定）</span>」は早責に入れます。「<span class="m-ui">搬入日</span>」は、「<span class="m-ui">必要人数のルール</span>」で人数を決めるときに使います。日付は「1,15」のようにカンマで区切ります。</li>
           <li>「<span class="m-ui">詳しい設定</span>」の中：
             <ul>
@@ -344,6 +345,8 @@ table.m-table { width: 100%; border-collapse: collapse; }
             </ul>
           </li>
           <li>「<span class="m-ui">カテゴリ</span>」は「<span class="m-ui">A（早番）</span>」か「<span class="m-ui">B（遅番）</span>」です。遅→早などの決まりは、これで見分けます。</li>
+          <li><span class="m-btn">詳細</span> の中の「<span class="m-ui">責任者として数える（特別日の副店長・責任者の順位）</span>」：このシフトに入っている人を、その時間帯の責任者として数えます。例えば深夜のシフトに付けると、入れ替え日に副店長が深夜に入っていれば「遅責に入っていない」のエラーになりません。また、深夜に入っている上の役職の人を、責任者の順位で「遅責に入るべき人」に数えません。はじめは付いていません。</li>
+          <li><span class="m-btn">詳細</span> の中の「<span class="m-ui">総務のシフト（総務の順番で入れ替える）</span>」：表を作ったあとに、<span class="m-tab" data-n="3">スタッフ管理</span> の「<span class="m-ui">総務の順番</span>」で入れ替えるシフトです。はじめは早総務・遅総務に付いています。</li>
           <li>画面のマスの色は、カテゴリで決まります（早番系は青、遅番系は橙、研修は紫）。<span class="m-btn">詳細</span> の中の「<span class="m-ui">Excel出力の色</span>」は、Excel に出すときの色です。</li>
           <li>「<span class="m-ui">必要人数/日</span>」は、社員とキャストで別々に入れます。人が余った日は、多く入れずに「余」（休み）にします。</li>
           <li>「<span class="m-ui">日別必要人数（上書き設定）</span>」で、特定の日だけ人数を変えられます。土日だけのつもりでも、月に何日もあると大きな人数になります。人員不足の大きな原因です。</li>
@@ -394,6 +397,15 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>「<span class="m-ui">早遅バランス（割合／のみ＝絶対）</span>」：「<span class="m-ui">早番多め（7：3）</span>」は、出勤の7割を早番にします。「<span class="m-ui">早番のみ（絶対）</span>」は早番だけ、「<span class="m-ui">指定なし（OFF）</span>」は割合を見ません。</li>
           <li>「<span class="m-ui">前月末の連勤日数（0＝月末は休み）</span>」と「<span class="m-ui">前月末シフト（連勤1日以上で選択）</span>」は、月の初めの連勤を正しく数えるために使います。</li>
           <li>下の「<span class="m-ui">スキル設定</span>」で、「営業できる人」などを登録し、早番・遅番に何人いるかを決めます。</li>
+          <li>「<span class="m-ui">総務の順番</span>」：表を作ったあと、総務のシフトにだれを先に入れるかです（<span class="m-tab" data-n="1">基本設定</span> の「<span class="m-ui">表を作ったあとに、総務の順番に入れ替える</span>」が入のとき）。
+            <ul>
+              <li>「<span class="m-ui">総務に先に入れる</span>」→「<span class="m-ui">ふつう</span>」→「<span class="m-ui">なるべく入れない</span>」の順に、総務へ入れます。はじめは「<span class="m-ui">ふつう</span>」です。</li>
+              <li>同じ「<span class="m-ui">ふつう</span>」どうしは、その時間帯のスキル（早番なら早番の「営業」など）を持たない人 → 職位が下の人（スタッフ → リーダー → チーフ → 副店長）→ 番号の順 です。</li>
+              <li>入れ替えるのは、同じ日・同じ時間帯の、総務の人とふつうの出勤（早・遅など）の人だけです。希望・固定で決まっている日や、相手のシフトを担当していない人は入れ替えません。エラーが1件でも増える入れ替えもしません。</li>
+              <li>営業のできない人に総務の日が集まります。多すぎる人は「<span class="m-ui">なるべく入れない</span>」にしてから、<span class="m-tab" data-n="6">シフト表</span> の <span class="m-btn">その他の操作</span> → <span class="m-btn">総務の順番に入れ替える</span> を押すか、作り直してください。</li>
+              <li>エラーにはしません（順番どおりでなくても、エラーの件数は変わりません）。</li>
+            </ul>
+          </li>
           <li>計算中も、一覧で人を切り替えて見ることや、「<span class="m-ui">スキル設定</span>」「<span class="m-ui">役職タイプ説明</span>」を開くことはできます。入力はできません。</li>
         </ul>
       </details>
@@ -499,11 +511,12 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>マスをドラッグして別のマスに落とすと、2つが入れ替わります。入れ替えただけでは、新しく固定されません。</li>
           <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-redo"/></svg>やり直す</span> は、この画面では <span class="m-key">Ctrl</span>+<span class="m-key">Z</span>・<span class="m-key">Ctrl</span>+<span class="m-key">Y</span> でも使えます。手直しや自動修正のほか、作り直したあとも、前の表に戻れます。</li>
           <li><span class="m-btn pri"><svg class="ic" aria-hidden="true"><use href="#i-repair"/></svg>エラーを自動修正</span>：直す案を、変えるマスの少ない順に計算して並べます。<span class="m-btn pri">反映</span> を押すまで、表は変わりません。「絶対」の違反が増える案は出ません。</li>
-          <li><span class="m-btn">その他の操作</span> の中の6つ：
+          <li><span class="m-btn">その他の操作</span> の中の7つ：
             <ul>
               <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-csv"/></svg>CSV出力</span>：表を CSV ファイルで保存します。</li>
               <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-rulecheck"/></svg>ルールチェック</span>：いまの表のエラーを数え直し、<span class="m-tab" data-n="5">自動生成</span> の画面に一覧を出します。</li>
               <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-sur-fix"/></svg>余の解消</span>：余のマスを、有給にするか、その日の人数を1人増やして出勤にします。</li>
+              <li><span class="m-btn">総務の順番に入れ替える</span>：いまの表で、総務のシフトに入る人を <span class="m-tab" data-n="3">スタッフ管理</span> の「<span class="m-ui">総務の順番</span>」の順に入れ替えます。エラーが1件でも増える入れ替えはしません。<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> で戻せます。</li>
               <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>まとめて固定</span>：表の上をドラッグして範囲を選び、まとめて固定・解除します。<span class="m-btn">終了</span> で戻ります。</li>
               <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-partial"/></svg>途中から作り直す</span>：指定した日より前はそのまま残し、その日から後だけを作り直します。</li>
               <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-unlock"/></svg>固定をすべて解除</span>：固定をすべて外します。表の中身と、<span class="m-tab" data-n="4">希望休入力</span> の希望はそのままです。</li>
@@ -575,7 +588,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <tr><td><span class="m-ui">定数オーバー</span></td><td>必要人数より多く入っている。</td><td>出勤の固定や希望を減らします。</td></tr>
           <tr><td><span class="m-ui">副店長不在</span></td><td>副店長が2人以上いる店で、副店長がだれも出勤せず、早責・遅責もチーフ以上でそろっていない日。副店長が1人の店では数えません。</td><td>副店長の休みをずらします。</td></tr>
           <tr><td><span class="m-ui">責任者・総務の重複</span></td><td>同じ時間帯に、早責などが2人以上いる。</td><td>片方を、ふつうのシフトにします。</td></tr>
-          <tr><td><span class="m-ui">責任者の順位</span></td><td>同じ時間帯に、責任者を担当できる上の役職の人が出勤しているのに、下の人が責任者になっている。</td><td>責任者を、上の人と入れ替えます。</td></tr>
+          <tr><td><span class="m-ui">責任者の順位</span></td><td>同じ時間帯に、責任者を担当できる上の役職の人が出勤しているのに、下の人が責任者になっている。<span class="m-tab" data-n="2">シフト種別</span> で「責任者として数える」にしたシフト（深夜など）に入っている人は数えません。</td><td>責任者を、上の人と入れ替えます。</td></tr>
           <tr class="m-grp"><th colspan="3"><span class="m-ui">スキル</span></th></tr>
           <tr><td><span class="m-ui">スキル不足</span></td><td>その時間帯に、スキルのある人が最低人数より少ない。</td><td>スキルのある人の休みをずらします。</td></tr>
           <tr><td><span class="m-ui">スキル目標に不足</span></td><td>最低人数はいるが、目標に届かない。</td><td>困らなければ、そのままでよいです。</td></tr>
@@ -595,7 +608,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <tr><td><span class="m-ui">遅→早は2連休（個人ルール）</span></td><td>遅番から早番になるとき、休みが1日しかない。</td><td>2連休にします。</td></tr>
           <tr><td><span class="m-ui">連休の回数不足</span></td><td>2連休の回数が、目安に届かない。</td><td>休みの位置を変えます。</td></tr>
           <tr class="m-grp"><th colspan="3"><span class="m-ui">行事</span></th></tr>
-          <tr><td><span class="m-ui">特別日の副店長</span></td><td>入れ替え日に副店長のだれも遅責に入っていない、または新装日に副店長のだれも早責に入っていない。入れ替え日に早責へ入っていてもエラーです。はじめは「できれば」です。</td><td>副店長を、入れ替え日は遅責に、新装日は早責にします。</td></tr>
+          <tr><td><span class="m-ui">特別日の副店長</span></td><td>入れ替え日に副店長のだれも遅責に入っていない、または新装日に副店長のだれも早責に入っていない。入れ替え日に早責へ入っていてもエラーです。同じ時間帯の「責任者として数える」シフト（深夜など）に入っていれば、エラーになりません。はじめは「できれば」です。</td><td>副店長を、入れ替え日は遅責に、新装日は早責にします。</td></tr>
           <tr><td><span class="m-ui">行事日に対象者が休み</span></td><td>行事の対象の人が、その日に休みになっている。</td><td>その人の休みをほかの日にずらします。</td></tr>
           <tr class="m-grp"><th colspan="3">そのほか</th></tr>
           <tr><td>有給の日数のずれ</td><td>「有」の日数が、「<span class="m-ui">有給（月の有給数）</span>」と違う。</td><td>有給の日数か、表の「有」を直します。</td></tr>

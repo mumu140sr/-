@@ -229,6 +229,7 @@ function _swReasons(p, key, day, fresh) {
         // 同じ時間帯に、この人より順位が上で、このシフトを担当できる人がいる（検査と同じ決め方）
         const sameBand = (c) => isLate(key) ? isLate(c) : (isEarlyCategory(c) && !isTraining(c));
         const better = ((group && group.staff) || []).filter(s => s.id !== p.id && isWork(cellOf(s.id, day)) && sameBand(cellOf(s.id, day))
+          && !isRespLikeShift(cellOf(s.id, day))   // v269: 「責任者として数える」シフトの人は数えない（検査と同じ）
           && (s.allowedShifts || []).includes(key) && getStaffPriority(s) < getStaffPriority(p))
           .sort((a, b) => getStaffPriority(a) - getStaffPriority(b))[0];
         return better ? `この日は順位が上の${better.name}さんが${bandOf(key)}にいるので、${shiftNameText(key)}は${better.name}さんが入る決まりです（責任者の順位）`
@@ -255,7 +256,9 @@ function _swReasons(p, key, day, fresh) {
       case 'special-day': {
         const kind = (AppState.specialDays || {})[v.day];
         const role = kind === 'replacement' ? '遅責' : '早責';
-        return `${kind === 'replacement' ? '入れ替え日' : '新装日'}なので、副店長が${shiftNameText(role)}に入る決まりですが、入らなくなります`;
+        const alts = respLikeKeysFor(role);   // v269: 同じ時間帯の「責任者として数える」シフトでもよい
+        const altText = alts.length ? `（または${alts.map(shiftNameText).join('・')}）` : '';
+        return `${kind === 'replacement' ? '入れ替え日' : '新装日'}なので、副店長が${shiftNameText(role)}${altText}に入る決まりですが、入らなくなります`;
       }
       default: return `その日に「${label(v.type)}」のエラーが出ます`;
     }
@@ -717,6 +720,8 @@ function refreshAllUI() {
   if ($tiered0) $tiered0.checked = AppState.settings.tieredOptimize !== false;
   const $par0 = document.getElementById('parallelSolve');
   if ($par0) $par0.checked = AppState.settings.parallelSolve !== false;
+  const $somu0 = document.getElementById('somuAutoSwap');
+  if ($somu0) $somu0.checked = AppState.settings.somuAutoSwap !== false;
   if ($maxAtt)    $maxAtt.value      = AppState.settings.maxAttempts;
   const $pairRestR = document.getElementById('pairRestTarget');
   if ($pairRestR) $pairRestR.value   = AppState.settings.pairRestTarget || 0;
@@ -1050,6 +1055,15 @@ function setupSettingsPanel() {
     AppState.settings.penaltySingleOff = $penaltySO.checked;
     autoSave(); recheckAfterRuleChange();
   });
+  // v269: 表を作ったあとに総務の順番に入れ替えるか（項目が無ければ入れ替える。切ったときだけ false を持つ）
+  const $somu = document.getElementById('somuAutoSwap');
+  if ($somu) {
+    $somu.checked = AppState.settings.somuAutoSwap !== false;
+    $somu.addEventListener('change', () => {
+      if ($somu.checked) delete AppState.settings.somuAutoSwap; else AppState.settings.somuAutoSwap = false;
+      autoSave();
+    });
+  }
   const $par = document.getElementById('parallelSolve');
   if ($par) {
     $par.checked = AppState.settings.parallelSolve !== false;
@@ -1211,7 +1225,7 @@ const RULE_LEVEL_META = [
   // d に記号（早責など）を入れるときは関数にして shiftSym を通す（記号を変えた店でも、その記号で出す。v258）
   { g: '人員・役職', t: 'vicemanager-absent', d: () => `副店長が2人以上いる店で、副店長がだれも出勤せず、「${shiftSym('早責')}」と「${shiftSym('遅責')}」もチーフ以上でそろっていない日（副店長が1人の店では数えません）`, def: 'must' },
   { g: '人員・役職', t: 'resp-duplicate',    def: 'must' },
-  { g: '人員・役職', t: 'hierarchy',         d: '同じ時間帯に、責任者を担当できる役職が上の人がいるのに、下の人が責任者に入っている', def: 'must' },
+  { g: '人員・役職', t: 'hierarchy',         d: '同じ時間帯に、責任者を担当できる役職が上の人がいるのに、下の人が責任者に入っている（②で「責任者として数える」にしたシフトに入っている人は数えません）', def: 'must' },
   { g: 'スキル',     t: 'skill-late',        d: '最低人数に足りない', def: 'must' },
   { g: 'スキル',     t: 'skill-short',       d: '最低人数はいるが、目標人数に届かない', def: 'should' },
   { g: 'リズム',     t: 'late-early',        d: '遅番の次の日に早番', def: 'must' },
@@ -1233,7 +1247,7 @@ const RULE_LEVEL_META = [
   { g: '個人希望',   t: 'rest-style',        d: '③の「休み方」（連休／分散）に合っていない', def: 'should' },
   { g: '個人希望',   t: 'pair-rest',         d: '③で「遅→早は連休必須」にした人の、遅番→休み1日→早番', def: 'should' },
   { g: '個人希望',   t: 'pair-rest-count',   d: '2連休の回数が、目安に届かない', def: 'should' },
-  { g: '行事',       t: 'special-day',       d: () => `入れ替え日に副店長のだれも「${shiftSym('遅責')}」に入っていない日と、新装日に副店長のだれも「${shiftSym('早責')}」に入っていない日（入れ替え日に「${shiftSym('早責')}」へ入っていてもエラーです）`, def: 'should' },
+  { g: '行事',       t: 'special-day',       d: () => `入れ替え日に副店長のだれも「${shiftSym('遅責')}」に入っていない日と、新装日に副店長のだれも「${shiftSym('早責')}」に入っていない日（入れ替え日に「${shiftSym('早責')}」へ入っていてもエラーです。②で「責任者として数える」にした同じ時間帯のシフトに入っていれば、エラーになりません）`, def: 'should' },
   { g: '行事',       t: 'event-absent',      def: 'must' },
 ];
 // そのルールの本当の既定（getRuleLevel が未設定のときに返すもの）
@@ -1567,6 +1581,14 @@ function renderRoleTable() {
           <input type="checkbox" data-idx="${idx}" data-field="isNight"
                  ${type.isNight ? 'checked' : ''}/>
           <span></span></span>夜勤</label>
+        <label class="rm-item" title="入れ替え日・新装日の副店長と、責任者の順位で、このシフトに入っている人をこの時間帯の責任者として数えます（深夜の副店長など）"><span class="switch">
+          <input type="checkbox" data-idx="${idx}" data-field="respLike"
+                 ${type.respLike === true ? 'checked' : ''}/>
+          <span></span></span>責任者として数える（特別日の副店長・責任者の順位）</label>
+        <label class="rm-item" title="表を作ったあと、③の「総務の順番」で、このシフトに入る人を入れ替えます"><span class="switch">
+          <input type="checkbox" data-idx="${idx}" data-field="somu"
+                 ${isSomuShift(type.key) ? 'checked' : ''}/>
+          <span></span></span>総務のシフト（総務の順番で入れ替える）</label>
         <label class="rm-item" title="社員＋キャストを合算した合計人数で判定（社員側の数を合計値として使用）"><span class="switch">
           <input type="checkbox" data-idx="${idx}" data-field="combined"
                  class="role-combined-input" ${isCombinedShift(type.key) ? 'checked' : ''}/>
@@ -1607,6 +1629,14 @@ function renderRoleTable() {
         return;
       } else if (field === 'countForStaff' || field === 'isTraining' || field === 'isNight') {
         type[field] = e.target.checked;
+      } else if (field === 'respLike') {
+        // v269: 付いていないときは項目を消す（印が1つも無い月は、Worker へ渡す中身・検査が前の版と同じ）
+        if (e.target.checked) type.respLike = true; else delete type.respLike;
+      } else if (field === 'somu') {
+        ensureSomuFlags();   // 前の版のデータの既定（早総務・遅総務）を先に入れてから変える
+        type.somu = e.target.checked;
+        autoSave();
+        return;              // 総務の順番の入れ替えだけに使う（検査・生成には効かない）
       } else if (field === 'color') {
         type.color = e.target.value;
         const prev = e.target.closest('tr').querySelector('.shift-preview');
@@ -2371,6 +2401,14 @@ function renderStaffTable() {
                data-field="note" data-id="${s.id}" style="width:100%;min-width:80px"/>
       </td>
       <td>
+        <select data-field="somuPref" data-id="${s.id}" style="min-width:128px"
+                title="表を作ったあと、総務のシフトにだれを先に入れるか（ふつうの人どうしは、その時間帯の営業ができない人→職位が下の人の順）">
+          <option value="first" ${s.somuPref === 'first' ? 'selected' : ''}>総務に先に入れる</option>
+          <option value=""      ${!s.somuPref || (s.somuPref !== 'first' && s.somuPref !== 'avoid') ? 'selected' : ''}>ふつう</option>
+          <option value="avoid" ${s.somuPref === 'avoid' ? 'selected' : ''}>なるべく入れない</option>
+        </select>
+      </td>
+      <td>
         <button class="btn-icon" data-del="${s.id}" title="削除" aria-label="削除">${uiIcon('trash')}</button>
       </td>
     `;
@@ -2385,6 +2423,12 @@ function renderStaffTable() {
       const staff = AppState.staff.find(s => s.id === id);
       if (!staff) return;
       let val = e.target.value;
+      if (field === 'somuPref') {
+        // v269: 総務の順番。「ふつう」は項目を持たない（前の版と同じ形。検査・生成には効かない）
+        if (val === 'first' || val === 'avoid') staff.somuPref = val; else delete staff.somuPref;
+        autoSave();
+        return;
+      }
       if (['maxOff', 'prevConsecutive', 'paidLeave', 'personalMaxCons', 'personalMaxOff', 'pairRestTarget'].includes(field)) val = parseInt(val) || 0;
       staff[field] = val;
       if (field === 'personalMaxCons') warnComplianceLimit(val, `${staff.name}さん（個人）`);
@@ -3324,7 +3368,9 @@ function genInputFp() {
     c(AppState.roleRequirements), c(AppState.roleRequirementsCast), c(AppState.skills), c(AppState.dailySkills),
     (AppState.staff || []).map(s => [s.id, s.allowedShifts, s.paidLeave, s.maxOff, s.positionType, s.department])]
     // 日ごとに要るスキル（v264）は、指定があるときだけ足す（無い月は前の版と同じ指紋。保存してある表を「古い」と言わない）
-    .concat(hasAnyDayShiftSkills() ? [c(AppState.dailyShiftSkills)] : []));
+    .concat(hasAnyDayShiftSkills() ? [c(AppState.dailyShiftSkills)] : [])
+    // v269: 「責任者として数える」シフトも、印があるときだけ足す（無い月は前の版と同じ指紋）
+    .concat(hasAnyRespLike() ? [['respLike', (AppState.shiftTypes || []).filter(t => isRespLikeShift(t.key)).map(t => t.key)]] : []));
 }
 /**
  * 日ごとに要るスキル（v264）の中のスキル名を from → to に直す。to が null なら外す（空になった指定は消す）。
@@ -3749,7 +3795,7 @@ function enableColumnResize(table, key) {
 function setupAllColumnResizers() {
   // v252: ②の列の並びを変えたので、前に保存した列幅（列の番号で覚えている）が別の列に当たらないよう名前を変える
   enableColumnResize(document.querySelector('.role-table'),  'role2');
-  enableColumnResize(document.querySelector('.staff-table'), 'staff');
+  enableColumnResize(document.querySelector('.staff-table'), 'staff2');   // v269: 列を足したので名前を変えた（前の幅が別の列に当たらないように）
   enableColumnResize(document.getElementById('resultTable'), 'result');
 }
 
@@ -3837,6 +3883,19 @@ const candHead = () => '<tr>' + _cth('案', 1) + _cth(uiIcon('crit') + '6連勤�
   + _cth('変わるマス') + _cth('早番と遅番の行き来', 1) + _cth('ほかの' + uiIcon('soft') + 'できれば', 1) + '<th></th></tr>';
 
 /** 生成した直後の表を控える（生成・途中から作り直しのあと） */
+/**
+ * v269: 表を作ったあとに、総務の順番に入れ替える（①の「表を作ったあとに、総務の順番に入れ替える」が入のとき）。
+ * 1分生成・じっくり生成・途中から作り直す（runGenerate）から、genBaseTake の前に呼ぶ。入れ替えた数を返す
+ */
+function applySomuReorderAfterGenerate() {
+  if (AppState.settings.somuAutoSwap === false || typeof somuReorder !== 'function') return 0;
+  if (!Object.keys(AppState.shifts || {}).length) return 0;
+  const r = somuReorder(AppState.shifts);
+  if (!r.swaps.length) return 0;
+  AppState.shifts = r.shifts;
+  AppState.violations = r.violations;
+  return r.swaps.length;
+}
 function genBaseTake() {
   AppState.genBase = {
     at: new Date().toISOString(),

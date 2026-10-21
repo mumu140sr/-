@@ -7,11 +7,11 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=268" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=268" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=268" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=268">
-<link rel="stylesheet" href="css/style.css?v=268" />
+<link rel="icon" href="favicon.svg?v=269" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=269" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=269" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=269">
+<link rel="stylesheet" href="css/style.css?v=269" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -72,7 +72,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v268</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v269</span>
   </div>
   <div class="header-actions">
     <!-- 「データ」メニュー：今のボタンそのものを中に置く（id はそのまま。開閉は js/ui-shell.v6.js） -->
@@ -132,6 +132,10 @@
       <div class="set-row">
         <div class="set-lbl"><div class="set-name"><label for="pairRestTarget">連休の目安回数（月・全体）</label></div><div class="set-desc">全員に月◯回の2連休以上を目安として入れます（0=指定なし。スタッフ個人の設定があればそちらを優先）</div></div>
         <div class="set-ctl"><input type="number" id="pairRestTarget" min="0" max="10" value="0" style="width:70px" /><span class="unit">回／月</span></div>
+      </div>
+      <div class="set-row">
+        <div class="set-lbl"><div class="set-name"><label for="somuAutoSwap">表を作ったあとに、総務の順番に入れ替える</label></div><div class="set-desc">総務のシフト（②の「詳細」で決めます）に、③の「総務の順番」の順で人を入れ替えます。順番は「総務に先に入れる」→「ふつう」→「なるべく入れない」、同じならその時間帯の営業ができない人→職位が下の人です。エラーが1件でも増える入れ替えはしません</div></div>
+        <div class="set-ctl"><label class="switch"><input type="checkbox" id="somuAutoSwap" checked /><span></span></label></div>
       </div>
     </section>
 
@@ -236,7 +240,7 @@
         </table>
       </div>
     </div>
-    <div class="band band-info"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg><div class="grow">シフトの種類を自由に追加・編集・削除できます。カテゴリ A = 早番系、B = 遅番系（連勤内の時間帯統一ルールで使用）。集計対象・研修扱い・夜勤・合算・Excel出力の色・削除は、各行の「詳細」にあります。</div></div>
+    <div class="band band-info"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg><div class="grow">シフトの種類を自由に追加・編集・削除できます。カテゴリ A = 早番系、B = 遅番系（連勤内の時間帯統一ルールで使用）。集計対象・研修扱い・夜勤・責任者として数える・総務のシフト・合算・Excel出力の色・削除は、各行の「詳細」にあります。</div></div>
 
     <div class="card">
       <h3 class="calc-view-only" style="cursor:pointer" onclick="toggleDailyReqPanel()">日別必要人数（上書き設定） <span id="dailyReqToggle">▶ 展開</span></h3>
@@ -291,6 +295,7 @@
               <th>前月末<br>連勤日数<br><small>0=月末は休み</small></th>
               <th>前月末<br>シフト<br><small>連勤1日以上で選択</small></th>
               <th>備考</th>
+              <th>総務の<br><small>順番</small></th>
               <th>削除</th>
             </tr>
           </thead>
@@ -446,6 +451,7 @@
             <button class="btn btn-ghost menu-item" id="btnExportCSV"><svg class="ic" aria-hidden="true"><use href="#i-csv"/></svg>CSV出力</button>
             <button class="btn btn-ghost menu-item" id="btnRecheck"><svg class="ic" aria-hidden="true"><use href="#i-rulecheck"/></svg>ルールチェック</button>
             <button class="btn btn-ghost menu-item" id="btnResolveSurplus" title="余（人員余り）のコマを、有給にするか、その日の必要人数を増やして出勤にするかを選べます"><svg class="ic" aria-hidden="true"><use href="#i-sur-fix"/></svg>余の解消</button>
+            <button class="btn btn-ghost menu-item" id="btnSomuReorder" title="総務のシフトに入る人を、③の「総務の順番」の順に入れ替えます。エラーが1件でも増える入れ替えはしません">総務の順番に入れ替える</button>
             <div class="menu-sep" role="separator"></div>
             <button class="btn btn-ghost menu-item" id="btnRangeLock" title="ドラッグで範囲を選んで、まとめて固定／解除できます">まとめて固定</button>
             <button class="btn btn-ghost menu-item" id="btnPartialRegen" title="指定した日より前をそのまま残し、その日以降だけを作り直します"><svg class="ic" aria-hidden="true"><use href="#i-partial"/></svg>途中から作り直す</button>
@@ -511,13 +517,13 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=268"></script>
-<script src="js/optimizer.v6.js?v=268"></script>
-<script src="js/worker-client.v6.js?v=268"></script>
-<script src="js/ai-explain.v6.js?v=268"></script>
-<script src="js/ui.v6.js?v=268"></script>
-<script src="js/milp.v6.js?v=268"></script>
-<script src="js/app.v6.js?v=268"></script>
-<script src="js/ui-shell.v6.js?v=268"></script>
+<script src="js/data.v6.js?v=269"></script>
+<script src="js/optimizer.v6.js?v=269"></script>
+<script src="js/worker-client.v6.js?v=269"></script>
+<script src="js/ai-explain.v6.js?v=269"></script>
+<script src="js/ui.v6.js?v=269"></script>
+<script src="js/milp.v6.js?v=269"></script>
+<script src="js/app.v6.js?v=269"></script>
+<script src="js/ui-shell.v6.js?v=269"></script>
 </body>
 </html>

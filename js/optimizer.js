@@ -3192,12 +3192,16 @@ function checkViolations(shifts) {
       const kind = AppState.specialDays[k];
       if (kind !== 'replacement' && kind !== 'renewal') return;
       const role = (kind === 'replacement') ? '遅責' : '早責';
-      const ok = vmsAll.some(vm => ((shifts[vm.id] || {})[d] || '') === role);
+      // v269: 同じ時間帯の「責任者として数える」シフト（②の印。深夜など）に副店長が入っていてもよい
+      const alts = respLikeKeysFor(role);
+      const okKeys = [role].concat(alts);
+      const ok = vmsAll.some(vm => okKeys.includes(((shifts[vm.id] || {})[d] || '')));
       if (!ok && vmsAll.length) {
+        const altText = alts.length ? `（または${alts.map(k => '「' + shiftSym(k) + '」').join('・')}）` : '';
         violations.push({
           staffId: (vmsAll[0] || {}).id || '', day: d, type: 'special-day',
-          message: `⚠️ ${kind === 'replacement' ? '入れ替え日' : '新装日'}に副店長が「${shiftSym(role)}」に入っていません`,
-          action:  `副店長のいずれかをこの日の${shiftSym(role)}にしてください`,
+          message: `⚠️ ${kind === 'replacement' ? '入れ替え日' : '新装日'}に副店長が「${shiftSym(role)}」${altText}に入っていません`,
+          action:  `副店長のいずれかをこの日の${shiftSym(role)}${altText}にしてください`,
         });
       }
     });
@@ -3324,6 +3328,7 @@ function checkViolations(shifts) {
           const sh = (shifts[s.id] || {})[d] || '';
           return s.id !== respEarlyPerson.id &&
             isWork(sh) && isEarlyCategory(sh) && !isTraining(sh) &&
+            !isRespLikeShift(sh) &&   // v269: 「責任者として数える」シフトの人は、責任者に入るべき上の人に数えない
             (s.allowedShifts || []).includes('早責') &&
             getStaffPriority(s) < getStaffPriority(respEarlyPerson);
         });
@@ -3343,6 +3348,7 @@ function checkViolations(shifts) {
           const sh = (shifts[s.id] || {})[d] || '';
           return s.id !== respLatePerson.id &&
             isWork(sh) && isLate(sh) &&
+            !isRespLikeShift(sh) &&   // v269: 同上（深夜の副店長など）
             (s.allowedShifts || []).includes('遅責') &&
             getStaffPriority(s) < getStaffPriority(respLatePerson);
         });
@@ -3562,6 +3568,76 @@ function scoreSummary(r) {
   if (r.bsOver) parts.push(`切り替えの超過 ${r.bsOver}回`);
   parts.push(`🟡${r.soft}件`);
   return parts.join('・');
+}
+
+// ── 総務の順番（v269）──
+// 表を作ったあとに、総務のシフト（②の「詳細」の印）に入る人を、総務の順番に入れ替える。ルール（エラー）にはしない。
+// 先に総務に入れる順（小さいほう）: ① ③の「総務の順番」（先に入れる→ふつう→なるべく入れない）② その時間帯のスキル
+// （早番なら早番のスキル。スキル名は決め打ちしない）を1つも持たない人 ③ 職位が下の人（getStaffPriority が大きいほう）④ 番号の順。
+// 入れ替えは、同じ日・同じ時間帯の、総務のシフトの人と、ふつうの出勤（人数に数えるシフトで、総務・責任者・1日1人の役・
+// 「責任者として数える」シフトでないもの）の人だけ。2人ともその日のマスが希望・🔒で決まっておらず、相手のシフトを担当できること。
+// 総務に入るべき人がふつうの出勤にいるときだけ入れ替える。入れ替えるたびに画面と同じ検査で比べ、エラーの種類ごとの件数・
+// 「絶対」の種類（scoreWorsened）・6連勤以上（compWorsened）のどれも悪くならず、並べ方（scoreCompare）で同じか良いときだけ残す。
+function somuRankOf(s, band) {
+  const pref = s.somuPref === 'first' ? 0 : s.somuPref === 'avoid' ? 2 : 1;
+  const bandSkills = (AppState.skills || []).filter(k => (k.target || 'late') === band).map(k => k.name);
+  const has = (s.skills || []).some(n => bandSkills.includes(n)) ? 1 : 0;
+  return [pref, has, -getStaffPriority(s)];
+}
+function somuRankCompare(a, b, band) {
+  const x = somuRankOf(a, band), y = somuRankOf(b, band);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];
+  return String(a.id).localeCompare(String(b.id), 'ja', { numeric: true });
+}
+function somuReorder(shiftsIn) {
+  const days = getDaysInMonth(AppState.settings.targetMonth);
+  const sh = JSON.parse(JSON.stringify(shiftsIn || {}));
+  const staff = AppState.staff || [];
+  const keys = (AppState.shiftTypes || []).map(t => t.key);
+  const somuKeys = keys.filter(k => isSomuShift(k) && isWork(k) && !isTraining(k));
+  const swaps = [];
+  if (!somuKeys.length) return { shifts: sh, swaps, violations: checkViolations(sh) };
+  const SOLO = new Set(typeof SOLO_SHIFT_KEYS !== 'undefined' ? SOLO_SHIFT_KEYS : []);
+  const bandOf = k => isLate(k) ? 'late' : 'early';
+  const sameBand = (k, band) => band === 'late' ? isLate(k) : (isEarlyCategory(k) && !isTraining(k));
+  const isPlain = k => { const t = getShiftType(k); return !!(t && t.countForStaff && !t.isTraining && !isSomuShift(k) && !SOLO.has(k)
+    && k !== '早責' && k !== '遅責' && !isRespLikeShift(k)); };
+  const locked = (s, d) => !!(((AppState.requests || {})[s.id] || {})[d] || ((AppState.fixedShifts || {})[s.id] || {})[d]);
+  const can = (s, k, d) => (s.allowedShifts || []).includes(k) && (typeof hasDaySkill !== 'function' || hasDaySkill(s, k, d));
+  const cnt = vs => { const o = {}; vs.forEach(v => { o[v.type] = (o[v.type] || 0) + 1; }); return o; };
+  let base = checkViolations(sh), baseSc = scoreViolations(base), baseCnt = cnt(base);
+  const notWorse = (v) => {
+    const sc = scoreViolations(v), c = cnt(v);
+    if (Object.keys(c).some(t => c[t] > (baseCnt[t] || 0))) return null;
+    if (scoreWorsened(sc, baseSc).length || compWorsened(base, v).length || scoreCompare(sc, baseSc) > 0) return null;
+    return { sc, c };
+  };
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false;
+    for (let d = 1; d <= days; d++) {
+      somuKeys.forEach(S => {
+        const band = bandOf(S);
+        staff.forEach(P => {
+          if (((sh[P.id] || {})[d] || '') !== S || locked(P, d)) return;
+          const cands = staff.filter(Q => {
+            if (Q.id === P.id || locked(Q, d)) return false;
+            const K = (sh[Q.id] || {})[d] || '';
+            return K && isPlain(K) && sameBand(K, band) && can(Q, S, d) && can(P, K, d) && somuRankCompare(Q, P, band) < 0;
+          }).sort((a, b) => somuRankCompare(a, b, band));
+          for (const Q of cands) {
+            const K = sh[Q.id][d];
+            sh[P.id][d] = K; sh[Q.id][d] = S;
+            const v = checkViolations(sh);
+            const ok = notWorse(v);
+            if (ok) { base = v; baseSc = ok.sc; baseCnt = ok.c; swaps.push({ day: d, somu: S, toSomu: Q.id, fromSomu: P.id, plain: K }); changed = true; return; }
+            sh[P.id][d] = S; sh[Q.id][d] = K;
+          }
+        });
+      });
+    }
+    if (!changed) break;
+  }
+  return { shifts: sh, swaps, violations: base };
 }
 
 function findConcreteFixes(opt) {
@@ -4279,6 +4355,7 @@ function runAIDiagnosis() {
         level: 'warning',
         title: `責任者の順位 ${cnt['hierarchy']} 件`,
         detail: '同じ時間帯に、責任者を担当できる上位役職者が出勤しているのに、下位者が責任者シフトに就いている日があります。\n'
+              + (hasAnyRespLike() ? `（②で「責任者として数える」にしたシフト（${(AppState.shiftTypes || []).filter(t => isRespLikeShift(t.key)).map(t => shiftSym(t.key)).join('・')}）に入っている上位役職者は数えません）\n` : '')
               + `対象: ${whoWhen('hierarchy')}`,
         suggestion: '上の「🔧 具体的な直し方を探す」で、その日の2人を入れ替えれば直ることが多いです。',
       });
@@ -5473,13 +5550,16 @@ function analyzeLowerBound(opts) {
         if (!want) return;
         const vms = g.staff.filter(s => s.positionType === 'viceManager');
         if (!vms.length) return;
-        const ok = vms.some(s => { const v = confirmOf(s, d); return !v || v === want; });
+        // v269: 同じ時間帯の「責任者として数える」シフト（②の印）に決まっていてもよい（検査と同じ）
+        const alts = respLikeKeysFor(want);
+        const ok = vms.some(s => { const v = confirmOf(s, d); return !v || v === want || alts.includes(v); });
         if (ok) return;
+        const altText = alts.length ? `（または${alts.map(k => '「' + shiftSym(k) + '」').join('・')}）` : '';
         res.reasons.push({
           kind: 'special-req', day: d,
-          fix: `副店長のどなたかの ${d}日 を「${shiftSym(want)}」にするか、空けてください`,
+          fix: `副店長のどなたかの ${d}日 を「${shiftSym(want)}」${altText}にするか、空けてください`,
           text: `${pfx}${d}日(${kind === 'replacement' ? '入れ替え日' : '新装日'}): 副店長が全員、別の予定になっています`
-              + `（${vms.map(s => s.name + 'さん=' + (shiftSym(confirmOf(s, d)) || '未定')).join('・')}）。この日は副店長が「${shiftSym(want)}」に入る決まりです`,
+              + `（${vms.map(s => s.name + 'さん=' + (shiftSym(confirmOf(s, d)) || '未定')).join('・')}）。この日は副店長が「${shiftSym(want)}」${altText}に入る決まりです`,
         });
       });
     }

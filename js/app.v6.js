@@ -1234,6 +1234,10 @@ function setupGeneratePanel() {
         }
         _milpApply(res, {});
       }
+      // v269: 表を作ったあとに、総務の順番に入れ替える（①の設定。エラーが1件でも増える入れ替えはしない）。
+      // 入れ替えたあとの表を「生成した直後の表」（genBase）にする（このあとの genBaseTake）
+      const somuN = (typeof applySomuReorderAfterGenerate === 'function') ? applySomuReorderAfterGenerate() : 0;
+      if (somuN) res.violations = AppState.violations;
       $bar.style.width = '100%';
       const cutOff = (res.allOptimal === false);   // 時間切れで打ち切られた＝最良解とは限らない
       const notTimeout = info && cutOff && !info.timedOut;
@@ -1242,7 +1246,8 @@ function setupGeneratePanel() {
                                          : (info && info.pickedFast) ? '｜1分生成の答えのほうが良かったので、そちらを採りました'
                                          : notTimeout ? '｜画面の検査で悪くなる答えを外して、良いほうを採りました（時間切れではありません）'
                                          : cutOff ? '｜時間内でいちばん良い答え（最良とは確認できていません）'
-                                                  : '｜大事な順に、これ以上減らせないことを確かめました');
+                                                  : '｜大事な順に、これ以上減らせないことを確かめました')
+                          + (somuN ? `｜総務の順番で ${somuN}か所 入れ替えました` : '');
       // 生成する前の表を元に戻すの履歴に積む（何回か作り直して、良い表へ ↩ で戻れるように）。
       // 前の表が無い（初めて作った・別の月）ときは、今までどおり履歴を空にする。
       if (typeof pushGenHistory === 'function') pushGenHistory(preGen);
@@ -1370,6 +1375,8 @@ function showSurplusPopup() {
   // ── 今回のエラーの原因まとめ（種類ごとに件数と原因・対処を表示）──
   // 種類 → [原因, 対処]。名前は getViolationLabel から引く（①の「ルールごとの強弱」・エラーの一覧と同じ名前。v268。
   // 前はここにも別の名前があり、「個人ルール: 切替時2連休」「4連休以上」「副店長・責任者の不在」などと出ていた）
+  // v269: 同じ時間帯の「責任者として数える」シフト（②の印）があれば「遅責（または深）」と書く（無ければ前の版と同じ文）
+  const spAlt = (role) => { const alts = respLikeKeysFor(role); return shiftSym(role) + (alts.length ? `（または${alts.map(shiftSym).join('・')}）` : ''); };
   const CAUSE = {
     'understaff':         ['その日その担当に人が足りない',           '定数を下げる／人を増やす'],
     'off-count':          ['その人が働きすぎで公休が取りきれない',   '担当できる人を増やして負担を分散'],
@@ -1396,7 +1403,7 @@ function showSurplusPopup() {
     'single-off':         ['前後が出勤で1日だけの休み',               '休みを2連休にまとめる'],
     'pair-rest-count':    ['2連休のかたまりが目安より少ない',         '休みをまとめて連休にする'],
     'night-after-work':   ['夜勤の翌日に出勤している',                 '夜勤翌日を休みにする'],
-    'special-day':        [`入れ替え日に副店長が${shiftSym('遅責')}に、新装日に${shiftSym('早責')}に入っていない`, `副店長を、入れ替え日は${shiftSym('遅責')}に、新装日は${shiftSym('早責')}にする`],
+    'special-day':        [`入れ替え日に副店長が${spAlt('遅責')}に、新装日に${spAlt('早責')}に入っていない`, `副店長を、入れ替え日は${spAlt('遅責')}に、新装日は${spAlt('早責')}にする`],
     'skill-short':        ['必要スキルの人が目標人数に届かない',       'スキル保有者を増やす／目標を見直す'],
     'paid':               ['表の「有」の日数が、設定した有給日数と違う', '有給日数か、希望休・表の「有」を見直す'],
   };
@@ -1843,6 +1850,26 @@ function setupResultPanel() {
     RangeLock.toggle();
   });
 
+  // v269: いまの表に、総務の順番の入れ替えをかける（元に戻す・やり直すで戻せる。変えたマスの記録に「総務の順番」で残す）
+  const btnSomu = document.getElementById('btnSomuReorder');
+  if (btnSomu) btnSomu.addEventListener('click', () => {
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+    if (!AppState.generated || !Object.keys(AppState.shifts || {}).length) { toast('シフトを生成してから実行してください', 'error'); return; }
+    const r = somuReorder(AppState.shifts);
+    if (!r.swaps.length) {
+      toast('総務の順番で入れ替えられる所はありませんでした（すでに順番どおりか、入れ替えるとエラーが増えるか、希望・固定で決まっています）', 'info', 7000);
+      return;
+    }
+    const before = JSON.parse(JSON.stringify(AppState.shifts));
+    if (typeof recordShiftHistory === 'function') recordShiftHistory();
+    AppState.shifts = r.shifts;
+    AppState.violations = r.violations;
+    if (typeof noteEdits === 'function') noteEdits('総務の順番', before);
+    renderResultTable();
+    saveToStorage();
+    toast(`総務の順番で ${r.swaps.length}か所 入れ替えました（エラーは増えていません。「元に戻す」で戻せます）`, 'success', 7000);
+  });
+
   document.getElementById('btnClearFixed').addEventListener('click', () => {
     if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
     let count = 0;
@@ -1970,6 +1997,11 @@ function setupResultPanel() {
             continue;
           }
           const sec = Math.round((Date.now() - t0) / 1000);
+          // v269: 「全部直す」は表を作り直すので、生成と同じく総務の順番に入れ替えてから比べる（①の設定が「入」のとき）
+          if (!sp.k && AppState.settings.somuAutoSwap !== false && typeof somuReorder === 'function') {
+            const sw = somuReorder(r._shifts || r.shifts);
+            if (sw.swaps.length) { r._shifts = sw.shifts; r.violations = sw.violations; }
+          }
           const st = candStats(baseShifts, r._shifts || r.shifts, beforeV, r.violations);
           // 🚨がどの種類も増えず、⛔ も悪くならず、🚨・⛔・連勤の超過日数・公休の足りない日数・切り替えの超過回数
           // （「絶対」のときだけ数える）のどれかが減った案だけを出す

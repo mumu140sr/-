@@ -516,6 +516,38 @@ function hasAnyDayShiftSkills() {
   const m = AppState.dailyShiftSkills || {};
   return Object.keys(m).some(k => Object.keys(m[k] || {}).some(d => Array.isArray(m[k][d]) && m[k][d].length > 0));
 }
+// ── 「その時間帯の責任者として数える」シフト（v269。特別日の副店長・責任者の順位）──
+// ②の「詳細」の印（shiftTypes の respLike: true）。研修のシフトは数えない。
+// 印が1つも無い月は、検査・生成・見込みとも前の版と同じに動く（Worker へは印があるときだけ渡す）。
+function isRespLikeShift(key) {
+  const t = getShiftType(key);
+  return !!(t && t.respLike === true && !t.isTraining);
+}
+/** 早責・遅責と同じ時間帯（遅責なら遅番の仲間、早責なら早番の仲間）の、印のあるシフト（その責任者そのものは除く） */
+function respLikeKeysFor(role) {
+  const late = isLate(role);
+  return (AppState.shiftTypes || []).filter(t => t.respLike === true && !t.isTraining && t.key !== role
+    && (late ? isLate(t.key) : isEarlyCategory(t.key))).map(t => t.key);
+}
+function hasAnyRespLike() { return (AppState.shiftTypes || []).some(t => t.respLike === true && !t.isTraining); }
+
+// ── 総務のシフト（v269。表を作ったあとに、総務の順番で入れ替える）──
+// ②の「詳細」の印（shiftTypes の somu）。まだ印の項目が1つも無い前の版のデータでは、はじめからある
+// 「早総務」「遅総務」に付ける（一度だけの既定。そのあとは利用者が変えられる）。生成の計算には使わない（Worker へは渡さない）。
+const SOMU_DEFAULT_KEYS = ['早総務', '遅総務'];
+function ensureSomuFlags(types) {
+  const list = types || AppState.shiftTypes || [];
+  if (list.some(t => typeof t.somu === 'boolean')) { list.forEach(t => { if (typeof t.somu !== 'boolean') t.somu = false; }); return; }
+  list.forEach(t => { t.somu = SOMU_DEFAULT_KEYS.includes(t.key); });
+}
+function isSomuShift(key) {
+  const list = AppState.shiftTypes || [];
+  const t = list.find(x => x.key === key);
+  if (!t) return false;
+  if (list.some(x => typeof x.somu === 'boolean')) return t.somu === true;
+  return SOMU_DEFAULT_KEYS.includes(key);
+}
+
 /** 取り込み・読込: 形を直す（日は1〜31の整数、スキル名は空でない文字。重なりと空の指定は捨てる） */
 function sanitizeDailyShiftSkills(m) {
   const out = {};
@@ -763,11 +795,16 @@ function normalizeAppData(data, base) {
     if (out.settings.parallelSolve  == null) out.settings.parallelSolve  = true;      // 旧データ補完
     if (out.settings.ignoreVioBeforeDay == null) out.settings.ignoreVioBeforeDay = 0;   // 旧データ補完
     if (!(out.settings.maxConsecutiveOff >= 1)) out.settings.maxConsecutiveOff = 3;    // 旧データ補完
+    // v269: 表を作ったあとに総務の順番に入れ替えるか（項目が無ければ入れ替える）。true／false だけを通す
+    if (typeof out.settings.somuAutoSwap !== 'boolean') delete out.settings.somuAutoSwap;
 
     // shiftTypes（v3以降）。workHours・isNight 未設定の旧データを補完
     out.shiftTypes = (Array.isArray(data.shiftTypes) ? data.shiftTypes : getDefaultShiftTypes()).map(t =>
       Object.assign({ workHours: 8, isNight: false }, t));
     sanitizeShiftSyms(out.shiftTypes);   // 表示用の記号（v258）: だめなものは捨てて key で出す
+    // v269: 「責任者として数える」（respLike）は true／false だけを通す。総務のシフト（somu）は true／false にそろえる（前の版のデータは既定）
+    out.shiftTypes.forEach(t => { if (typeof t.respLike !== 'boolean') delete t.respLike; });
+    ensureSomuFlags(out.shiftTypes);
 
     // roleRequirements
     out.roleRequirements = Object.assign(b.roleRequirements, data.roleRequirements || {});
@@ -822,6 +859,8 @@ function normalizeAppData(data, base) {
         weekendPref:     s.weekendPref === 'hard' ? 'soft' : (typeof s.weekendPref === 'string' ? s.weekendPref : ''),
         restStyle:       (typeof s.restStyle === 'string' ? s.restStyle : '').replace('-hard', '-soft'),
         pairRestTarget:  parseInt(s.pairRestTarget) || 0, // 月の連休回数（個人・0=全体設定）
+        // v269: 総務の順番（'first'＝先に入れる／'avoid'＝なるべく入れない）。「ふつう」は項目なし（前の版と同じ形）
+        ...((s.somuPref === 'first' || s.somuPref === 'avoid') ? { somuPref: s.somuPref } : {}),
       };
     });
 

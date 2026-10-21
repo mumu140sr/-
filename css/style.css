@@ -544,7 +544,7 @@ td.ds-mark { outline: 2px dotted var(--link); outline-offset: -3px; }
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--sd-gap); row-gap: 14px;
   padding: 4px 20px 20px; background: transparent;
   grid-template-areas: "name dept pos" "allow allow allow" "skill skill skill" "maxoff paid pairt" "offrun rest week"
-                       "prefs bal cons" "needp needp needp" "pcons plast note";
+                       "prefs bal cons" "somu needp needp" "pcons plast note";
 }
 .staff-split.is-split .staff-table tbody tr.is-selected > td {
   display: flex; flex-direction: column; align-items: stretch; gap: 6px;
@@ -570,11 +570,13 @@ td.ds-mark { outline: 2px dotted var(--link); outline-offset: -3px; }
 .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(16) { grid-area: pcons; }  .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(16)::after { content: "前月末の連勤日数（0＝月末は休み）"; }
 .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(17) { grid-area: plast; }  .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(17)::after { content: "前月末シフト（連勤1日以上で選択）"; }
 .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(18) { grid-area: note; }   .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(18)::after { content: "備考"; }
+/* v269: 総務の順番（列は19番目。削除は20番目になった）。並べる場所は「勤務の希望」の中 */
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) { grid-area: somu; }   .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19)::after { content: "総務の順番"; }
 /* 削除は詳細の右上（見出しの行）に出す */
-.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) { position: absolute; top: 8px; right: 12px; }
-.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) .btn-icon { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); padding: 4px 10px; }
-.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) .btn-icon::after { content: "このスタッフを削除"; }
-.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) .btn-icon .ic { width: 16px; height: 16px; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(20) { position: absolute; top: 8px; right: 12px; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(20) .btn-icon { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); padding: 4px 10px; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(20) .btn-icon::after { content: "このスタッフを削除"; }
+.staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(20) .btn-icon .ic { width: 16px; height: 16px; }
 /* 区分の見出し（基本・担当シフト・スキル・休み・勤務の希望・前月末・備考）。その区分の最初の欄の上に出す */
 .staff-split.is-split .staff-table tbody tr.is-selected > td:is(:nth-child(1), :nth-child(4), :nth-child(5), :nth-child(6), :nth-child(8), :nth-child(16))::before {
   position: absolute; top: 0; left: 0; width: calc(var(--sd-cols) * 100% + (var(--sd-cols) - 1) * var(--sd-gap));
@@ -604,7 +606,7 @@ td.ds-mark { outline: 2px dotted var(--link); outline-offset: -3px; }
   .staff-split.is-split .staff-table tbody tr.is-selected {
     --sd-cols: 2; grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas: "name dept" "pos ." "allow allow" "skill skill" "maxoff paid" "pairt offrun" "rest week"
-                         "prefs bal" "cons needp" "pcons plast" "note note";
+                         "prefs bal" "cons somu" "needp needp" "pcons plast" "note note";
   }
   .staff-split.is-split .staff-table tbody tr.is-selected > td:is(:nth-child(3), :nth-child(15), :nth-child(10), :nth-child(18)) { padding-top: 0; }
 }
@@ -612,7 +614,7 @@ td.ds-mark { outline: 2px dotted var(--link); outline-offset: -3px; }
   .staff-split.is-split .staff-table tbody tr.is-selected {
     --sd-cols: 1; grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "name" "dept" "pos" "allow" "skill" "maxoff" "paid" "pairt" "offrun" "rest" "week"
-                         "prefs" "bal" "cons" "needp" "pcons" "plast" "note";
+                         "prefs" "bal" "cons" "somu" "needp" "pcons" "plast" "note";
   }
   .staff-split.is-split .staff-table tbody tr.is-selected > td:is(:nth-child(2), :nth-child(7), :nth-child(9), :nth-child(17)) { padding-top: 0; }
 }
@@ -620,7 +622,7 @@ td.ds-mark { outline: 2px dotted var(--link); outline-offset: -3px; }
   .card.staff-list-card { max-width: none; position: static; }
   .staff-list { max-height: 40vh; }
   .staff-detail-h { padding-right: 20px; }
-  .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(19) { position: static; grid-column: 1 / -1; }
+  .staff-split.is-split .staff-table tbody tr.is-selected > td:nth-child(20) { position: static; grid-column: 1 / -1; }
 }
 
 /* 各画面の下の「前へ」「次へ」 */

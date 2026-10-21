@@ -17,9 +17,17 @@ function _milpPayload(settingsPatch, requestsPatch, staffPatch, inputPatch) {
     settings = Object.assign({}, AppState.settings, settingsPatch);
     if (settingsPatch.penalties) settings.penalties = Object.assign({}, AppState.settings.penalties || {}, settingsPatch.penalties);
   }
+  // v269: 画面だけで使う項目（総務のシフトの印 somu・表を作ったあとの入れ替え somuAutoSwap・③の総務の順番 somuPref）は
+  // Worker へ渡さない。「責任者として数える」（respLike）は印があるときだけ渡す（無い月は前の版と同じ中身にする）
+  if ('somuAutoSwap' in settings) { settings = Object.assign({}, settings); delete settings.somuAutoSwap; }
+  const shiftTypes = (AppState.shiftTypes || []).map(t => {
+    if (!('somu' in t) && !('respLike' in t && t.respLike !== true)) return t;
+    const o = Object.assign({}, t); delete o.somu; if (o.respLike !== true) delete o.respLike; return o;
+  });
+  const noSomuPref = st => { if (!('somuPref' in st)) return st; const o = Object.assign({}, st); delete o.somuPref; return o; };
   return {
     settings:              settings,
-    shiftTypes:            AppState.shiftTypes,
+    shiftTypes:            shiftTypes,
     roleRequirements:      AppState.roleRequirements,
     roleRequirementsCast:  AppState.roleRequirementsCast,
     dailyRequirements:     ip.dailyRequirements || AppState.dailyRequirements,
@@ -27,13 +35,13 @@ function _milpPayload(settingsPatch, requestsPatch, staffPatch, inputPatch) {
     skills:                AppState.skills,
     dailySkills:           AppState.dailySkills,
     shifts:                AppState.shifts,   // 微調整のとき、いまの表を出発点にする
-    staff:                 staffPatch && staffPatch.length ? AppState.staff.map(st => {
+    staff:                 (staffPatch && staffPatch.length ? AppState.staff.map(st => {
                              const add = [].concat(...staffPatch.filter(c => c.id === st.id).map(c => c.add || []));
                              if (!add.length) return st;
                              const keys = (st.allowedShifts || []).slice();
                              add.forEach(k => { if (keys.indexOf(k) < 0) keys.push(k); });
                              return Object.assign({}, st, { allowedShifts: keys });
-                           }) : AppState.staff,
+                           }) : AppState.staff).map(noSomuPref),
     requests:              requestsPatch && requestsPatch.length ? (() => {
                              const r = JSON.parse(JSON.stringify(AppState.requests || {}));
                              requestsPatch.forEach(c => { r[c.id] = r[c.id] || {}; if (c.to) r[c.id][c.day] = c.to; else delete r[c.id][c.day]; });
@@ -192,7 +200,7 @@ function milpTrial(payload, variant, timeOverride) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=268'); }
+    try { worker = new Worker('js/milp.worker.js?v=269'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     const untrack = _milpTrack(worker, () => { clearTimeout(timeout); reject(new Error(MILP_CANCEL_MSG)); });
     const timeout = setTimeout(() => { untrack(); try { worker.terminate(); } catch (_) {} reject(new Error('タイムアウト')); }, 600000);
@@ -288,7 +296,7 @@ function _milpOnce(onProgress, opts, variant) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=268'); }
+    try { worker = new Worker('js/milp.worker.js?v=269'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     // 1部門あたり最大10分。部門数ぶん待てるよう十分な余裕を持たせる（誤タイムアウト防止）
     const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（30分）')); }, 1800000);

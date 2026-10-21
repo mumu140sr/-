@@ -292,12 +292,18 @@
         const kind = sp[d];
         if (kind !== 'replacement' && kind !== 'renewal') continue;
         const role = (kind === 'replacement') ? '遅責' : '早責';
-        if (!roles.includes(role)) continue;
+        // v269: 同じ時間帯の「責任者として数える」シフト（②の印。深夜など）に副店長が入っていてもよい（検査と同じ）。
+        // 印が無ければ okKeys は [role] だけで、式は前の版と同じ
+        const okAll = [role].concat(respLikeKeysFor(role));
+        const okKeys = okAll.filter(k => roles.includes(k));
+        if (!okKeys.length) continue;
         const terms = []; let c = 0;
         vms.forEach(s => {
-          if (fx(s, d) === role) { c++; return; }   // B6: 担当外の固定も数える
-          if (!(s.allowedShifts || []).includes(role)) return;
-          if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[role]));
+          if (okAll.includes(fx(s, d))) { c++; return; }   // B6: 担当外の固定も数える
+          okKeys.forEach(k => {
+            if (!(s.allowedShifts || []).includes(k)) return;
+            if (free(s, d)) terms.push(V(sidOf[s.id], d, roleIdx[k]));
+          });
         });
         if (c === 0 && terms.length) {
           const v = `sp_${d}`; addSlack(v, 1, wSP, 'special-day');
@@ -325,6 +331,15 @@
     };
     const realT = arr => arr.filter(x => x !== '_');
     const constOf = (arr) => arr.filter(x => x === '_').length;
+    // v269: 責任者の順位で「上の人がその時間帯にいる」と数えるとき、「責任者として数える」シフト（②の印）に
+    // 入っている分は外す（検査と同じ）。印が無ければ arr をそのまま返す（式は前の版と同じ）
+    const RL = new Set(roles.filter(k => isRespLikeShift(k)));
+    const noRL = (hi, d, arr) => {
+      if (!RL.size) return arr;
+      if (isFixWork(hi, d) && isRespLikeShift(fx(hi, d))) return arr.filter(x => x !== '_');
+      const vs = new Set([...RL].map(k => V(sidOf[hi.id], d, roleIdx[k])));
+      return arr.filter(x => !vs.has(x));
+    };
 
     gStaff.forEach(s => {
       const isCast = getStaffDepartment(s) === 'cast';
@@ -731,7 +746,7 @@
         if (isTrainDay(hi, d)) { const k = fx(hi, d); return (band === 'l' && cat(k) === 'l') ? { t: [], c: 1 } : { t: [], c: 0 }; }
         const o = cellTerms(hi, d);
         if (o.half) return { t: [], c: 0 };
-        const arr = band === 'e' ? o.e : o.l;
+        const arr = noRL(hi, d, band === 'e' ? o.e : o.l);
         return { t: realT(arr), c: constOf(arr) };
       };
       [['e', earlyRoles], ['l', lateRoles]].forEach(([band, bandRoles]) => {
@@ -775,7 +790,7 @@
               else return;
               capable.forEach(hi => {
                 if (hi.id === lo.id || getStaffPriority(hi) >= getStaffPriority(lo)) return;
-                const o = cellTerms(hi, d); const bandArr = band === 'e' ? o.e : o.l;
+                const o = cellTerms(hi, d); const bandArr = noRL(hi, d, band === 'e' ? o.e : o.l);
                 const hiT = realT(bandArr), hiC = constOf(bandArr);
                 if (loResp === '1c') { if (hiT.length) { const v = `h_${band}_${d}_${sidOf[lo.id]}_${sidOf[hi.id]}`; addSlack(v, 1, wH, 'hierarchy'); cons.push(`${v}c: ${hiT.join(' + ')} - ${v} <= ${1 - hiC}`); } return; }
                 const v = `h_${band}_${d}_${sidOf[lo.id]}_${sidOf[hi.id]}`; addSlack(v, 1, wH, 'hierarchy');

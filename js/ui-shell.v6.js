@@ -77,7 +77,7 @@
   const STAFF_COLS = ['名前', '部門', '役職', '担当シフト', 'スキル', '公休数(月の休み数)', '有給(月の有給数)',
     '希望早可/遅可', '早遅バランス(割合／のみ＝絶対)', '連勤上限(個人・空欄=全体)', '連休上限(個人・空欄=全体)',
     '遅→早は連休必須', '土日休み希望', '休み方連休/分散', '連休回数(月・空欄=全体)', '前月末連勤日数0=月末は休み',
-    '前月末シフト連勤1日以上で選択', '備考', '削除'];
+    '前月末シフト連勤1日以上で選択', '備考', '総務の順番', '削除'];   // v269: 「総務の順番」を足した（CSS の nth-child も直した）
   function setupStaffSplit() {
     const split = document.getElementById('staffSplit');
     const tb = document.getElementById('staffTableBody');
