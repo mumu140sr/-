@@ -29,7 +29,9 @@
     { label: 'コンプラ(6連勤以上)', w: 1, types: ['comp-cons'] },
     { label: '人員・役職',     w: 2, types: ['understaff', 'resp-duplicate', 'skill-late', 'vicemanager-absent', 'special-day'] },
     { label: '公休・有給',     w: 2, types: ['off-count', 'paid'] },
-    { label: '連勤・遅→早',    w: 2, types: ['consecutive', 'late-early'] },
+    // 夜勤明けの出勤は、v268 まではどの段にも入っておらず、段ごとに解く生成では減らす対象になっていなかった
+    // （検査では「絶対」）。v269 で、同じ「休みの間を空ける」決まりの遅→早と同じ段に入れた。夜勤の無い月は罰点が無いので変わらない
+    { label: '連勤・遅→早',    w: 2, types: ['consecutive', 'late-early', 'night-after-work'] },
     { label: '単発出勤・定数',  w: 3, types: ['single-work', 'overstaff', 'off-surplus'] },
     // 「リズム」は2つに分ける。まとめて1段にすると、この段だけ極端に重くなり
     // 毎回時間切れになっていた。実測（4つの実データ・60秒）で、まとめた場合の
