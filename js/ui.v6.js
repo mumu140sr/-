@@ -27,6 +27,7 @@ function toast(message, type = 'info', duration = 3000) {
 let _autoSaveTimer = null;
 function autoSave() {
   if (typeof scheduleShortageRefresh === 'function') scheduleShortageRefresh();   // 帯の下の文・理由の枠を数え直す（v265）
+  if (typeof scheduleCalendarMargins === 'function') scheduleCalendarMargins();   // ④の「あと何人休めるか」と知らせを数え直す（v270）
   if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
   _autoSaveTimer = setTimeout(() => {
     if (typeof saveToStorage === 'function') saveToStorage();
@@ -445,7 +446,12 @@ function _rcDays(list, combined) {
 }
 const _rcDiff = (n) => n >= 0 ? `<span class="rc-plus">余り ${capNum(n)}</span>` : `<span class="rc-minus">不足 ${capNum(-n)}</span>`;
 let _rcHelpOpen = false;   // 表の見方の折りたたみ。描き直しても開いたまま
-document.addEventListener('toggle', (e) => { if (e.target && e.target.matches && e.target.matches('details.rc-help')) _rcHelpOpen = e.target.open; }, true);
+let _rcDetailOpen = false;   // 「くわしい数を見る」の折りたたみ（v270）。描き直しても開いたまま
+document.addEventListener('toggle', (e) => {
+  if (!e.target || !e.target.matches) return;
+  if (e.target.matches('details.rc-help')) _rcHelpOpen = e.target.open;
+  if (e.target.matches('details.rc-detail')) _rcDetailOpen = e.target.open;
+}, true);
 /** 読みまちがえやすい行の一言。数の欄でなく行の名前の下に出す（v267 の直し: 数の欄では細く何行にも折り返していた） */
 /** 削る日がある人の名前（2人まで。残りは「ほか◯人」） */
 function _rcCutNames(who) {
@@ -527,11 +533,44 @@ function renderRoleCapacityHtml(pre) {
   const rule = '①基本設定の「詳しい設定」の中の「必要人数のルール」';
   // 休み・有給を削る日のある行（担当を増やしても、休みの希望を動かしても減らない。v267 の直し）
   const anyCut = t.groups.some(g => g.total.cut > 0 || g.rows.some(r => r.cut > 0)) || t.skills.some(k => k.cut > 0);
-  return `<div class="rc-wrap"><h4>できることごとの余り・不足（この月の見込み）</h4>${html}`
+  // v270: いちばん上に人手の合計（全体の行）を大きく、役ごと・スキルごとは「足りています／◯日に足りません」だけを出す。
+  // 数（必要・出られる・埋められる・余り不足・削る日）は「くわしい数を見る」の中に、前の表のまま入れる（数そのものは変えない）
+  const sumHtml = t.groups.map(g => {
+    const x = g.total;
+    const big = x.diff >= 0 ? `<span class="rc-plus">余り ${capNum(x.diff)}人日</span>` : `<span class="rc-minus">不足 ${capNum(-x.diff)}人日</span>`;
+    const say = x.diff >= 0 ? `全員が予定どおり休んでも、月に${capNum(x.diff)}人日あまります。` : `全員が予定どおり休むと、月に${capNum(-x.diff)}人日足りません。`;
+    return `<div class="rc-sum">${multi ? `<span class="rc-sum-dept">${escapeHtml(g.label)}</span>` : ''}<span class="rc-sum-big">${big}</span>`
+      + `<span class="rc-sum-say">${escapeHtml(say)}（1人が1日出る分＝1人日。だれが何をできるかは見ずに、人の数と日数の合計で比べた数です）</span>${_rcWhy(x, true, false)}</div>`;
+  }).join('');
+  const status = (x) => {
+    if (x.need === 0 && x.target != null) return '<span class="rc-ok">最低ラインなし</span>';
+    if (x.short.length) return `<span class="rc-minus">${escapeHtml(_rcDays(x.short, !!x.sub))}に足りません</span>`;
+    if (x.diff < 0) return `<span class="rc-minus">月の合計で${capNum(-x.diff)}人日足りません</span>`;
+    return '<span class="rc-ok">足りています</span>';
+  };
+  const brief = [];
+  t.groups.forEach(g => {
+    if (multi) brief.push(`<tr class="rc-bdept"><th scope="rowgroup" colspan="3">${escapeHtml(g.label)}</th></tr>`);
+    g.rows.forEach(r => brief.push(`<tr><th scope="row"><span class="rc-name">${escapeHtml(_rcRowLabel(r))}</span>${_rcWhy(r, false, false)}</th>`
+      + `<td class="rc-st">${status(r)}</td><td class="rc-ppl">できる人 ${r.people}人</td></tr>`));
+  });
+  if (t.skills.length) {
+    if (multi || t.groups.length) brief.push(`<tr class="rc-bdept"><th scope="rowgroup" colspan="3">スキル${multi ? '（社員とキャストを合わせて数えます）' : ''}</th></tr>`);
+    t.skills.forEach(k => brief.push(`<tr><th scope="row"><span class="rc-name">${escapeHtml(`${k.band === 'early' ? '早番' : '遅番'}の「${k.name}」`)}</span>${_rcWhy(k, false, true)}</th>`
+      + `<td class="rc-st">${status(k)}</td><td class="rc-ppl" title="その時間帯に入れる人">持っている人 ${k.people}人</td></tr>`));
+  }
+  return `<div class="rc-wrap"><h4>できることごとの余り・不足（この月の見込み）</h4>`
+    + `<h5 class="rc-dept">人手の合計（この月の本当の余り）</h5>${sumHtml}`
+    + `<h5 class="rc-dept">役ごと・スキルごとに足りるか</h5>`
+    + `<div class="rc-scroll"><table class="rc-table rc-brief"><tbody>${brief.join('')}</tbody></table></div>`
+    + `<p class="rc-note">同じ人がいくつもの役に入れるので、役ごとの数は足し算しません（本当に余っているのは、上の「人手の合計」の数です）。`
+    + (t.groups.some(g => g.total.diff < 0) ? '人手の合計が足りないときは、役ごとに「足りています」と出ていても、全部の役を同時には埋められません。' : '') + '</p>'
     + (roleShort ? `<p class="rc-todo"><b>不足の行があるときは</b>、次のどれかをします：その役を担当できる人を増やす（③スタッフ管理の「担当シフト」。スキルの行は「スキル」）・足りない日の休みの希望や有給を動かす（④希望休入力）・必要人数を見直す（②シフト種別、${rule}）。</p>` : '')
     + (anyCut ? `<p class="rc-todo"><b>「休み・有給を◯日削って」と出ている行は</b>、その人の出勤の希望・固定が、その人の出られる日数（公休・有給の予定と研修の日を引いた日数）より多い分です。担当を増やしても、休みの希望を動かしても減りません。行の名前の下に出ている人の出勤の希望・固定を減らす（④希望休入力。固定は⑥シフト表）か、その人の公休数・有給の日数を見直します（③スタッフ管理の「公休数（月の休み数）」「有給（月の有給数）」）。</p>` : '')
     + (shortTot.length ? `<p class="rc-todo"><b>全体の行が不足のときは</b>、人の数と日数の合計が足りません。担当を増やしたり、休みの希望を別の日へ動かしたりしても、この数は変わりません。必要人数を見直す（②シフト種別、${rule}）か、公休数・有給の日数を見直します（③スタッフ管理の「公休数（月の休み数）」「有給（月の有給数）」）。`
       + (forced.length ? `必要には、必要人数を超えて希望・固定で決まっている出勤（${escapeHtml(forced.join('、'))}）が入っています。その希望・固定を見直すと、不足が減ります。` : '') + '</p>' : '')
+    + `<details class="rc-detail"${_rcDetailOpen ? ' open' : ''}><summary class="calc-view-only">くわしい数を見る（必要・出られる・埋められる・余り・不足・足りない日）</summary>`
+    + html
     + (comp.length ? `<p class="hint">6連勤を作らずに出せる日数で見ると、次の期間も足りません（作る前の見込みと同じ）：</p><ul class="sp-list rc-comp">${comp.slice(0, 8).map(x => `<li>${escapeHtml(x.text)}</li>`).join('')}${comp.length > 8 ? `<li class="hint">ほか${comp.length - 8}件</li>` : ''}</ul>` : '')
     + `<details class="rc-help"${_rcHelpOpen ? ' open' : ''}><summary class="calc-view-only">表の見方（数の意味と、不足が多く出るわけ）</summary>`
     + `<p class="hint">必要：その役に、この月に入る人の数の合計です（スキルは最低ラインの合計）。出られる：その役ができる人が、この月に出られる日数の合計です（公休の予定・有給・研修・休みの希望と、ほかの役や、その役が要らない日、必要人数より多く決まっている日の出勤を引き、その役が要る日に入れる日数までにしています）。スキルの行は、その時間帯に希望・固定で入っている保有者を、シフト表のエラーと同じく、必要人数を超えていても、研修や人数に数えないシフトでも数えます。目標だけの日も数えます。埋められる：その役が要る日に、できる人を1人1日1つずつ当てはめてみて、埋まる数です。1人が埋めるのは、その人の出られる日数までです（希望・固定で決まっている人は先に入れますが、その人の出られる日数の中でだけ数えます）。余り・不足：休み・有給を削らずに全部埋まれば「余り」（出られる − 必要。0より小さければ0）、埋まらない所があれば「不足」（必要 − 埋められる）です。</p>`
@@ -540,7 +579,7 @@ function renderRoleCapacityHtml(pre) {
     + `<p class="hint">全体の行は、だれが何をできるかを見ずに、人の数と日数の合計だけで比べます（AI診断レポートの「人手が◯人日 足りません」と同じ数え方）。足りない日があるときは「月の合計では足りますが、…は足りません」と添えます。</p>`
     + `<p class="hint">足りない日：その日に出られる「できる人」が必要より少ない日です（「合わせて」は、まとめた役のどれにも1人ずつ入れきれない日、「枠」は、できる人はいても入れる枠が足りない日）。足りない日が「なし」でも、月全体で出られる日数が足りないときや、休み・有給を削る日があるときは不足になります。</p>`
     + `<p class="rc-note">同じ人がいくつもの役をできるので、出られる日数は役どうしで取り合いになります。行ごとに見て足りていても、全部の役を同時に埋められるとは限りません。</p>`
-    + '</details></div>';
+    + '</details></details></div>';
 }
 /** いまの表の「不足」の内訳（帯と同じ検査の違反から）。人員不足は役ごと、休み・有給は全体、スキルは別の行 */
 function bandBreakdown(pre) {
@@ -2648,6 +2687,11 @@ function renderCalendar() {
     });
   });
   table.appendChild(tbody);
+  // いちばん下に、日ごとの「あと何人休めるか」（v270）
+  const tfoot = document.createElement('tfoot');
+  tfoot.className = 'cal-margin';
+  table.appendChild(tfoot);
+  updateCalendarMargins();
 
   // クリック（記号入力）
   tbody.querySelectorAll('td[data-sid]').forEach(td => {
@@ -2658,6 +2702,8 @@ function renderCalendar() {
       // 出勤系シフト（早責/遅責/研 など）も requests に入れるが、生成側は
       // getFixedShiftAt() 経由で「固定」として扱うので指定どおりに配置される。
       if (!AppState.requests[sid]) AppState.requests[sid] = {};
+      const prev = AppState.requests[sid][d];
+      const before = calendarMarginModel();   // 入れる前の「あと何人休めるか」（v270。下回る日なら知らせる）
       if (selectedMark === '') {
         delete AppState.requests[sid][d];
       } else {
@@ -2667,6 +2713,7 @@ function renderCalendar() {
       span.textContent   = shiftSym(selectedMark);   // 表示用の記号（v258。requests は key のまま）
       span.className     = 'shift-cell ' + getShiftClass(selectedMark) + (isWork(selectedMark) ? ' ' + shiftToneClass(selectedMark) + ' c-lock' : '');
       span.style.cssText = '';
+      noteRequestMarginDrop(sid, d, prev, before);
       autoSave();
       scheduleRequestAlerts();
     });
@@ -2679,11 +2726,158 @@ function renderCalendar() {
       span.textContent   = '';
       span.className     = 'shift-cell s-empty';
       span.style.cssText = '';
+      updateCalendarMargins();
       autoSave();
       scheduleRequestAlerts();
     });
   });
   scheduleRequestAlerts();
+}
+
+// ===== ④の「あと何人休めるか」（v270） =====
+// 数は⑤の実現性チェックの「日ごとの人数の余裕」と同じ analyzeDayMargins（新しい数え方は作らない）。
+// 全体・早番・遅番は「出られる人 − 必要人数」（その日・その時間帯の必要人数が0の日は出さない）。
+// スキルは「その時間帯に入れる、持っている人 − 最低ライン」（スキル設定の最低ライン＝下回ると「絶対」のエラーになる数）。
+// 最低ラインの無い日（目標人数だけの日）は出さない（目標は「できれば」で、守れなくても「絶対」のエラーにはならないため）。
+function calendarMarginModel() {
+  const groups = (typeof analyzeDayMargins === 'function') ? analyzeDayMargins() : [];
+  const rows = [];
+  if (!groups.length) return { rows, days: 0 };
+  const multi = groups.length > 1;
+  const days = groups[0].days.length;
+  groups.forEach(g => {
+    const pre = multi ? g.label + 'の' : '';
+    [['total', '全体'], ['early', '早番'], ['late', '遅番']].forEach(([k, lab]) => {
+      const cells = g.days.map(r => { const c = r[k]; return c && c.need > 0 ? { v: c.margin, avail: c.avail, need: c.need } : null; });
+      if (cells.some(Boolean)) rows.push({ id: g.label + '|' + k, kind: k, label: pre + lab, cells });
+    });
+  });
+  const skills = [];
+  groups[0].days.forEach(r => (r.skills || []).forEach(k => { const id = k.name + '|' + k.band; if (!skills.includes(id)) skills.push(id); }));
+  skills.forEach(id => {
+    const [name, band] = id.split('|');
+    const cells = groups[0].days.map(r => {
+      const c = (r.skills || []).find(x => x.name + '|' + x.band === id);
+      return c && c.min > 0 ? { v: c.avail - c.min, avail: c.avail, need: c.min } : null;
+    });
+    if (cells.some(Boolean)) rows.push({ id: 'skill|' + id, kind: 'skill', skill: name, band,
+      label: `${band === 'early' ? '早番' : '遅番'}の「${name}」`, cells });
+  });
+  return { rows, days };
+}
+function _cmCellText(c) { return c.v < 0 ? '−' + (-c.v) : String(c.v); }
+function _cmCellTitle(row, d, c) {
+  const who = row.kind === 'skill' ? `その時間帯に入れる、「${row.skill}」を持っている人 ${c.avail}人 ／ 最低 ${c.need}人`
+    : `${row.kind === 'total' ? '出られる人' : (row.kind === 'early' ? '早番に入れる人' : '遅番に入れる人')} ${c.avail}人 ／ 必要 ${c.need}人`;
+  const how = c.v > 0 ? `あと${c.v}人まで休めます` : c.v === 0 ? 'これ以上休めません（出られる人が全員出勤になります）' : `${-c.v}人足りません`;
+  return `${d}日 ${row.label}：${who}。${how}`;
+}
+let _cmTimer = null;
+function scheduleCalendarMargins() {
+  clearTimeout(_cmTimer);
+  _cmTimer = setTimeout(() => {
+    const p = document.getElementById('panel-calendar');
+    if (p && p.classList.contains('active')) updateCalendarMargins();
+  }, 200);
+}
+/** ④の表のいちばん下の行と、その下の説明を描き直す（希望・固定・必要人数・スキル・担当などが変わったら、その場で数え直す） */
+function updateCalendarMargins() {
+  const table = document.getElementById('calendarTable');
+  const tfoot = table && table.querySelector('tfoot.cal-margin');
+  if (!tfoot) return;
+  let m;
+  try { m = calendarMarginModel(); } catch (e) { m = { rows: [], days: 0 }; }
+  const note = document.getElementById('calMarginNote');
+  if (!m.rows.length) { tfoot.innerHTML = ''; if (note) note.innerHTML = ''; renderRequestMarginAlert(m); return; }
+  const wcls = (d) => { const w = getWeekday(AppState.settings.targetMonth, d); return w === 0 ? ' weekend-sun' : w === 6 ? ' weekend-sat' : ''; };
+  let html = `<tr class="cm-head"><td class="cm-title">あと何人休めるか<small>その日だけを見た目安</small></td>`;
+  for (let d = 1; d <= m.days; d++) html += `<td class="cm-day${wcls(d)}">${d}</td>`;
+  html += '</tr>';
+  m.rows.forEach(r => {
+    html += `<tr class="cm-row" data-cm="${escapeHtml(r.id)}"><td class="cm-label">${escapeHtml(r.label)}</td>`;
+    r.cells.forEach((c, i) => {
+      const d = i + 1;
+      if (!c) { html += `<td class="cm-cell cm-none" title="${escapeHtml(`${d}日 ${r.label}：${r.kind === 'skill' ? 'この日は最低ラインがありません' : 'この日は必要人数が0人です'}`)}"></td>`; return; }
+      const cls = c.v < 0 ? ' cm-neg' : c.v === 0 ? ' cm-zero' : '';
+      html += `<td class="cm-cell${cls}" data-day="${d}" title="${escapeHtml(_cmCellTitle(r, d, c))}">${_cmCellText(c)}</td>`;
+    });
+    html += '</tr>';
+  });
+  tfoot.innerHTML = html;
+  if (note) note.innerHTML = '表のいちばん下の<b>「あと何人休めるか」</b>は、その日、あと何人まで休んでも最低人数を守れるかの目安です（その日だけを見た数）。'
+    + '<span class="cm-key cm-zero">0</span> の日は、これ以上休めません。<span class="cm-key cm-neg">−1</span> のようにマイナスの日は、もう足りません。'
+    + '全体・早番・遅番は「出られる人 − 必要人数」、スキルは「その時間帯に入れる、持っている人 − 最低ライン（③スタッフ管理の「スキル設定」）」です。'
+    + '休み・有給・半休・研修の希望と、シフトを決めた希望・固定を数に入れています。スキルは最低ラインのある日だけ出します（目標人数は「できれば」なので数えません）。'
+    + '0 が無くても、ある日に休むと、その人はほかの日に出る分が増えるので、連勤などのエラーが出ることがあります。';
+  renderRequestMarginAlert(m);
+}
+
+// ===== 希望を入れた瞬間の知らせ（v270） =====
+// ④で入れた希望で、その日の「あと何人休めるか」がマイナスになった（または、もっと下がった）ら、④の画面の中に知らせる。
+// 入れるのは止めない（決めるのは使う人）。トーストではなく④の画面の下に貼り付けて出す（表を下まで送っても見える）。
+// 入れた希望が変わる・消える、または足りるようになったら、知らせも消える。
+let _reqMarginAlert = null;   // { sid, d, mark, prev, ids:[行の id] }
+function noteRequestMarginDrop(sid, d, prev, before) {
+  const after = calendarMarginModel();
+  const cur = (AppState.requests[sid] || {})[d];
+  const ids = [], was = {};
+  after.rows.forEach(r => {
+    const a = r.cells[d - 1]; if (!a || a.v >= 0) return;
+    const br = before.rows.find(x => x.id === r.id), b = br && br.cells[d - 1];
+    if (!b || a.v < b.v) { ids.push(r.id); was[r.id] = b ? b.v : null; }
+  });
+  // 下がらなかったときは、前の知らせを残す（まだ当てはまるかは描き直すときに確かめる）
+  if (ids.length) _reqMarginAlert = { sid, d, mark: cur, prev, ids, was };
+  updateCalendarMargins();
+}
+function _reqMarginVerb(mark) {
+  if (!mark) return '希望を外す';
+  if (mark === '休' || mark === '☆') return '休む';
+  if (mark === '有') return '有給にする';
+  if (mark === '半') return '半休にする';
+  if (typeof isTraining === 'function' && isTraining(mark)) return `研修（「${shiftSym(mark)}」）に入れる`;
+  return `「${shiftSym(mark)}」に決める`;
+}
+function renderRequestMarginAlert(m) {
+  const box = document.getElementById('reqMarginAlert');
+  if (!box) return;
+  const a = _reqMarginAlert;
+  const cur = a ? (AppState.requests[a.sid] || {})[a.d] : undefined;
+  const st = a && (AppState.staff || []).find(x => x.id === a.sid);
+  // 入れた希望が変わった・消えた・人がいない → 知らせを消す
+  if (!a || !st || cur !== a.mark) { _reqMarginAlert = null; box.innerHTML = ''; box.hidden = true; return; }
+  const model = m || calendarMarginModel();
+  const lines = [];
+  a.ids.forEach(id => {
+    const r = model.rows.find(x => x.id === id), c = r && r.cells[a.d - 1];
+    if (!c || c.v >= 0) return;
+    // 入れる前からマイナスだった日は「さらに足りなくなります」
+    const more = a.was && a.was[id] != null && a.was[id] < 0;
+    const now = r.kind === 'early' || r.kind === 'late' ? `いま${r.label.replace(/^.*の/, '')}に入れるのは${c.avail}人` : `いま出られるのは${c.avail}人`;
+    lines.push(r.kind === 'skill'
+      ? (more ? `${r.label}が、さらに足りなくなります（最低${c.need}人・${now}）` : `${r.label}が最低${c.need}人を下回ります（${now}）`)
+      : (more ? `${r.label}が、さらに足りなくなります（必要${c.need}人・${now}）` : `${r.label}で必要な${c.need}人を下回ります（${now}）`));
+  });
+  if (!lines.length) { _reqMarginAlert = null; box.innerHTML = ''; box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = `<div class="rma-body">${uiIcon('must')}<div class="grow"><b>${escapeHtml(`${st.name}さんが${a.d}日に${_reqMarginVerb(a.mark)}と、`)}</b>`
+    + `<ul>${lines.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`
+    + `<div class="hint">希望は入れたままです。別の日にするか、このまま進めるかを決めてください（このままだと、その日は人員不足やスキル不足のエラーになります）。</div></div>`
+    + `<div class="rma-btns"><button type="button" class="btn" id="rmaUndo">この希望を取り消す</button><button type="button" class="btn btn-ghost calc-view-only" id="rmaClose">閉じる</button></div></div>`;
+  box.querySelector('#rmaUndo').addEventListener('click', () => {
+    if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+    const x = _reqMarginAlert; if (!x) return;
+    AppState.requests[x.sid] = AppState.requests[x.sid] || {};
+    if (x.prev === undefined || x.prev === '') delete AppState.requests[x.sid][x.d]; else AppState.requests[x.sid][x.d] = x.prev;
+    _reqMarginAlert = null;
+    autoSave(); renderCalendar();
+  });
+  box.querySelector('#rmaClose').addEventListener('click', () => { _reqMarginAlert = null; box.innerHTML = ''; box.hidden = true; scheduleRequestAlerts(); });
+}
+/** いま知らせている日（#reqAlerts で同じ日の人員不足・スキル不足を二重に言わないため） */
+function requestMarginAlertDay() {
+  const a = _reqMarginAlert;
+  return a && (AppState.requests[a.sid] || {})[a.d] === a.mark ? a : null;
 }
 
 // ===== 希望だけで必ず🚨になるもの（④で希望を入れたその場で知らせる） =====
@@ -2787,6 +2981,14 @@ function renderRequestAlerts() {
   if (!box || !AppState.staff || !AppState.staff.length) return;
   let res;
   try { res = requestCertainMusts(); } catch (e) { box.innerHTML = ''; return; }
+  // v270: 下の「希望を入れた瞬間の知らせ」に出ている日の、その日の人数・スキルの不足は、ここでは出さない（同じことを二重に言わない）
+  const ma = (typeof requestMarginAlertDay === 'function') ? requestMarginAlertDay() : null;
+  if (ma) {
+    const skillIds = ma.ids.filter(id => id.indexOf('skill|') === 0).map(id => id.split('|')[1]);
+    const hasTotal = ma.ids.some(id => /\|total$/.test(id));
+    res.items = res.items.filter(it => !(it.reason.day === ma.d
+      && ((it.reason.kind === 'day' && hasTotal) || (it.reason.kind === 'skill' && skillIds.includes(it.reason.skill)))));
+  }
   // 表のマスに印を付ける
   document.querySelectorAll('#calendarTable td.req-alert').forEach(td => { td.classList.remove('req-alert'); td.style.outline = ''; });
   res.items.forEach(it => {

@@ -64,6 +64,7 @@ id	btnTheme	HTML	1	app.v6.js
 id	btnUndo	HTML	1	app.v6.js,ui.v6.js
 id	btnWizard	HTML	1	app.v6.js
 id	calendarTable	HTML	1	ui.v6.js
+id	calMarginNote	HTML	1	ui.v6.js
 id	dailyReqContent	HTML	1	ui.v6.js
 id	dailyReqPanel	HTML	1	ui.v6.js
 id	dailyReqToggle	HTML	1	ui.v6.js
@@ -151,10 +152,13 @@ id	replacementDays	HTML	1	ui.v6.js
 id	reportCard	HTML	1	app.v6.js,ui.v6.js
 id	reportContent	HTML	1	app.v6.js
 id	reqAlerts	HTML	1	ui.v6.js
+id	reqMarginAlert	HTML	1	ui.v6.js
 id	resolveMsg	JS	0	ui.v6.js
 id	resultBand	HTML	1	ui.v6.js
 id	resultMenu	HTML	1	ui-shell.v6.js
 id	resultTable	HTML	1	ui.v6.js
+id	rmaClose	JS	0	ui.v6.js
+id	rmaUndo	JS	0	ui.v6.js
 id	roleTableBody	HTML	1	ui-shell.v6.js,ui.v6.js
 id	ruleLevelsInputs	HTML	1	ui.v6.js
 id	ruleLevelsPanel	HTML	1	ui.v6.js
@@ -227,9 +231,11 @@ class	active	HTML	2	app.v6.js,ui.v6.js
 class	allowed-label	JS	0	ui-shell.v6.js,ui.v6.js
 class	bad	JS	0	ui.v6.js
 class	btn-primary	HTML	8	ui.v6.js
+class	cal-margin	JS	0	ui.v6.js
 class	calc-lock-area	JS	0	milp.v6.js,ui.v6.js
 class	calc-view-only	JS	0	milp.v6.js
 class	chip-btn	HTML	4	ui.v6.js
+class	cm-row	JS	0	ui.v6.js
 class	col-resizer	JS	0	ui.v6.js
 class	col-resizing	JS	0	ui.v6.js
 class	daily-req-input	JS	0	ui.v6.js
@@ -247,6 +253,7 @@ class	nav-link	HTML	1	ui.v6.js
 class	open	JS	0	app.v6.js,ui-shell.v6.js
 class	range-sel	JS	0	ui.v6.js
 class	range-select-mode	JS	0	ui.v6.js
+class	rc-detail	JS	0	ui.v6.js
 class	rc-help	JS	0	ui.v6.js
 class	req-alert	JS	0	ui.v6.js
 class	resizable-cols	JS	0	ui.v6.js
@@ -277,6 +284,7 @@ attr	data-asstaff	JS	0	ui.v6.js
 attr	data-band-open	JS	0	ui.v6.js
 attr	data-ck	JS	0	ui.v6.js
 attr	data-ckgo	JS	0	ui.v6.js
+attr	data-cm	JS	0	ui.v6.js
 attr	data-day	JS	0	ui.v6.js
 attr	data-dayhead	JS	0	ui.v6.js
 attr	data-del	JS	0	ui.v6.js

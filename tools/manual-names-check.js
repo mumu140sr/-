@@ -132,6 +132,8 @@ const norm = s => String(s || '').replace(/\s+/g, '');
     band:      async p => { await p.click('.tab[data-tab="result"]');
                             await p.evaluate(() => { (AppState.skills || []).forEach(sk => { sk.min = 9; sk.req = 9; }); AppState.violations = checkViolations(AppState.shifts); renderResultTable(); });
                             await p.click('[data-band-open="short"], [data-band-open="sur"]'); await p.waitForTimeout(800);
+                            // v270: 数の表は「くわしい数を見る」の中（はじめは閉じている）なので、先に開く
+                            await p.evaluate(() => document.querySelectorAll('#shpBody details.rc-detail').forEach(d => { d.open = true; }));
                             const t = await p.$('#shpBody [data-rc-toggle]'); if (t) { await t.click(); await p.waitForTimeout(200); } },
     // ①で「スキル不足」を OFF にしたときの、スキルの行の一言（v268）。band と同じく、この状態の中だけで最低ラインを上げる
     skilloff:  async p => { await p.click('.tab[data-tab="result"]');
@@ -154,10 +156,25 @@ const norm = s => String(s || '').replace(/\s+/g, '');
                               AppState.skills.push({ name: '目標だけ', target: 'early', req: 1, min: 0 });   // 最低ラインの無いスキルの行の一言
                               AppState.violations = checkViolations(AppState.shifts); renderResultTable(); });
                             await p.click('[data-band-open="short"], [data-band-open="sur"]'); await p.waitForTimeout(800);
+                            await p.evaluate(() => document.querySelectorAll('#shpBody details.rc-detail').forEach(d => { d.open = true; }));
                             const h = await p.$('#shpBody details.rc-help > summary'); if (h) { await h.click(); await p.waitForTimeout(200); } },
     shortwhy:  async p => { await p.click('.tab[data-tab="result"]');
                             const bt = await p.$('#shortageNote:not([hidden]) .sn-why') || await p.$('.short-why');
                             if (bt) { await bt.click(); await p.waitForTimeout(800); } },
+    // ④の「あと何人休めるか」と、希望を入れた瞬間の知らせ（v270）: 全体の行が0の日を作り（無ければ、この状態の中だけで休みの希望を足す）、
+    // その日に出られる人の休みを、画面で入れる
+    margin:    async p => { await p.click('.tab[data-tab="calendar"]'); await p.waitForTimeout(300);
+                            const tgt = await p.evaluate(() => {
+                              const row = () => calendarMarginModel().rows.find(r => r.kind === 'total');
+                              const free = (d) => AppState.staff.filter(s => !((AppState.requests[s.id] || {})[d]) && staffDayState(s, d) === 'free');
+                              const d = 3; let r = row();
+                              while (r && r.cells[d - 1] && r.cells[d - 1].v > 0 && free(d).length > 1) {
+                                const s = free(d)[0]; AppState.requests[s.id] = AppState.requests[s.id] || {}; AppState.requests[s.id][d] = '休'; r = row(); }
+                              renderCalendar();
+                              const s = free(d)[0]; return s ? { id: s.id, d } : null; });
+                            if (!tgt) return;
+                            await p.click('.chip-btn[data-mark="休"]');
+                            await p.click(`#calendarTable td[data-sid="${tgt.id}"][data-day="${tgt.d}"]`); await p.waitForTimeout(600); },
     recheck:   async p => { await menu(p, 'btnRecheck'); await p.waitForTimeout(800); await p.click('.tab[data-tab="generate"]'); },
     month:     async p => { await p.evaluate(() => { const m = document.getElementById('targetMonth'); const [y, mo] = m.value.split('-').map(Number);
                               m.value = mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`; m.dispatchEvent(new Event('change')); });
