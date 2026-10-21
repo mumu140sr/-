@@ -25,6 +25,10 @@ function _milpPayload(settingsPatch, requestsPatch, staffPatch, inputPatch) {
     const o = Object.assign({}, t); delete o.somu; if (o.respLike !== true) delete o.respLike; return o;
   });
   const noSomuPref = st => { if (!('somuPref' in st)) return st; const o = Object.assign({}, st); delete o.somuPref; return o; };
+  // スキル設定の「なるべく総務に入れない」（noSomu）も渡さない
+  const skills = Array.isArray(AppState.skills) && AppState.skills.some(k => k && typeof k === 'object' && 'noSomu' in k)
+    ? AppState.skills.map(k => { if (!k || typeof k !== 'object' || !('noSomu' in k)) return k; const o = Object.assign({}, k); delete o.noSomu; return o; })
+    : AppState.skills;
   return {
     settings:              settings,
     shiftTypes:            shiftTypes,
@@ -32,7 +36,7 @@ function _milpPayload(settingsPatch, requestsPatch, staffPatch, inputPatch) {
     roleRequirementsCast:  AppState.roleRequirementsCast,
     dailyRequirements:     ip.dailyRequirements || AppState.dailyRequirements,
     dailyRequirementsCast: ip.dailyRequirementsCast || AppState.dailyRequirementsCast,
-    skills:                AppState.skills,
+    skills:                skills,
     dailySkills:           AppState.dailySkills,
     shifts:                AppState.shifts,   // 微調整のとき、いまの表を出発点にする
     staff:                 (staffPatch && staffPatch.length ? AppState.staff.map(st => {
@@ -82,7 +86,7 @@ const MILP_CANCEL_MSG = 'cancel: 中止しました';
 // calcBegin で始め、終わったら必ず calcEnd を呼ぶ。計算中は下のボタンを押せなくする。
 let _calcOwner = null;
 const CALC_BUTTONS = ['btnGenerate', 'btnGenerateFast', 'btnWizard', 'btnRepair', 'btnPartialRegen',
-                      'btnSurplusPlan', 'btnRelax', 'btnResolveSurplus', 'nsGo'];
+                      'btnSurplusPlan', 'btnRelax', 'btnResolveSurplus', 'nsGo', 'btnSomuReorder'];
 function calcBusy() { return !!_calcOwner; }
 // ⏹ 中止ボタンがあるのは、生成・自動修正・🧪 希望の変え方を確かめる・余の解消のつじつま合わせ・④の見込みの計算中だけ。
 // ほかの計算では中止を案内しない（ボタンが無いのに「⏹ 中止を押して」と案内していた）。

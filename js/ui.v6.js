@@ -2111,7 +2111,8 @@ function setupSkillsPanel() {
       Object.keys(AppState.dailySkills || {}).forEach(n => used.add(n));
       let name = '営業';
       for (let i = 2; used.has(name); i++) name = 'スキル' + i;
-      AppState.skills.push({ name, target: 'late', req: 0 });
+      ensureSkillSomuFlags();   // v269: 前の版のデータの既定（「営業」）を先に入れる。新しいスキルには「なるべく総務に入れない」を付けない
+      AppState.skills.push({ name, target: 'late', req: 0, noSomu: false });
       renderSkillsPanel();
       renderStaffTable();
       autoSave(); recheckAfterRuleChange();
@@ -2146,6 +2147,9 @@ function renderSkillsPanel() {
       <span class="hint" title="この人数を下回ると「絶対」の違反。目標に届かなくても最低ライン以上なら「できれば」の違反どまり。">最低ライン:</span>
       <input type="number" min="0" max="20" value="${escapeHtml(min)}" data-skill-idx="${i}" data-skill-field="min"
              style="width:56px"/>
+      <label class="hint" style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"
+             title="表を作ったあとに総務の順番で入れ替えるとき、このスキルを持つ人を、この時間帯（${target === 'early' ? '早番' : '遅番'}）の総務に、あとから入れます（③の「総務の順番」が同じ人どうしのとき）">
+        <input type="checkbox" data-skill-idx="${i}" data-skill-field="noSomu" ${isNoSomuSkill(sk) ? 'checked' : ''} style="margin:0"/>なるべく総務に入れない</label>
       <button class="btn-icon" data-skill-del="${i}" title="削除" aria-label="削除">${uiIcon('trash')}</button>
     </div>`;
   }).join('');
@@ -2158,6 +2162,13 @@ function renderSkillsPanel() {
       const field = e.target.dataset.skillField;
       if (!AppState.skills[idx]) return;
       const oldName = AppState.skills[idx].name;
+      if (field === 'noSomu') {
+        // v269: 総務の順番の入れ替えだけに使う（検査・生成には効かない）。前の版のデータの既定（「営業」）を先に入れてから変える
+        ensureSkillSomuFlags();
+        AppState.skills[idx].noSomu = e.target.checked;
+        autoSave();
+        return;
+      }
       if (field === 'req') {
         AppState.skills[idx].req = parseInt(e.target.value) || 0;
         delete AppState.skills[idx].lateReq; // 旧フィールドを掃除
@@ -2175,6 +2186,7 @@ function renderSkillsPanel() {
         if (typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
       } else if (field === 'target') {
         AppState.skills[idx].target = e.target.value;
+        renderSkillsPanel();   // 「なるべく総務に入れない」の説明に時間帯を書いているので描き直す
         // 日別必要人数の表にも「早番/遅番」を出しているので、そちらも描き直す
         if (typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
       } else {
@@ -2402,7 +2414,7 @@ function renderStaffTable() {
       </td>
       <td>
         <select data-field="somuPref" data-id="${s.id}" style="min-width:128px"
-                title="表を作ったあと、総務のシフトにだれを先に入れるか（ふつうの人どうしは、その時間帯の営業ができない人→職位が下の人の順）">
+                title="表を作ったあと、総務のシフトにだれを先に入れるか（同じ順番の人どうしは、スキル設定で「なるべく総務に入れない」にしたスキル（その時間帯のもの）を持たない人→職位が下の人→その月の総務の日が少ない人の順）">
           <option value="first" ${s.somuPref === 'first' ? 'selected' : ''}>総務に先に入れる</option>
           <option value=""      ${!s.somuPref || (s.somuPref !== 'first' && s.somuPref !== 'avoid') ? 'selected' : ''}>ふつう</option>
           <option value="avoid" ${s.somuPref === 'avoid' ? 'selected' : ''}>なるべく入れない</option>
@@ -3365,7 +3377,10 @@ function genInputFp() {
   const c = _fpClean;
   return JSON.stringify([AppState.settings.targetMonth, c(AppState.requests),
     c(AppState.dailyRequirements), c(AppState.dailyRequirementsCast),
-    c(AppState.roleRequirements), c(AppState.roleRequirementsCast), c(AppState.skills), c(AppState.dailySkills),
+    c(AppState.roleRequirements), c(AppState.roleRequirementsCast),
+    // スキル設定の「なるべく総務に入れない」（v269）は表の作り方に効かないので入れない（前の版と同じ指紋。印を変えても「古い表」と言わない）
+    c(Array.isArray(AppState.skills) ? AppState.skills.map(k => { if (!k || typeof k !== 'object' || !('noSomu' in k)) return k; const o = Object.assign({}, k); delete o.noSomu; return o; }) : AppState.skills),
+    c(AppState.dailySkills),
     (AppState.staff || []).map(s => [s.id, s.allowedShifts, s.paidLeave, s.maxOff, s.positionType, s.department])]
     // 日ごとに要るスキル（v264）は、指定があるときだけ足す（無い月は前の版と同じ指紋。保存してある表を「古い」と言わない）
     .concat(hasAnyDayShiftSkills() ? [c(AppState.dailyShiftSkills)] : [])
@@ -3882,7 +3897,6 @@ const candHead = () => '<tr>' + _cth('案', 1) + _cth(uiIcon('crit') + '6連勤�
   + _cth('連勤の超過', 1) + _cth('公休の不足', 1) + (CAND_BS() ? _cth('切り替えの超過', 1) : '')
   + _cth('変わるマス') + _cth('早番と遅番の行き来', 1) + _cth('ほかの' + uiIcon('soft') + 'できれば', 1) + '<th></th></tr>';
 
-/** 生成した直後の表を控える（生成・途中から作り直しのあと） */
 /**
  * v269: 表を作ったあとに、総務の順番に入れ替える（①の「表を作ったあとに、総務の順番に入れ替える」が入のとき）。
  * 1分生成・じっくり生成・途中から作り直す（runGenerate）から、genBaseTake の前に呼ぶ。入れ替えた数を返す
@@ -3896,6 +3910,7 @@ function applySomuReorderAfterGenerate() {
   AppState.violations = r.violations;
   return r.swaps.length;
 }
+/** 生成した直後の表を控える（生成・途中から作り直しのあと） */
 function genBaseTake() {
   AppState.genBase = {
     at: new Date().toISOString(),
@@ -5461,6 +5476,8 @@ function showSurplusResolveModal() {
       const histMid = captureChangeBase();
       try {
         await optimizeScheduleMILP(null, { fastMode: true });
+        // v269: 生成と同じく、作り直した表を総務の順番に入れ替える（①の設定が「入」のとき。エラーが1件でも増える入れ替えはしない）
+        applySomuReorderAfterGenerate();
         AppState.violations = checkViolations(AppState.shifts);
         const aSc = scoreViolations(AppState.violations);
         // 作り直した結果が6連勤以上を増やすなら、元に戻す（⛔ で止める。戻すのは下の catch）。

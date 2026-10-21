@@ -3572,22 +3572,27 @@ function scoreSummary(r) {
 
 // ── 総務の順番（v269）──
 // 表を作ったあとに、総務のシフト（②の「詳細」の印）に入る人を、総務の順番に入れ替える。ルール（エラー）にはしない。
-// 先に総務に入れる順（小さいほう）: ① ③の「総務の順番」（先に入れる→ふつう→なるべく入れない）② その時間帯のスキル
-// （早番なら早番のスキル。スキル名は決め打ちしない）を1つも持たない人 ③ 職位が下の人（getStaffPriority が大きいほう）④ 番号の順。
-// 入れ替えは、同じ日・同じ時間帯の、総務のシフトの人と、ふつうの出勤（人数に数えるシフトで、総務・責任者・1日1人の役・
+// 先に総務に入れる順（小さいほう）: ① ③の「総務の順番」（先に入れる→ふつう→なるべく入れない）② その時間帯の、スキル設定で
+// 「なるべく総務に入れない」にしたスキル（isNoSomuSkill。前の版のデータは名前に「営業」を含むスキル）を1つも持たない人
+// ③ 職位が下の人（getStaffPriority が大きいほう）④ その月の総務の日が少ない人（2日以上少ないときだけ入れ替える。1日の差で
+// 行ったり来たりしないように）。①〜④が同じなら入れ替えない（候補を試す順だけ、番号の順）。
+// 入れ替えは、同じ日・同じ時間帯の、総務のシフトの人と、ふつうの出勤（人数に数えるシフトで、総務・1日1人の役（責任者を含む）・
 // 「責任者として数える」シフトでないもの）の人だけ。2人ともその日のマスが希望・🔒で決まっておらず、相手のシフトを担当できること。
 // 総務に入るべき人がふつうの出勤にいるときだけ入れ替える。入れ替えるたびに画面と同じ検査で比べ、エラーの種類ごとの件数・
 // 「絶対」の種類（scoreWorsened）・6連勤以上（compWorsened）のどれも悪くならず、並べ方（scoreCompare）で同じか良いときだけ残す。
+// 止まること: ①〜③で入れ替えるたびに、総務の人の順位の合計が下がり、④で入れ替えるたびに、総務の日数の2乗の合計が下がる
+// （a 日の人から b 日の人へ1日移すと a−b≥2 なので 2(b−a)+2 ≤ −2）。念のため回す回数にも上限を付ける。
 function somuRankOf(s, band) {
   const pref = s.somuPref === 'first' ? 0 : s.somuPref === 'avoid' ? 2 : 1;
-  const bandSkills = (AppState.skills || []).filter(k => (k.target || 'late') === band).map(k => k.name);
-  const has = (s.skills || []).some(n => bandSkills.includes(n)) ? 1 : 0;
+  const marked = (AppState.skills || []).filter(k => k && (k.target || 'late') === band && isNoSomuSkill(k)).map(k => k.name);
+  const has = (s.skills || []).some(n => marked.includes(n)) ? 1 : 0;
   return [pref, has, -getStaffPriority(s)];
 }
+/** ①〜③の比べ（同じなら0。番号では比べない） */
 function somuRankCompare(a, b, band) {
   const x = somuRankOf(a, band), y = somuRankOf(b, band);
   for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];
-  return String(a.id).localeCompare(String(b.id), 'ja', { numeric: true });
+  return 0;
 }
 function somuReorder(shiftsIn) {
   const days = getDaysInMonth(AppState.settings.targetMonth);
@@ -3601,10 +3606,16 @@ function somuReorder(shiftsIn) {
   const bandOf = k => isLate(k) ? 'late' : 'early';
   const sameBand = (k, band) => band === 'late' ? isLate(k) : (isEarlyCategory(k) && !isTraining(k));
   const isPlain = k => { const t = getShiftType(k); return !!(t && t.countForStaff && !t.isTraining && !isSomuShift(k) && !SOLO.has(k)
-    && k !== '早責' && k !== '遅責' && !isRespLikeShift(k)); };
+    && !isRespLikeShift(k)); };
   const locked = (s, d) => !!(((AppState.requests || {})[s.id] || {})[d] || ((AppState.fixedShifts || {})[s.id] || {})[d]);
   const can = (s, k, d) => (s.allowedShifts || []).includes(k) && (typeof hasDaySkill !== 'function' || hasDaySkill(s, k, d));
   const cnt = vs => { const o = {}; vs.forEach(v => { o[v.type] = (o[v.type] || 0) + 1; }); return o; };
+  // その月の総務の日数（どの総務のシフトでも1日）。入れ替えるたびに数え直す
+  const somuSet = new Set(somuKeys), somuDays = {};
+  staff.forEach(s => { let n = 0; for (let d = 1; d <= days; d++) if (somuSet.has((sh[s.id] || {})[d] || '')) n++; somuDays[s.id] = n; });
+  const byId = (a, b) => String(a.id).localeCompare(String(b.id), 'ja', { numeric: true });
+  // Q（ふつうの出勤）を P（総務）の代わりに総務へ入れるべきか: ①〜③で先、または同じで総務の日が2日以上少ない
+  const shouldTake = (Q, P, band) => { const r = somuRankCompare(Q, P, band); return r < 0 || (r === 0 && somuDays[P.id] - somuDays[Q.id] >= 2); };
   let base = checkViolations(sh), baseSc = scoreViolations(base), baseCnt = cnt(base);
   const notWorse = (v) => {
     const sc = scoreViolations(v), c = cnt(v);
@@ -3612,7 +3623,7 @@ function somuReorder(shiftsIn) {
     if (scoreWorsened(sc, baseSc).length || compWorsened(base, v).length || scoreCompare(sc, baseSc) > 0) return null;
     return { sc, c };
   };
-  for (let pass = 0; pass < 3; pass++) {
+  for (let pass = 0; pass < 10; pass++) {
     let changed = false;
     for (let d = 1; d <= days; d++) {
       somuKeys.forEach(S => {
@@ -3622,14 +3633,17 @@ function somuReorder(shiftsIn) {
           const cands = staff.filter(Q => {
             if (Q.id === P.id || locked(Q, d)) return false;
             const K = (sh[Q.id] || {})[d] || '';
-            return K && isPlain(K) && sameBand(K, band) && can(Q, S, d) && can(P, K, d) && somuRankCompare(Q, P, band) < 0;
-          }).sort((a, b) => somuRankCompare(a, b, band));
+            return K && isPlain(K) && sameBand(K, band) && can(Q, S, d) && can(P, K, d) && shouldTake(Q, P, band);
+          }).sort((a, b) => somuRankCompare(a, b, band) || somuDays[a.id] - somuDays[b.id] || byId(a, b));
           for (const Q of cands) {
             const K = sh[Q.id][d];
             sh[P.id][d] = K; sh[Q.id][d] = S;
             const v = checkViolations(sh);
             const ok = notWorse(v);
-            if (ok) { base = v; baseSc = ok.sc; baseCnt = ok.c; swaps.push({ day: d, somu: S, toSomu: Q.id, fromSomu: P.id, plain: K }); changed = true; return; }
+            if (ok) {
+              base = v; baseSc = ok.sc; baseCnt = ok.c; somuDays[P.id]--; somuDays[Q.id]++;
+              swaps.push({ day: d, somu: S, toSomu: Q.id, fromSomu: P.id, plain: K }); changed = true; return;
+            }
             sh[P.id][d] = S; sh[Q.id][d] = K;
           }
         });

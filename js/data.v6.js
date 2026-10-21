@@ -547,6 +547,19 @@ function isSomuShift(key) {
   if (list.some(x => typeof x.somu === 'boolean')) return t.somu === true;
   return SOMU_DEFAULT_KEYS.includes(key);
 }
+// スキル設定の印（skills の noSomu。v269）: このスキルを持つ人は、なるべく総務に入れない（総務の順番の2つ目の決め方。
+// その時間帯のスキルだけを見る）。まだ印の項目が1つも無い前の版のデータでは、名前に「営業」を含むスキルに付ける
+// （一度だけの既定。そのあとは利用者が変えられる。新しく足したスキルには付けない）。生成の計算には使わない（Worker へは渡さない）。
+function ensureSkillSomuFlags(skills) {
+  const list = (skills || AppState.skills || []).filter(k => k && typeof k === 'object');
+  if (list.some(k => typeof k.noSomu === 'boolean')) { list.forEach(k => { if (typeof k.noSomu !== 'boolean') k.noSomu = false; }); return; }
+  list.forEach(k => { k.noSomu = String(k.name || '').includes('営業'); });
+}
+function isNoSomuSkill(k) {
+  if (!k) return false;
+  if ((AppState.skills || []).some(x => x && typeof x.noSomu === 'boolean')) return k.noSomu === true;
+  return String(k.name || '').includes('営業');
+}
 
 /** 取り込み・読込: 形を直す（日は1〜31の整数、スキル名は空でない文字。重なりと空の指定は捨てる） */
 function sanitizeDailyShiftSkills(m) {
@@ -811,7 +824,11 @@ function normalizeAppData(data, base) {
     out.roleRequirementsCast  = data.roleRequirementsCast  || {};
     out.dailyRequirements     = data.dailyRequirements     || {};
     out.dailyRequirementsCast = data.dailyRequirementsCast || {};
-    out.skills                = Array.isArray(data.skills) ? data.skills : [];
+    // v269: 「なるべく総務に入れない」（noSomu）は true／false だけを通し、前の版のデータは名前に「営業」を含むスキルに付ける
+    // （読み込んだ中身そのものは書き換えないよう、スキルの1つずつを写してから直す）
+    out.skills                = (Array.isArray(data.skills) ? data.skills : []).map(k => (k && typeof k === 'object' && !Array.isArray(k)) ? Object.assign({}, k) : k);
+    out.skills.forEach(k => { if (k && typeof k === 'object' && typeof k.noSomu !== 'boolean') delete k.noSomu; });
+    ensureSkillSomuFlags(out.skills);
     out.dailySkills           = data.dailySkills || {};
     out.dailyShiftSkills      = sanitizeDailyShiftSkills(data.dailyShiftSkills);   // 日ごとに要るスキル（v264）
 

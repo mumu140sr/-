@@ -134,7 +134,7 @@
         <div class="set-ctl"><input type="number" id="pairRestTarget" min="0" max="10" value="0" style="width:70px" /><span class="unit">回／月</span></div>
       </div>
       <div class="set-row">
-        <div class="set-lbl"><div class="set-name"><label for="somuAutoSwap">表を作ったあとに、総務の順番に入れ替える</label></div><div class="set-desc">総務のシフト（②の「詳細」で決めます）に、③の「総務の順番」の順で人を入れ替えます。順番は「総務に先に入れる」→「ふつう」→「なるべく入れない」、同じならその時間帯の営業ができない人→職位が下の人です。エラーが1件でも増える入れ替えはしません</div></div>
+        <div class="set-lbl"><div class="set-name"><label for="somuAutoSwap">表を作ったあとに、総務の順番に入れ替える</label></div><div class="set-desc">総務のシフト（②の「詳細」で決めます）に、③の「総務の順番」の順で人を入れ替えます。順番は「総務に先に入れる」→「ふつう」→「なるべく入れない」、同じなら、③の「スキル設定」で「なるべく総務に入れない」にしたスキル（その時間帯のもの）を持たない人→職位が下の人→その月の総務の日が少ない人（2日以上少ないとき）です。エラーが1件でも増える入れ替えはしません</div></div>
         <div class="set-ctl"><label class="switch"><input type="checkbox" id="somuAutoSwap" checked /><span></span></label></div>
       </div>
     </section>
@@ -306,7 +306,7 @@
     </div>
 
     <details class="card fold-card">
-      <summary class="fold-sum calc-view-only"><span class="grow">スキル設定</span><span class="fold-sub">「営業できる人」などのスキルと、早番／遅番の必要人数</span></summary>
+      <summary class="fold-sum calc-view-only"><span class="grow">スキル設定</span><span class="fold-sub">「営業できる人」などのスキルと、早番／遅番の必要人数、総務に入れるか</span></summary>
       <div class="fold-body adv-body">
         <p class="hint" style="margin-top:0">「営業できる人」などのスキルを登録し、早番／遅番に最低何人必要かを設定できます。登録すると、スタッフの設定の「スキル」に各スキルのチェック欄が表示されます。</p>
         <div class="toolbar" style="margin-bottom:8px">
