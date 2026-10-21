@@ -29,14 +29,16 @@
     { label: 'コンプラ(6連勤以上)', w: 1, types: ['comp-cons'] },
     { label: '人員・役職',     w: 2, types: ['understaff', 'resp-duplicate', 'skill-late', 'vicemanager-absent', 'special-day'] },
     { label: '公休・有給',     w: 2, types: ['off-count', 'paid'] },
-    // 夜勤明けの出勤は、v268 まではどの段にも入っておらず、段ごとに解く生成では減らす対象になっていなかった
-    // （検査では「絶対」）。v269 で、同じ「休みの間を空ける」決まりの遅→早と同じ段に入れた。夜勤の無い月は罰点が無いので変わらない
-    { label: '連勤・遅→早',    w: 2, types: ['consecutive', 'late-early', 'night-after-work'] },
+    { label: '連勤・遅→早',    w: 2, types: ['consecutive', 'late-early'] },
     { label: '単発出勤・定数',  w: 3, types: ['single-work', 'overstaff', 'off-surplus'] },
     // 「リズム」は2つに分ける。まとめて1段にすると、この段だけ極端に重くなり
     // 毎回時間切れになっていた。実測（4つの実データ・60秒）で、まとめた場合の
     // 合計118件に対し、分けると73件（38%減）。どのデータでも悪化しなかった。
-    { label: 'リズム(休みの間隔)', w: 2, types: ['bad-rest', 'long-rest', 'pair-rest'] },
+    // 夜勤明けの出勤は、v268 まではどの段にも入っておらず、段ごとに解く生成では減らす対象になっていなかった（検査では「絶対」）。
+    // v269 で、休みの間隔の段に入れた（「絶対」なので、promoteMustTiers で「（絶対）」の段へ上がる）。連勤・遅→早の段に入れた版は、
+    // 遅→休→早などを「絶対」にした月で、夜勤明けを先に0にする代わりにそれらが増え、「絶対」の合計が増えた（作り物の2か月で 2→3）。
+    // 夜勤の無い月は罰点が無いので変わらない
+    { label: 'リズム(休みの間隔)', w: 2, types: ['bad-rest', 'long-rest', 'pair-rest', 'night-after-work'] },
     { label: 'リズム(早遅の切替)', w: 2, types: ['category-switch', 'band-switch'] },
     // 個人の希望は、まとめて1段にすると重すぎて解けないため小分けにする。
     // 1段が小さいほど「大事なルールを守ったままの組合せ」を見つけやすい。
