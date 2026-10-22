@@ -180,6 +180,17 @@ const norm = s => String(s || '').replace(/\s+/g, '');
                             await p.click('.chip-btn[data-mark="休"]');
                             await p.click(`#calendarTable td[data-sid="${tgt.id}"][data-day="${tgt.d}"]`); await p.waitForTimeout(600); },
     recheck:   async p => { await menu(p, 'btnRecheck'); await p.waitForTimeout(800); await p.click('.tab[data-tab="generate"]'); },
+    // 研修に入っている保有者を数えないスキルのエラーの文（v271）: この状態の中だけ、最初のスキルの最低ラインを上げ、
+    // 保有者の1人の2日を研修にして数え直し、⑤のレポートの一覧を出す
+    skillnc:   async p => { await p.click('.tab[data-tab="result"]');
+                            await p.evaluate(() => {
+                              const tr = (AppState.shiftTypes.find(t => t.isTraining) || {}).key, sk = (AppState.skills || [])[0];
+                              if (!tr || !sk) return;
+                              sk.min = 9; sk.req = 9; sk.target = isLate(tr) ? 'late' : 'early';
+                              const h = AppState.staff.find(s => (s.skills || []).includes(sk.name));
+                              if (h) { AppState.shifts[h.id] = AppState.shifts[h.id] || {}; AppState.shifts[h.id][2] = tr; }
+                              AppState.violations = checkViolations(AppState.shifts); renderResultTable(); });
+                            await p.click('.tab[data-tab="generate"]'); await p.waitForTimeout(1200); },
     month:     async p => { await p.evaluate(() => { const m = document.getElementById('targetMonth'); const [y, mo] = m.value.split('-').map(Number);
                               m.value = mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`; m.dispatchEvent(new Event('change')); });
                             await p.waitForTimeout(1300); },

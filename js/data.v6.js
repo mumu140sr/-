@@ -586,6 +586,13 @@ function isEarlyCategory(shift) {
   return isEarly(shift) || isTraining(shift);
 }
 
+// スキルの人数に数えるシフトか（v271）。生成の計算（milp-core。getWorkShiftKeys の役割だけを数える）と同じく、
+// 人数に数える（countForStaff）・研修でないシフトだけ。研修・人数に数えないシフトに入っている保有者は、その日のスキルの人数に数えない
+function isSkillCountShift(shift) {
+  const t = getShiftType(shift);
+  return !!(t && t.countForStaff && !t.isTraining);
+}
+
 /**
  * 前月末の状態を正規化して返す。
  *  - lastShift: 前月末シフト（出勤シフトのときのみ有効）

@@ -507,7 +507,7 @@ function renderDayMarginsHtml() {
   }).join('');
   return `<div style="padding:12px 14px;border-radius:10px;margin:0 0 14px;border:1px solid var(--border);background:var(--surface-2, var(--surface))">
       <b style="font-size:14px">日ごとの人数の余裕（出られる人数 − 必要人数）</b>
-      <div class="hint" style="margin:2px 0 6px">休み・有給・半休の希望、休みの固定の日は「出られない」に数えています。余裕0人の日は、出られる人が全員出勤になり、その前後の連勤などが決まってしまいます。早番帯・遅番帯は、その時間帯に入れる人の数です（両方できる人は両方に数えます）。スキルは、その時間帯に入れる保有者の人数 − 目標人数です。希望・固定でその時間帯に入っている保有者は、研修や人数に数えないシフトでも数えます（シフト表のエラーと同じ数え方）。${multi && groups[0].skillsAll ? `スキルは${escapeHtml(groups.map(g => g.label).join('と'))}を合わせて数え、【${escapeHtml(groups[0].label)}】のところに出します。` : ''}</div>
+      <div class="hint" style="margin:2px 0 6px">休み・有給・半休の希望、休みの固定の日は「出られない」に数えています。余裕0人の日は、出られる人が全員出勤になり、その前後の連勤などが決まってしまいます。早番帯・遅番帯は、その時間帯に入れる人の数です（両方できる人は両方に数えます）。スキルは、その時間帯に入れる保有者の人数 − 目標人数です。研修や人数に数えないシフトに入っている保有者は数えません（シフト表のエラー・生成と同じ数え方）。${multi && groups[0].skillsAll ? `スキルは${escapeHtml(groups.map(g => g.label).join('と'))}を合わせて数え、【${escapeHtml(groups[0].label)}】のところに出します。` : ''}</div>
       ${html}
     </div>`;
 }

@@ -598,10 +598,13 @@ function mustFirstSwapPolish(shifts, maxRounds) {
       // 非保有者の枠を引き継がせ、非保有者を休ませる（人数不変）
       if (!changed && v.type === 'skill-late') {
         const d = v.day;
-        const sk = (AppState.skills || []).find(k => v.message && v.message.includes(k.name));
+        // v271 で文の後ろに「研修（「研」）に入っている…」を足したので、その前の部分だけでスキルを探す（足す前の文と同じ探し方）
+        const head = (v.message || '').split('）。')[0];
+        const sk = (AppState.skills || []).find(k => head && head.includes(k.name));
         const skName = sk ? sk.name : null;
         const target = (sk && sk.target) === 'early' ? 'early' : 'late';
-        const inBand = sh => target === 'early' ? (isEarlyCategory(sh) && !isTraining(sh)) : isLate(sh);
+        // スキルの人数に数えるシフト（v271。研修・人数に数えないシフトは除く。検査と同じ）
+        const inBand = sh => isSkillCountShift(sh) && (target === 'early' ? isEarlyCategory(sh) : isLate(sh));
         if (skName) {
           const holders = staff.filter(s => (s.skills || []).includes(skName) &&
             _polishMovable(shifts, s.id, d) && !isWork(shifts[s.id][d]));
@@ -2568,7 +2571,8 @@ function calculateScore(shifts, allowedShifts, days, P) {
         staff.forEach(s => {
           const sh = shifts[s.id][d];
           const inTarget = early ? isEarlyCategory(sh) : isLate(sh);
-          if (isWork(sh) && inTarget && (s.skills || []).includes(sk.name)) have++;
+          // v271: 研修・人数に数えないシフトの保有者は数えない（検査と同じ。この点数はいまどこからも使っていない）
+          if (isSkillCountShift(sh) && inTarget && (s.skills || []).includes(sk.name)) have++;
         });
         if (have < min) {
           if (ruleOn('skill-late'))  score += (min - have) * (P.skillLateShortage || 9000); // 最低ライン割れ（強）
@@ -3231,6 +3235,8 @@ function checkViolations(shifts) {
 
   // スキル別: 指定の時間帯（早番/遅番）に必要なスキル保有者が足りているか。
   // 最低ライン min を下回る＝🔴(skill-late)、min〜目標未満＝🟡(skill-short)。
+  // 数えるのは、その時間帯の人数に数える・研修でないシフトに入っている保有者だけ（v271。生成の計算と同じ。isSkillCountShift）。
+  // 研修・人数に数えないシフトに入っている保有者は数えず、文に「…に入っている◯人は数えていません」と添える
   (AppState.skills || []).forEach(sk => {
     const baseNeed = (sk.req != null ? sk.req : (sk.lateReq || 0));
     // 既定が0でも日別上書きがあれば判定する
@@ -3243,20 +3249,23 @@ function checkViolations(shifts) {
       const { need, min } = getDaySkillReq(sk, d);
       if (!need && !min) continue;
       let have = 0;
+      const notCounted = {};   // その時間帯の研修・人数に数えないシフト → 入っている保有者の数
       staff.forEach(s => {
         const sh = (shifts[s.id] || {})[d] || '';
-        if (isWork(sh) && inTarget(sh) && (s.skills || []).includes(sk.name)) have++;
+        if (!isWork(sh) || !inTarget(sh) || !(s.skills || []).includes(sk.name)) return;
+        if (isSkillCountShift(sh)) have++; else notCounted[sh] = (notCounted[sh] || 0) + 1;
       });
+      const ncText = Object.keys(notCounted).length ? '。' + skillNotCountedText(notCounted, '入っている') : '';
       if (have < min) {
         violations.push({
           staffId: null, day: d, type: 'skill-late', skill: sk.name, band: target, have, min, need,   // どのスキル・時間帯か（理由の枠の文。v266）
-          message: `🚨 ${d}日 ${label}に「${sk.name}」できる人が${have}人（最低${min}人必要）`,
+          message: `🚨 ${d}日 ${label}に「${sk.name}」できる人が${have}人（最低${min}人必要）${ncText}`,
           action:  `「${sk.name}」スキルのある人を${label}に配置してください`,
         });
       } else if (have < need) {
         violations.push({
           staffId: null, day: d, type: 'skill-short', skill: sk.name, band: target, have, min, need,   // 同上（v266）
-          message: `⚠️ ${d}日 ${label}に「${sk.name}」できる人が${have}人（目標${need}人・最低${min}人はOK）`,
+          message: `⚠️ ${d}日 ${label}に「${sk.name}」できる人が${have}人（目標${need}人・最低${min}人はOK）${ncText}`,
           action:  `可能なら「${sk.name}」スキルのある人をもう1人${label}に配置してください`,
         });
       }
@@ -4186,7 +4195,8 @@ function runAIDiagnosis() {
     const early = (sk.target || 'late') === 'early';
     const bandLabel = early ? '早番' : '遅番';
     const holders = staff.filter(s => (s.skills || []).includes(sk.name));
-    const inBand = k => early ? isEarlyCategory(k) : isLate(k);
+    // スキルの人数に数えるシフト（v271。研修・人数に数えないシフトは除く。検査・生成と同じ）
+    const inBand = k => isSkillCountShift(k) && (early ? isEarlyCategory(k) : isLate(k));
     const belowMin = [], belowTarget = [];
     for (let d = 1; d <= days; d++) {
       let avail = 0;
@@ -4194,8 +4204,10 @@ function runAIDiagnosis() {
         const rq = (AppState.requests[s.id] || {})[d];
         if (rq && isOff(rq)) return;                                   // 希望休・有給などで不在
         const fx = (AppState.fixedShifts[s.id] || {})[d];
-        if (fx) { if (isWork(fx) && inBand(fx) && !isTraining(fx)) avail++; return; } // 固定シフト
-        const canBand = (s.allowedShifts || []).some(k => inBand(k) && !isTraining(k));
+        if (fx) { if (inBand(fx)) avail++; return; } // 固定シフト
+        // 希望で研修・人数に数えないシフトに決まっている日は、スキルの人数に数えない（v271。前は担当シフトで「入れる」と数えていた）
+        if (rq && isWork(rq) && !isSkillCountShift(rq)) return;
+        const canBand = (s.allowedShifts || []).some(k => inBand(k));
         const prefOk  = early ? (!s.prefs || s.prefs.includes('早可')) : (!s.prefs || s.prefs.includes('遅可'));
         if (canBand && prefOk) avail++;
       });
@@ -4935,17 +4947,41 @@ function daySkillHave(groups, sk, d, shiftKeys) {
     if (!(s.skills || []).includes(sk.name)) return;
     const st = staffDayState(s, d);
     if (st === 'off') return;
-    // 希望・🔒で決まっている出勤は、検査（checkViolations）と同じく、研修・人数に数えないシフトでも、その時間帯のシフトなら数える（v267 の直し。
-    // 前は数えず、検査ではエラーにならない日を「必ず起きる」と言っていた）
+    // 希望・🔒で決まっている出勤は、検査（checkViolations）と同じく、その時間帯の人数に数えるシフトなら数える（v271: 研修・人数に数えない
+    // シフトは、生成と同じく数えない。v267〜v270 は検査に合わせて数えていた）
     if (st !== 'free') { if (inBand(getFixedShiftAt(s.id, d))) have++; return; }
     if ((s.allowedShifts || []).some(k => shiftKeys.includes(k) && inBand(k))) have++;
   }));
   return have;
 }
-/** スキルの時間帯に入るシフトか（検査 checkViolations と同じ: 出勤のシフトで、早番は早番の仲間か研修、遅番は遅番の仲間） */
+/**
+ * スキルの人数に数える、その時間帯のシフトか（検査 checkViolations・生成と同じ: 人数に数える・研修でないシフトで、
+ * 早番は早番の仲間、遅番は遅番の仲間）。v271: 研修・人数に数えないシフトは数えない（前は検査に合わせて数えていた）
+ */
 function _skillInBand(sk) {
   const early = (sk.target || 'late') === 'early';
-  return k => !!k && isWork(k) && (early ? isEarlyCategory(k) : isLate(k));
+  return k => !!k && isSkillCountShift(k) && (early ? isEarlyCategory(k) : isLate(k));
+}
+/**
+ * 研修・人数に数えないシフトの保有者を数えていないことの一言（v271。検査の文・作る前の見込みで同じ言い方）。
+ * cnt: シフト → 保有者の数。verb: 「入っている」（表）／「決まっている」（希望・🔒）。無ければ ''
+ */
+function skillNotCountedText(cnt, verb) {
+  const ks = Object.keys(cnt || {});
+  if (!ks.length) return '';
+  return `${ks.map(k => `${isTraining(k) ? '研修' : '人数に数えないシフト'}（「${shiftSym(k)}」）`).join('・')}に${verb}${ks.reduce((a, k) => a + cnt[k], 0)}人は数えていません`;
+}
+/** その日、スキル sk の時間帯の研修・人数に数えないシフトに、希望・🔒で決まっている保有者（シフト → 人数。v271） */
+function skillNotCountedFixed(sk, d) {
+  const early = (sk.target || 'late') === 'early';
+  const cnt = {};
+  (AppState.staff || []).forEach(s => {
+    if (!(s.skills || []).includes(sk.name)) return;
+    const k = getFixedShiftAt(s.id, d);
+    if (!k || !isWork(k) || isSkillCountShift(k) || !(early ? isEarlyCategory(k) : isLate(k))) return;
+    cnt[k] = (cnt[k] || 0) + 1;
+  });
+  return cnt;
 }
 /**
  * その時間帯の枠に、保有者を最大何人まで置けるか（店全体。部門ごとの枠に置ける人数を足す）。
@@ -4982,7 +5018,8 @@ function maxSkillInBand(g, sk, bandKeys, d, wantOptions) {
     const has = (s.skills || []).includes(sk.name);
     if (st !== 'free') {
       const k = getFixedShiftAt(s.id, d);
-      // 枠の無いシフト（研修・人数に数えないシフト）や別の時間帯に決まっている人。検査と同じく、その時間帯の保有者なら数える（v267 の直し）
+      // 枠の無いシフト（研修・人数に数えないシフト）や別の時間帯に決まっている人。v271 から、研修・人数に数えないシフトの保有者は
+      // 検査・生成と同じく数えない（inBand が外す。v267〜v270 は数えていた）
       if (need[k] == null) { if (has && inBand(k)) fixedHolders++; return; }
       fixedCnt[k]++;
       if (has) fixedHolders++;
@@ -5039,8 +5076,7 @@ function analyzeDayMargins() {
   const inBand = (k, band) => band === 'early' ? isEarlyCategory(k) : isLate(k);
   const groups = getDepartmentGroups(AppState.staff);
   // スキルは、できることごとの表・作る前の見込み（daySkillHave）と同じ数え方（v267 の直し）: 店全体（社員とキャストを合わせる）で、
-  // 希望・🔒でその時間帯のシフトに決まっている保有者は、検査と同じく研修・人数に数えないシフトでも数える。
-  // 前は部門ごとに、研修の日と人数に数えないシフトに決まっている日を数えず、表と見込みが足りるとする日を「足りない」と出していた。
+  // 希望・🔒でその時間帯のシフトに決まっている保有者は、検査と同じく、人数に数える・研修でないシフトのときだけ数える（v271。生成と同じ）。
   // 部門が2つでも、スキルは最初の部門の行にだけ出す（同じ数を2回出さない）
   const skillHolders = (sk, d) => {
     const fixedIn = _skillInBand(sk), band = (sk.target || 'late') === 'early' ? 'early' : 'late';
@@ -5187,10 +5223,12 @@ function analyzeLowerBound(opts) {
         if (!(min > 0)) return;
         const early = (sk.target || 'late') === 'early';
         const have = daySkillHave(groups, sk, d, shiftKeys);
+        // 研修・人数に数えないシフトに決まっている保有者は数えない（v271）。そのことを文に添える（なぜ少ないかが分かるように）
+        const ncNote = () => { const t = skillNotCountedText(skillNotCountedFixed(sk, d), '決まっている'); return t ? `（${t}）` : ''; };
         if (have < min) {
           res.reasons.push({
             kind: 'skill', day: d, skill: sk.name, need: min, have,
-            text: `${d}日: スキル「${sk.name}」は最低 ${min}人 必要ですが、その日入れる保有者は ${have}人 です`,
+            text: `${d}日: スキル「${sk.name}」は最低 ${min}人 必要ですが、その日入れる保有者は ${have}人 です${ncNote()}`,
           });
         }
         // ③' スキルの「枠」不足（人はいるのに、入れる枠が無いケース）
@@ -5209,7 +5247,7 @@ function analyzeLowerBound(opts) {
         res.reasons.push({
           kind: 'skill-slot', day: d, skill: sk.name, need: min, have: r.max,
           fix: `「${sk.name}」を持つ人を増やすか、${early ? '早番' : '遅番'}帯の必要人数を見直してください`, act: null,
-          text: `${d}日: スキル「${sk.name}」は最低 ${min}人 必要ですが、${early ? '早番' : '遅番'}の枠に置けるのは最大 ${r.max}人 です。`,
+          text: `${d}日: スキル「${sk.name}」は最低 ${min}人 必要ですが、${early ? '早番' : '遅番'}の枠に置けるのは最大 ${r.max}人 です${ncNote()}。`,
           _opts: r.options.length ? r.options : null,
         });
       });
@@ -6381,22 +6419,22 @@ function roleCapacityTable() {
     if (!minSum && !needSum) return;
     const holders = AppState.staff.filter(s => (s.skills || []).includes(sk.name));
     const hOrder = byRoom(holders);
-    const short = [], usedSk = {}, usedTrain = {}, canDays = {}, cutBy = {};
+    const short = [], usedSk = {}, canDays = {}, cutBy = {};
     const pIdx = new Map(), edges = [];
     let nNode = 2, prefill = 0, cut = 0;
     for (let d = 1; d <= days; d++) {
       const { need, min } = getDaySkillReq(sk, d);
       const want = Math.max(min > 0 ? min : 0, need > 0 ? need : 0);
       if (!want) continue;   // 最低ラインか目標のある日だけ（出られるは目標だけの日も数える。v267 の直し）
-      // 希望・🔒でその時間帯のシフトに決まっている保有者。検査と同じく、研修・人数に数えないシフト・必要人数を超えた人も数える
-      // 削る日に当たらない保有者（研修の人も入れる）を先にする。削る人は、ほかの保有者が足りないときだけ数える（v267 の9回目）
+      // 希望・🔒でその時間帯の人数に数えるシフトに決まっている保有者。検査と同じく、必要人数を超えた人も数える
+      // （v271: 研修・人数に数えないシフトの保有者は、生成と同じく数えない。前は研修の人も入れていた）。
+      // 削る日に当たらない保有者を先にする。削る人は、ほかの保有者が足りないときだけ数える（v267 の9回目）
       let fh = 0;
       const inFix = hOrder.filter(s => { const st = staffDayState(s, d); return st !== 'off' && st !== 'free' && inBand(getFixedShiftAt(s.id, d)); });
-      const cutHere = s => staffDayState(s, d) !== 'training' && has(cutDays, s.id, d);
+      const cutHere = s => has(cutDays, s.id, d);
       inFix.filter(s => !cutHere(s)).concat(inFix.filter(cutHere)).forEach(s => {
-        const st = staffDayState(s, d);
-        if (fh < want) { mark(usedSk, s.id, d); if (st === 'training') mark(usedTrain, s.id, d); canDays[s.id] = (canDays[s.id] || 0) + 1; }
-        // 最低ラインを先に埋める人。役の行と同じく、その人の削る日（cutDays）に当たれば埋められるに数えない（研修の日は削る日にならない）
+        if (fh < want) { mark(usedSk, s.id, d); canDays[s.id] = (canDays[s.id] || 0) + 1; }
+        // 最低ラインを先に埋める人。役の行と同じく、その人の削る日（cutDays）に当たれば埋められるに数えない
         if (min > 0 && fh < min) {
           if (cutHere(s)) { cut++; cutBy[s.id] = (cutBy[s.id] || 0) + 1; } else prefill++;
         }
@@ -6445,10 +6483,11 @@ function roleCapacityTable() {
         to.forEach(t => edges.push([pd, t, 1]));
       });
     }
-    // 出られる: 保有者ごとに、出られる日数（スキルに数える日のほかに決まっている出勤を引き、スキルに数える研修の日を足す）と、
+    // 出られる: 保有者ごとに、出られる日数（スキルに数える日のほかに決まっている出勤を引く）と、
     // 最低ラインか目標のある日のうちその時間帯の枠に入れる日の数の小さいほう
+    // （v271: 研修の日はスキルに数えないので、v270 までの「スキルに数える研修の日を足す」分は無くなった）
     const used = (id, d) => has(usedSk, id, d);
-    const budget = s => personAvail(s, used) + (usedTrain[s.id] ? usedTrain[s.id].size : 0);
+    const budget = s => personAvail(s, used);
     // 決まって入っている保有者で埋める分（prefill）は、上の日ごとの数え方で、削る日を除いてある（v267 の直し）
     const fill = prefill + (edges.length ? _maxFlow(nNode, edges, 0, 1) : 0);
     let avail = 0, people = 0;
