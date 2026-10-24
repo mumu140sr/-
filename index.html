@@ -7,11 +7,11 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=271" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=271" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=271" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=271">
-<link rel="stylesheet" href="css/style.css?v=271" />
+<link rel="icon" href="favicon.svg?v=272" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=272" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=272" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=272">
+<link rel="stylesheet" href="css/style.css?v=272" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -72,7 +72,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v271</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v272</span>
   </div>
   <div class="header-actions">
     <!-- 「データ」メニュー：今のボタンそのものを中に置く（id はそのまま。開閉は js/ui-shell.v6.js） -->
@@ -213,6 +213,8 @@
       </div>
     </details>
     <!-- 前へ・次へ：左メニューのボタンを押すのと同じ（js/ui-shell.v6.js） -->
+    <!-- 人手がきつくなる日の知らせ（v272）。変えたその場で、休める人が0人・1人以下が続く日などを出す。画面の下に貼り付く（js/ui.v6.js の renderTightAlert） -->
+    <div id="tightAlertSettings" class="req-margin-alert" role="status" aria-live="polite" hidden></div>
     <div class="step-nav"><button type="button" class="btn btn-primary step-next" data-go="roles">次へ：シフト種別<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button></div>
   </section>
 
@@ -250,6 +252,8 @@
       </div>
     </div>
     <!-- 前へ・次へ：左メニューのボタンを押すのと同じ（js/ui-shell.v6.js） -->
+    <!-- 人手がきつくなる日の知らせ（v272）。変えたその場で、休める人が0人・1人以下が続く日などを出す。画面の下に貼り付く（js/ui.v6.js の renderTightAlert） -->
+    <div id="tightAlertRoles" class="req-margin-alert" role="status" aria-live="polite" hidden></div>
     <div class="step-nav"><button type="button" class="btn step-prev" data-go="settings"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>基本設定</button><button type="button" class="btn step-next btn-primary" data-go="staff">次へ：スタッフ管理<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button></div>
   </section>
 
@@ -326,6 +330,8 @@
       </div>
     </details>
     <!-- 前へ・次へ：左メニューのボタンを押すのと同じ（js/ui-shell.v6.js） -->
+    <!-- 人手がきつくなる日の知らせ（v272）。変えたその場で、休める人が0人・1人以下が続く日などを出す。画面の下に貼り付く（js/ui.v6.js の renderTightAlert） -->
+    <div id="tightAlertStaff" class="req-margin-alert" role="status" aria-live="polite" hidden></div>
     <div class="step-nav"><button type="button" class="btn step-prev" data-go="roles"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>シフト種別</button><button type="button" class="btn step-next btn-primary" data-go="calendar">次へ：希望休入力<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button></div>
   </section>
 
@@ -360,7 +366,7 @@
       <!-- 表のいちばん下の「あと何人休めるか」の見方（v270。js/ui.v6.js の updateCalendarMargins が書く） -->
       <p id="calMarginNote" class="hint cm-note"></p>
     </div>
-    <!-- 希望を入れた瞬間の知らせ（v270）。その日の「あと何人休めるか」がマイナスになったら出す。画面の下に貼り付く -->
+    <!-- 希望を入れた瞬間の知らせ（v270。v272 から、0人になった日・1人以下が続く日も）。画面の下に貼り付く -->
     <div id="reqMarginAlert" class="req-margin-alert" role="status" aria-live="polite" hidden></div>
     <!-- 前へ・次へ：左メニューのボタンを押すのと同じ（js/ui-shell.v6.js） -->
     <div class="step-nav"><button type="button" class="btn step-prev" data-go="staff"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>スタッフ管理</button><button type="button" class="btn step-next btn-primary" data-go="generate">次へ：自動生成<svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button></div>
@@ -498,6 +504,8 @@
       <div id="summaryArea"></div>
     </div>
     <!-- 前へ・次へ：左メニューのボタンを押すのと同じ（js/ui-shell.v6.js） -->
+    <!-- 人手がきつくなる日の知らせ（v272）。変えたその場で、休める人が0人・1人以下が続く日などを出す。画面の下に貼り付く（js/ui.v6.js の renderTightAlert） -->
+    <div id="tightAlertResult" class="req-margin-alert" role="status" aria-live="polite" hidden></div>
     <div class="step-nav"><button type="button" class="btn step-prev" data-go="generate"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg>自動生成</button></div>
   </section>
 
@@ -521,13 +529,13 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=271"></script>
-<script src="js/optimizer.v6.js?v=271"></script>
-<script src="js/worker-client.v6.js?v=271"></script>
-<script src="js/ai-explain.v6.js?v=271"></script>
-<script src="js/ui.v6.js?v=271"></script>
-<script src="js/milp.v6.js?v=271"></script>
-<script src="js/app.v6.js?v=271"></script>
-<script src="js/ui-shell.v6.js?v=271"></script>
+<script src="js/data.v6.js?v=272"></script>
+<script src="js/optimizer.v6.js?v=272"></script>
+<script src="js/worker-client.v6.js?v=272"></script>
+<script src="js/ai-explain.v6.js?v=272"></script>
+<script src="js/ui.v6.js?v=272"></script>
+<script src="js/milp.v6.js?v=272"></script>
+<script src="js/app.v6.js?v=272"></script>
+<script src="js/ui-shell.v6.js?v=272"></script>
 </body>
 </html>

@@ -996,17 +996,37 @@ tbody tr:hover { background: var(--surface-2); }
 .calendar-table tfoot.cal-margin td.cm-title { color: var(--text); font-weight: 700; line-height: 1.3; }
 .calendar-table tfoot.cal-margin td.cm-title small { display: block; color: var(--text-muted); font-weight: 400; font-size: 10px; }
 .calendar-table tfoot.cal-margin td.cm-label { font-weight: 500; font-size: 11px; line-height: 1.3; }
-.calendar-table tfoot.cal-margin .cm-zero, .cm-key.cm-zero { background: var(--lv-soft-bg); color: var(--text); }
-.calendar-table tfoot.cal-margin .cm-neg, .cm-key.cm-neg { background: color-mix(in srgb, var(--danger) 22%, var(--surface)); color: var(--text); }
+/* v272: マイナス＝いちばん強い色、0＝赤系、1＝黄系。1以下が2日以上続く所（きつい期間）は上下を線で囲み、始めと終わりに縦の線 */
+.calendar-table tfoot.cal-margin .cm-neg, .cm-key.cm-neg { background: var(--lv-crit); color: var(--lv-crit-on); }
+.calendar-table tfoot.cal-margin .cm-zero, .cm-key.cm-zero { background: color-mix(in srgb, var(--lv-must) 24%, var(--surface)); color: var(--text); }
+.calendar-table tfoot.cal-margin .cm-one, .cm-key.cm-one { background: var(--lv-soft-bg); color: var(--text); }
+.calendar-table tfoot.cal-margin td.cm-run { box-shadow: inset 0 3px 0 var(--text), inset 0 -3px 0 var(--text); }
+.calendar-table tfoot.cal-margin td.cm-run.cm-run-s { box-shadow: inset 3px 0 0 var(--text), inset 0 3px 0 var(--text), inset 0 -3px 0 var(--text); }
+.calendar-table tfoot.cal-margin td.cm-run.cm-run-e { box-shadow: inset -3px 0 0 var(--text), inset 0 3px 0 var(--text), inset 0 -3px 0 var(--text); }
+.cm-key.cm-run-key { box-shadow: inset 0 0 0 2px var(--text); font-weight: 500; padding: 0 6px; }
+/* 「④で日ごとの数を見る」で知らせた日のマスを光らせる */
+.calendar-table tfoot.cal-margin td.cm-flash { outline: 3px solid var(--link); outline-offset: -3px; }
 .cm-key { display: inline-block; min-width: 1.8em; padding: 0 4px; border-radius: 4px; text-align: center; font-weight: 700; }
 .cm-note { margin: 0; padding: 8px 12px 10px; line-height: 1.7; }
 .cm-note:empty { display: none; }
-/* 希望を入れた瞬間の知らせ（v270）: 表を下まで送っても見えるように、④の画面の下に貼り付く */
+/* 希望を入れた瞬間の知らせ（v270）。v272 から、①②③⑥で変えたときの「人手がきつくなる日の知らせ」も同じ形。
+   表を下まで送っても見えるように、その画面の下に貼り付く */
 .req-margin-alert { position: sticky; bottom: 12px; z-index: 6; margin: 12px 0; }
 .req-margin-alert[hidden] { display: none; }
 .req-margin-alert .rma-body { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; padding: 10px 14px; border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent); background: color-mix(in srgb, var(--danger) 12%, var(--surface));
   box-shadow: 0 4px 16px color-mix(in srgb, var(--text) 18%, transparent); color: var(--text); }
+/* v272: マイナスが無く、0人の日・きつい期間だけのときは「できれば」の色（黄） */
+.req-margin-alert .rma-body.rma-warn { border-color: color-mix(in srgb, var(--lv-soft) 60%, transparent); background: color-mix(in srgb, var(--lv-soft-bg) 70%, var(--surface)); }
+/* 表の大事な所を隠しすぎないように、高さは画面の4分の1まで（はみ出す分は中で送る） */
+.req-margin-alert .rma-body { max-height: 25vh; overflow-y: auto; }
+/* スマホの幅: 文の部分だけを送り、ボタン（閉じる など）はいつも見えるようにする（全体で画面の4分の1ほど） */
+@media (max-width: 600px) {
+  .req-margin-alert .rma-body { max-height: none; overflow: visible; padding: 8px 10px; }
+  .req-margin-alert .rma-body .grow { max-height: 13vh; overflow-y: auto; }
+  .req-margin-alert .rma-btns { gap: 4px; flex-wrap: nowrap; }
+  .req-margin-alert .rma-btns .btn { padding: 3px 8px; font-size: 13px; white-space: nowrap; }
+}
 .req-margin-alert .rma-body .grow { flex: 1 1 240px; min-width: 0; }
 .req-margin-alert ul { margin: 4px 0; padding-left: 18px; }
 .req-margin-alert .rma-btns { display: flex; gap: 6px; flex-wrap: wrap; }

@@ -203,6 +203,10 @@ id	surplusResolveBtn	JS	0	app.v6.js
 id	surplusX	JS	0	ui.v6.js($)
 id	targetMonth	HTML	1	ui.v6.js
 id	tieredOptimize	HTML	1	ui.v6.js
+id	tightAlertResult	HTML	1	ui.v6.js
+id	tightAlertRoles	HTML	1	ui.v6.js
+id	tightAlertSettings	HTML	1	ui.v6.js
+id	tightAlertStaff	HTML	1	ui.v6.js
 id	toast	HTML	1	ui.v6.js
 id	wfGo	JS	0	app.v6.js
 id	wfNote	JS	0	app.v6.js
@@ -235,6 +239,7 @@ class	cal-margin	JS	0	ui.v6.js
 class	calc-lock-area	JS	0	milp.v6.js,ui.v6.js
 class	calc-view-only	JS	0	milp.v6.js
 class	chip-btn	HTML	4	ui.v6.js
+class	cm-flash	JS	0	ui.v6.js
 class	cm-row	JS	0	ui.v6.js
 class	col-resizer	JS	0	ui.v6.js
 class	col-resizing	JS	0	ui.v6.js
@@ -256,6 +261,7 @@ class	range-select-mode	JS	0	ui.v6.js
 class	rc-detail	JS	0	ui.v6.js
 class	rc-help	JS	0	ui.v6.js
 class	req-alert	JS	0	ui.v6.js
+class	req-margin-alert	HTML	5	ui.v6.js
 class	resizable-cols	JS	0	ui.v6.js
 class	result-table	HTML	1	ui.v6.js
 class	rl-mode	JS	0	ui.v6.js
@@ -329,6 +335,8 @@ attr	data-sprow	JS	0	ui.v6.js
 attr	data-staffhead	JS	0	ui.v6.js
 attr	data-sw-day	JS	0	ui.v6.js
 attr	data-tab	HTML	6	app.v6.js,ui-shell.v6.js,ui.v6.js
+attr	data-tight-close	JS	0	ui.v6.js
+attr	data-tight-go	JS	0	ui.v6.js
 attr	data-tu	JS	0	ui.v6.js
 attr	data-tutor	JS	0	ui.v6.js
 attr	data-wf	JS	0	app.v6.js

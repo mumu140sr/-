@@ -8,7 +8,7 @@
 // アプリを、作り物のデータ（tools/suite/cases。本物のデータは使わない）でいろいろな状態にして、
 // 画面に出た文字を集め、手引きの名前と突き合わせる。状態：6つの画面、開いた小窓（実現性チェック・
 // エラー解消プラン・余の使い道・見込み・順番に確認して生成する・余の解消・途中から作り直す・まとめて固定・
-// 自動修正の案・シフト編集・人手が足りない理由の枠・余り・不足の内訳と表の一言）、計算中、確認の文、知らせ、月の切り替え、1分生成のあとの知らせ。
+// 自動修正の案・シフト編集・人手が足りない理由の枠・余り・不足の内訳と表の一言・人手がきつくなる日の知らせ）、計算中、確認の文、知らせ、月の切り替え、1分生成のあとの知らせ。
 // 実際に出せなかった名前は、JS の文字列と CSS の content でも探し、そうと分かるように出す。
 // あわせて、①「ルールごとの強弱」の名前がエラーの名前（VIOLATION_LABEL）と同じか、既定（def）が検査・生成の既定と同じかも確かめる（v268）。
 //
@@ -179,6 +179,19 @@ const norm = s => String(s || '').replace(/\s+/g, '');
                             if (!tgt) return;
                             await p.click('.chip-btn[data-mark="休"]');
                             await p.click(`#calendarTable td[data-sid="${tgt.id}"][data-day="${tgt.d}"]`); await p.waitForTimeout(600); },
+    // 人手がきつくなる日の知らせ（v272）: この状態の中だけ、21〜23日の全体の行を1にそろえ（休みの希望を足す）、
+    // ②の日別必要人数で22日の最初のシフトを1人増やす（0の日・きつい期間・何を変えたからか・「④で日ごとの数を見る」）
+    tight:     async p => { await p.evaluate(() => {
+                              const row = () => calendarMarginModel().rows.find(r => r.kind === 'total');
+                              const free = d => AppState.staff.filter(s => !((AppState.requests[s.id] || {})[d]) && staffDayState(s, d) === 'free');
+                              [21, 22, 23].forEach(d => { let r = row();
+                                while (r && r.cells[d - 1] && r.cells[d - 1].v > 1 && free(d).length) { const s = free(d)[free(d).length - 1];
+                                  AppState.requests[s.id] = AppState.requests[s.id] || {}; AppState.requests[s.id][d] = '休'; r = row(); } }); });
+                            await p.click('.tab[data-tab="roles"]'); await p.evaluate(() => toggleDailyReqPanel()); await p.waitForTimeout(300);
+                            const sel = await p.evaluate(() => { const e = document.querySelector('.daily-req-input[data-day="22"]');
+                              return e ? `.daily-req-input[data-shift="${e.dataset.shift}"][data-day="22"][data-dept="${e.dataset.dept}"]` : null; });
+                            if (!sel) return;
+                            const v = await p.$eval(sel, e => +e.value || 0); await p.fill(sel, String(v + 1)); await p.press(sel, 'Tab'); await p.waitForTimeout(600); },
     recheck:   async p => { await menu(p, 'btnRecheck'); await p.waitForTimeout(800); await p.click('.tab[data-tab="generate"]'); },
     // 研修に入っている保有者を数えないスキルのエラーの文（v271）: この状態の中だけ、最初のスキルの最低ラインを上げ、
     // 保有者の1人の2日を研修にして数え直し、⑤のレポートの一覧を出す

@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=271" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=271" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=271" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=271">
+<link rel="icon" href="favicon.svg?v=272" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=272" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=272" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=272">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=271" />
+<link rel="stylesheet" href="css/style.css?v=272" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -304,6 +304,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>「<span class="m-ui">詳しい設定</span>」は、ふだんはそのままでよいです。</li>
           <li>6連勤以上は、連勤上限をいくつにしても、いちばん重いエラーです。</li>
           <li>ここの設定を変えると、いまの <span class="m-tab" data-n="6">シフト表</span> のエラーをその場で数え直します。表そのものは変わらないので、新しい設定で作るには生成し直します。</li>
+          <li>「<span class="m-ui">必要人数のルール</span>」や特別日を変えて、その日の「<span class="m-ui">あと何人休めるか</span>」（<span class="m-tab" data-n="4">希望休入力</span> の表のいちばん下の行）がマイナス・0になる日や、1以下の日が続く所が新しくできると、この画面の下に知らせが出ます。<span class="m-btn">④で日ごとの数を見る</span> で、その日の数を見られます（くわしくは <span class="m-tab" data-n="4">希望休入力</span> の説明）。</li>
         </ul></dd>
       </dl>
       <details class="m-more"><summary>くわしく</summary>
@@ -334,6 +335,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li><b>記号と名称は、自由に変えてよいです。</b>中の名前は変わらないので、決まりやデータは壊れません。</li>
           <li>「<span class="m-ui">日別必要人数（上書き設定）</span>」は、効きすぎることがあります。</li>
           <li>ここの設定を変えると、いまの <span class="m-tab" data-n="6">シフト表</span> のエラーをその場で数え直します。表そのものは変わらないので、新しい設定で作るには生成し直します。</li>
+          <li>必要人数（ふだん・日ごと）やシフトを変えて、その日の「<span class="m-ui">あと何人休めるか</span>」（<span class="m-tab" data-n="4">希望休入力</span> の表のいちばん下の行）がマイナス・0になる日や、1以下の日が続く所が新しくできると、この画面の下に知らせが出ます。<span class="m-btn">④で日ごとの数を見る</span> で、その日の数を見られます（くわしくは <span class="m-tab" data-n="4">希望休入力</span> の説明）。</li>
         </ul></dd>
       </dl>
       <details class="m-more"><summary>くわしく</summary>
@@ -386,6 +388,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li><b>「<span class="m-ui">担当シフト</span>」がいちばん大事です。</b>チェックの無いシフトには入りません。</li>
           <li>有給は、公休に数えません。公休9日・有給3日なら、休みは合わせて12日です。</li>
           <li>ここの設定を変えると、いまの <span class="m-tab" data-n="6">シフト表</span> のエラーをその場で数え直します。表そのものは変わらないので、新しい設定で作るには生成し直します。</li>
+          <li>「<span class="m-ui">担当シフト</span>」・スキル・「<span class="m-ui">スキル設定</span>」を変えて、その日の「<span class="m-ui">あと何人休めるか</span>」（<span class="m-tab" data-n="4">希望休入力</span> の表のいちばん下の行）がマイナス・0になる日や、1以下の日が続く所が新しくできると、この画面の下に知らせが出ます。<span class="m-btn">④で日ごとの数を見る</span> で、その日の数を見られます（くわしくは <span class="m-tab" data-n="4">希望休入力</span> の説明）。</li>
         </ul></dd>
       </dl>
       <details class="m-more"><summary>くわしく</summary>
@@ -419,7 +422,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
         <dt>気をつけること</dt><dd><ul>
           <li>入れすぎると、決まりを守れなくなります。出勤の固定は、本当に動かせない日だけにします。</li>
           <li>表の上に、希望だけで必ずエラーになるものが出たら、見直します。</li>
-          <li>表のいちばん下の「<span class="m-ui">あと何人休めるか</span>」で、その日にあと何人まで休めるかが分かります（その日だけを見た目安）。<span class="cm-key cm-zero">0</span> の日は、これ以上休めません。<span class="cm-key cm-neg">−1</span> のようにマイナスの日は、もう足りません。</li>
+          <li>表のいちばん下の「<span class="m-ui">あと何人休めるか</span>」で、その日にあと何人まで休めるかが分かります（その日だけを見た目安）。<span class="cm-key cm-neg">−1</span> のようにマイナスの日は、もう足りません。<span class="cm-key cm-zero">0</span> の日は、これ以上休めません。<span class="cm-key cm-one">1</span> の日は、あと1人だけ休めます。1以下の日が2日以上続く所（<span class="cm-key cm-one cm-run-key">きつい期間</span>）は、囲んで出します。0の日やきつい期間の前後では、連勤や遅→休→早などのエラーが増えやすくなります。</li>
         </ul></dd>
       </dl>
       <details class="m-more"><summary>くわしく</summary>
@@ -431,8 +434,16 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>「<span class="m-ui">あと何人休めるか</span>」の行：全体・早番・遅番は「出られる人 − 必要人数」、スキルは「その時間帯に入れる、持っている人 − 最低ライン」です（最低ラインは <span class="m-tab" data-n="3">スタッフ管理</span> の「<span class="m-ui">スキル設定</span>」で決めた数。下回ると「絶対」のエラーになります）。スキルは、最低ラインのある日だけ出します（目標人数は「できれば」なので数えません）。スキルの数には、研修や人数に数えないシフトに入る人を数えません（シフト表のエラー・生成と同じ数え方です）。その日・その時間帯の必要人数が0人の日は空けています。マスにマウスを置くと、出られる人と必要人数が出ます。</li>
           <li>数は、<span class="m-tab" data-n="5">自動生成</span> の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</span> の「日ごとの人数の余裕」と同じ数え方です。ただし、スキルは⑤では目標人数で数えるので、目標が最低ラインより多いスキルでは数が違います。</li>
           <li>その日だけを見た目安です。希望休は公休の中なので、月の休みの合計は増えません。ただ、ある日に休むと、その人はほかの日に出る分が増えます。0 が無くても、連勤などのエラーが出ることがあります。月の合計で足りるかは、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</span> の「<span class="m-ui">人手の合計（人の数と日数で見た余り・不足）</span>」と、その下の「<span class="m-ui">役ごと・スキルごとに足りるか</span>」で見ます。</li>
-          <li>希望を入れて、その日の数がマイナスになったら（もとからマイナスの日は、もっと下がったら）、画面の下に「<span class="m-msg" data-pat="◯さんが◯日に休むと、">Aさんが28日に休むと、</span>」のような知らせが出ます。例：「<span class="m-msg" data-pat="で必要な◯人を下回ります（いま出られるのは◯人）">全体で必要な8人を下回ります（いま出られるのは7人）</span>」「早番の「S営業」が最低2人を下回ります（いま出られるのは1人）」。休み・有給・半休・研修のほか、シフトを決めて別の時間帯から外れるときも出ます。</li>
-          <li>希望は入れたままです。<span class="m-btn">この希望を取り消す</span> で、入れる前に戻せます。<span class="m-btn">閉じる</span> で知らせだけを消せます。希望を消したり、足りるようになったりしたときも、知らせは消えます（④の入力は「元に戻す」では戻りません。この知らせのボタンか、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-eraser"/></svg>クリア</span> を使います）。</li>
+          <li>希望を入れて、次のどれかが新しく起きると、画面の下に「<span class="m-msg" data-pat="◯さんが◯日に休むと、">Aさんが22日に休むと、</span>」のような知らせが出ます。休み・有給・半休・研修のほか、シフトを決めて別の時間帯から外れるときも出ます。
+            <ul>
+              <li>その日の数がマイナスになった（もとからマイナスの日は、もっと下がった）：例「<span class="m-msg" data-pat="で必要な◯人を下回ります（いま出られるのは◯人）">全体で必要な8人を下回ります（いま出られるのは7人）</span>」「早番の「S営業」が最低2人を下回ります（いま出られるのは1人）」</li>
+              <li>その日の数が0になった：例「<span class="m-msg" data-pat="休める人が0人になります（出られる人が全員出勤になります）">休める人が0人になります（出られる人が全員出勤になります）</span>」「早番で休める人が0人になります（早番に入れる人が全員、早番に出ることになります）」</li>
+              <li>1以下の日が2日以上続く所（きつい期間）ができた・伸びた：例「<span class="m-msg" data-pat="◯〜◯日は、休める人があと1人以下の日が続きます">21〜23日は、休める人があと1人以下の日が続きます</span>」</li>
+            </ul>
+          </li>
+          <li>希望は入れたままです。<span class="m-btn">この希望を取り消す</span> で、入れる前に戻せます。<span class="m-btn">日ごとの数を見る</span> で、表のいちばん下の行の、その日のマスが光ります。<span class="m-btn">閉じる</span> で知らせだけを消せます。希望を消したり、足りるようになったりしたときも、知らせは消えます（④の入力は「元に戻す」では戻りません。この知らせのボタンか、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-eraser"/></svg>クリア</span> を使います）。</li>
+          <li>ほかの画面で変えたときも、同じ知らせがその画面の下に出ます（<span class="m-tab" data-n="1">基本設定</span> の「<span class="m-ui">必要人数のルール</span>」と特別日、<span class="m-tab" data-n="2">シフト種別</span> の必要人数とシフト、<span class="m-tab" data-n="3">スタッフ管理</span> の「<span class="m-ui">担当シフト</span>」・スキル・「<span class="m-ui">スキル設定</span>」、<span class="m-tab" data-n="6">シフト表</span> の下の必要人数の行）。見出しには「<span class="m-msg" data-pat="◯日の「◯」の必要人数を◯人にしたので、">22日の「遅総務」の必要人数を2人にしたので、</span>」のように、何を変えたからかが出ます。<span class="m-btn">④で日ごとの数を見る</span> で、この画面の表のいちばん下の行へ移ります。変更はそのままです（やめるときは、変えた欄を元に戻します。元に戻して前と同じ数になると、知らせは消えます）。</li>
+          <li>「<span class="m-ui">公休数（月の休み数）</span>」「<span class="m-ui">有給（月の有給数）</span>」「<span class="m-ui">希望（早可／遅可）</span>」を変えても、この数は変わらず、知らせも出ません（どの日に休むか・どちらに入るかが、まだ決まっていないため）。月の合計で足りるかは、<span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-feasible"/></svg>実現性チェック（生成前）</span> の「<span class="m-ui">人手の合計（人の数と日数で見た余り・不足）</span>」で見ます。</li>
         </ul>
       </details>
     </div>
@@ -492,6 +503,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
         <dt>気をつけること</dt><dd><ul>
           <li>マスを押して変えたマスは、固定されます。作り直しても動きません。</li>
           <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> は、ページを読み込み直すと使えません。</li>
+          <li>表の下の必要人数の行で人数を変えて、その日の「<span class="m-ui">あと何人休めるか</span>」（<span class="m-tab" data-n="4">希望休入力</span> の表のいちばん下の行）がマイナス・0になる日や、1以下の日が続く所が新しくできると、この画面の下に知らせが出ます。<span class="m-btn">④で日ごとの数を見る</span> で、その日の数を見られます（くわしくは <span class="m-tab" data-n="4">希望休入力</span> の説明）。</li>
         </ul></dd>
       </dl>
       <details class="m-more"><summary>くわしく</summary>

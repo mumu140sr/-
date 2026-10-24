@@ -879,6 +879,7 @@ function discardGenerateResult() {
   if (typeof _lastReportResult !== 'undefined') _lastReportResult = null;
   _reportDrawnKey = null;
   if (typeof _fixPlanNote !== 'undefined') _fixPlanNote = null;
+  if (typeof clearTightAlerts === 'function') clearTightAlerts();   // 人手がきつくなる日の知らせも捨てる（前のデータの変更の話のため。v272）
 }
 function syncGenerateResult() {
   if (typeof document === 'undefined') return;
@@ -2720,8 +2721,7 @@ function renderCalendar() {
       // 出勤系シフト（早責/遅責/研 など）も requests に入れるが、生成側は
       // getFixedShiftAt() 経由で「固定」として扱うので指定どおりに配置される。
       if (!AppState.requests[sid]) AppState.requests[sid] = {};
-      const prev = AppState.requests[sid][d];
-      const before = calendarMarginModel();   // 入れる前の「あと何人休めるか」（v270。下回る日なら知らせる）
+      // 入れる前の「あと何人休めるか」は、このクリックを先に受けた _tightOnEvent が控える（v272。下回る日・0人の日・きつい期間なら知らせる）
       if (selectedMark === '') {
         delete AppState.requests[sid][d];
       } else {
@@ -2731,7 +2731,7 @@ function renderCalendar() {
       span.textContent   = shiftSym(selectedMark);   // 表示用の記号（v258。requests は key のまま）
       span.className     = 'shift-cell ' + getShiftClass(selectedMark) + (isWork(selectedMark) ? ' ' + shiftToneClass(selectedMark) + ' c-lock' : '');
       span.style.cssText = '';
-      noteRequestMarginDrop(sid, d, prev, before);
+      updateCalendarMargins();
       autoSave();
       scheduleRequestAlerts();
     });
@@ -2796,6 +2796,7 @@ function scheduleCalendarMargins() {
   _cmTimer = setTimeout(() => {
     const p = document.getElementById('panel-calendar');
     if (p && p.classList.contains('active')) updateCalendarMargins();
+    refreshTightAlerts();   // ①②③⑥の知らせも、いまの数で確かめ直す（v272）
   }, 200);
 }
 /** ④の表のいちばん下の行と、その下の説明を描き直す（希望・固定・必要人数・スキル・担当などが変わったら、その場で数え直す） */
@@ -2806,49 +2807,328 @@ function updateCalendarMargins() {
   let m;
   try { m = calendarMarginModel(); } catch (e) { m = { rows: [], days: 0 }; }
   const note = document.getElementById('calMarginNote');
-  if (!m.rows.length) { tfoot.innerHTML = ''; if (note) note.innerHTML = ''; renderRequestMarginAlert(m); return; }
+  if (!m.rows.length) { tfoot.innerHTML = ''; if (note) note.innerHTML = ''; renderTightAlert('calendar', m); return; }
   const wcls = (d) => { const w = getWeekday(AppState.settings.targetMonth, d); return w === 0 ? ' weekend-sun' : w === 6 ? ' weekend-sat' : ''; };
   let html = `<tr class="cm-head"><td class="cm-title">あと何人休めるか<small>その日だけを見た目安</small></td>`;
   for (let d = 1; d <= m.days; d++) html += `<td class="cm-day${wcls(d)}">${d}</td>`;
   html += '</tr>';
   m.rows.forEach(r => {
+    // v272: マイナス＝いちばん強い色、0＝赤系、1＝黄系。1以下が2日以上続く所（きつい期間）は囲む
+    const runs = _tightRuns(r.cells);
     html += `<tr class="cm-row" data-cm="${escapeHtml(r.id)}"><td class="cm-label">${escapeHtml(r.label)}</td>`;
     r.cells.forEach((c, i) => {
       const d = i + 1;
       if (!c) { html += `<td class="cm-cell cm-none" title="${escapeHtml(`${d}日 ${r.label}：${r.kind === 'skill' ? 'この日は最低ラインがありません' : 'この日は必要人数が0人です'}`)}"></td>`; return; }
-      const cls = c.v < 0 ? ' cm-neg' : c.v === 0 ? ' cm-zero' : '';
-      html += `<td class="cm-cell${cls}" data-day="${d}" title="${escapeHtml(_cmCellTitle(r, d, c))}">${_cmCellText(c)}</td>`;
+      const run = runs.find(([a, z]) => d >= a && d <= z);
+      let cls = c.v < 0 ? ' cm-neg' : c.v === 0 ? ' cm-zero' : c.v === 1 ? ' cm-one' : '';
+      if (run) cls += ' cm-run' + (d === run[0] ? ' cm-run-s' : '') + (d === run[1] ? ' cm-run-e' : '');
+      const title = _cmCellTitle(r, d, c) + (run ? `\n${run[0]}〜${run[1]}日：${_tightSubj(r)}休める人があと1人以下の日が続きます（きつい期間）` : '');
+      html += `<td class="cm-cell${cls}" data-day="${d}" title="${escapeHtml(title)}">${_cmCellText(c)}</td>`;
     });
     html += '</tr>';
   });
   tfoot.innerHTML = html;
   if (note) note.innerHTML = '表のいちばん下の<b>「あと何人休めるか」</b>は、その日、あと何人まで休んでも最低人数を守れるかの目安です（その日だけを見た数）。'
-    + '<span class="cm-key cm-zero">0</span> の日は、これ以上休めません。<span class="cm-key cm-neg">−1</span> のようにマイナスの日は、もう足りません。'
+    + '<span class="cm-key cm-neg">−1</span> のようにマイナスの日は、もう足りません。<span class="cm-key cm-zero">0</span> の日は、これ以上休めません（出られる人が全員出勤）。'
+    + '<span class="cm-key cm-one">1</span> の日は、あと1人だけ休めます。<span class="cm-key cm-one cm-run-key">1以下が2日以上続く所</span>は囲んで出します（きつい期間）。'
+    + 'きつい期間や0の日の前後では、連勤や遅→休→早などのエラーが増えやすくなります。'
     + '全体・早番・遅番は「出られる人 − 必要人数」、スキルは「その時間帯に入れる、持っている人 − 最低ライン（③スタッフ管理の「スキル設定」）」です。'
     + '休み・有給・半休・研修の希望と、シフトを決めた希望・固定を数に入れています。スキルは最低ラインのある日だけ出します（目標人数は「できれば」なので数えません）。'
     + 'スキルの数には、研修や人数に数えないシフトに入る人を数えません（シフト表のエラー・生成と同じ数え方です）。'
-    + '0 が無くても、ある日に休むと、その人はほかの日に出る分が増えるので、連勤などのエラーが出ることがあります。';
-  renderRequestMarginAlert(m);
+    + '0 が無くても、ある日に休むと、その人はほかの日に出る分が増えるので、連勤などのエラーが出ることがあります。'
+    + '希望・必要人数・必要人数のルール・スタッフの担当やスキルを変えて、マイナスや0の日・きつい期間が新しくできると、変えた画面の下に知らせが出ます。';
+  renderTightAlert('calendar', m);
 }
 
-// ===== 希望を入れた瞬間の知らせ（v270） =====
-// ④で入れた希望で、その日の「あと何人休めるか」がマイナスになった（または、もっと下がった）ら、④の画面の中に知らせる。
-// 入れるのは止めない（決めるのは使う人）。トーストではなく④の画面の下に貼り付けて出す（表を下まで送っても見える）。
-// 入れた希望が変わる・消える、または足りるようになったら、知らせも消える。
-let _reqMarginAlert = null;   // { sid, d, mark, prev, ids:[行の id] }
-function noteRequestMarginDrop(sid, d, prev, before) {
-  const after = calendarMarginModel();
-  const cur = (AppState.requests[sid] || {})[d];
-  const ids = [], was = {};
-  after.rows.forEach(r => {
-    const a = r.cells[d - 1]; if (!a || a.v >= 0) return;
-    const br = before.rows.find(x => x.id === r.id), b = br && br.cells[d - 1];
-    if (!b || a.v < b.v) { ids.push(r.id); was[r.id] = b ? b.v : null; }
-  });
-  // 下がらなかったときは、前の知らせを残す（まだ当てはまるかは描き直すときに確かめる）
-  if (ids.length) _reqMarginAlert = { sid, d, mark: cur, prev, ids, was };
-  updateCalendarMargins();
+// ===== 人手がきつくなる日を、変えたその場で知らせる（v272。v270 の「希望を入れた瞬間の知らせ」を広げたもの） =====
+// ①の必要人数のルール（と特別日）・②のシフトと必要人数（ふだん・日ごと。シフト追加の小窓も）・③のスタッフとスキル設定・
+// ④の希望・⑥の日ごとの必要人数の欄で何かを変えたら、変える前と後の「あと何人休めるか」（calendarMarginModel。数え方は
+// ⑤の「日ごとの人数の余裕」と同じ analyzeDayMargins。新しい数え方は作らない）を行ごとに比べ、新しく起きた次のことを、
+// 変えた画面の下に貼り付けて知らせる。
+//   ・マイナスになった（もとからマイナスなら、もっと下がった）日 … v270 と同じ
+//   ・0 になった日（1以上だった日・数えていなかった日が 0）
+//   ・1以下の日が2日以上続く所（きつい期間）が新しくできた・伸びた・つながった（新しく0・マイナスになった日を含む期間も）
+// 変更は止めない（決めるのは使う人）。表が無い月でも出す。計算中は出さない（どの画面も計算中の鍵で変えられない）。
+// 変える前の数は、入力・クリックを各画面の処理より先に（document の capture で）受けて控える。各画面の処理には手を入れない。
+// 何も新しく起きなければ、前の知らせは残す（v270 と同じ。いまも当てはまるかは、描き直すたびに確かめる）。
+const TIGHT_AREAS = '#panel-settings, #panel-roles, #panel-staff, #panel-calendar, .summary-req-input, #addShiftModal';
+const TIGHT_BOX = { calendar: 'reqMarginAlert', settings: 'tightAlertSettings', roles: 'tightAlertRoles', staff: 'tightAlertStaff', result: 'tightAlertResult' };
+let _tightPending = null;   // 変える前: { panel, model, state }
+let _tightTimer = null;
+const _tightAlerts = {};    // 画面 → { cause, req, items, month }
+
+function _tightPanelOf(el) {
+  if (!el || !el.closest || !el.closest(TIGHT_AREAS)) return null;
+  if (el.closest('.summary-req-input')) return 'result';
+  if (el.closest('#addShiftModal')) return 'roles';
+  const p = el.closest('.tab-panel');
+  return p && TIGHT_BOX[p.id.replace('panel-', '')] ? p.id.replace('panel-', '') : null;
 }
+// 変えた中身（何を変えたからかの文に使う）。数え方に効くものだけを写す
+function _tightState() {
+  const S = AppState, st = S.settings || {};
+  return JSON.parse(JSON.stringify({
+    month: st.targetMonth, requests: S.requests || {}, fixed: S.fixedShifts || {}, staff: S.staff || [], shiftTypes: S.shiftTypes || [],
+    rr: S.roleRequirements || {}, rrc: S.roleRequirementsCast || {}, dr: S.dailyRequirements || {}, drc: S.dailyRequirementsCast || {},
+    rules: st.reqRules || [], combined: st.combinedShifts || {}, special: S.specialDays || {}, skills: S.skills || [], dskills: S.dailySkills || {},
+  }));
+}
+function _tightOnEvent(e) {
+  const t = e.target;
+  if (t && t.closest && t.closest('.req-margin-alert')) return;   // 知らせの中のボタン（取り消す・閉じる・見る）は数えない
+  const panel = _tightPanelOf(t);
+  if (!panel) return;
+  if (typeof calcBusy === 'function' && calcBusy()) return;
+  if (!_tightPending) {
+    let model; try { model = calendarMarginModel(); } catch (_) { return; }
+    _tightPending = { panel, model, state: _tightState() };
+  }
+  clearTimeout(_tightTimer);
+  // 文字を打っている間（input）は確定（change）を待つ。change が来ない欄のために、打ち終わって少ししたら比べる
+  _tightTimer = setTimeout(_tightEval, e.type === 'input' ? 1500 : 30);
+}
+['click', 'dblclick', 'input', 'change'].forEach(ev => document.addEventListener(ev, _tightOnEvent, true));
+
+/** 1以下の日が2日以上続く所（きつい期間）。[[始めの日, 終わりの日], …]（数えていない日＝必要人数0の日で切れる） */
+function _tightRuns(cells) {
+  const runs = []; let s = -1;
+  for (let i = 0; i <= cells.length; i++) {
+    const c = cells[i];
+    if (c && c.v <= 1) { if (s < 0) s = i; continue; }
+    if (s >= 0 && i - s >= 2) runs.push([s + 1, i]);
+    s = -1;
+  }
+  return runs;
+}
+/** 変える前（before）と後（after）の「あと何人休めるか」を比べ、新しく起きたことを行ごとに返す */
+function tightNewIssues(before, after) {
+  const items = [];
+  after.rows.forEach(r => {
+    const br = before.rows.find(x => x.id === r.id);
+    const neg = [], zero = [], was = {};
+    r.cells.forEach((c, i) => {
+      if (!c || c.v > 0) return;
+      const b = br ? br.cells[i] : null;
+      if (b && c.v >= b.v) return;   // 前と同じか、よくなった
+      (c.v < 0 ? neg : zero).push(i + 1);
+      if (b) was[i + 1] = b.v;
+    });
+    const bDays = new Set();
+    if (br) _tightRuns(br.cells).forEach(([a, z]) => { for (let d = a; d <= z; d++) bDays.add(d); });
+    // 新しくできた・伸びた・つながった期間と、新しくマイナス・0になった日を含む期間（前からの期間でも、その日がどこに入るかを出す）
+    const hot = new Set(neg.concat(zero)), runs = [];
+    _tightRuns(r.cells).forEach(([a, z]) => {
+      const nd = []; for (let d = a; d <= z; d++) if (!bDays.has(d) || hot.has(d)) nd.push(d);
+      if (nd.length) runs.push({ a, z, nd });
+    });
+    if (neg.length || zero.length || runs.length) items.push({ id: r.id, neg, zero, runs, was, bRun: Array.from(bDays) });
+  });
+  return items;
+}
+
+// 日の並び → 「21〜23日・25日」（多いときは「ほか◯か所」）
+function _tightDayRanges(days) {
+  const s = Array.from(new Set(days)).sort((x, y) => x - y), out = [];
+  s.forEach(d => { const l = out[out.length - 1]; if (l && d === l[1] + 1) l[1] = d; else out.push([d, d]); });
+  return out;
+}
+function _tightRangeText(ranges, max) {
+  max = max || 4;
+  const t = ranges.slice(0, max).map(([a, z]) => a === z ? `${a}日` : `${a}〜${z}日`).join('・');
+  return ranges.length > max ? `${t}（ほか${ranges.length - max}か所）` : t;
+}
+// 「休める人」の前に付ける言葉（全体の行は、部門が1つなら付けない）
+function _tightSubj(r) {
+  if (r.kind === 'skill') return `${r.label}を持つ人で`;
+  if (r.kind === 'total') return r.label === '全体' ? '' : `${r.label.replace(/の全体$/, '')}で`;
+  return `${r.label}で`;
+}
+// 0人の日の（ ）の中: だれが全員出ることになるか
+function _tightZeroNote(r) {
+  const band = r.kind === 'skill' ? (r.band === 'early' ? '早番' : '遅番') : (r.kind === 'early' ? '早番' : '遅番');
+  if (r.kind === 'skill') return `その時間帯に入れる「${r.skill}」を持つ人が全員、${band}に出ることになります`;
+  if (r.kind === 'total') return (r.label === '全体' ? '出られる人' : `${r.label.replace(/の全体$/, '')}で出られる人`) + 'が全員出勤になります';
+  return `${r.label}に入れる人が全員、${band}に出ることになります`;
+}
+// v270 のマイナスの文（1日ぶん）
+function _tightNegText(r, c, more) {
+  const now = r.kind === 'early' || r.kind === 'late' ? `いま${r.label.replace(/^.*の/, '')}に入れるのは${c.avail}人` : `いま出られるのは${c.avail}人`;
+  return r.kind === 'skill'
+    ? (more ? `${r.label}が、さらに足りなくなります（最低${c.need}人・${now}）` : `${r.label}が最低${c.need}人を下回ります（${now}）`)
+    : (more ? `${r.label}が、さらに足りなくなります（必要${c.need}人・${now}）` : `${r.label}で必要な${c.need}人を下回ります（${now}）`);
+}
+/** 知らせの文（いまの数で、まだ当てはまるものだけ）。oneDay: 見出しに日が入っている（④で1つの希望を入れた）とき、その日 */
+function _tightLines(a, model) {
+  const lines = [], negIds = [];
+  let anyNeg = false, anyTight = false;
+  const oneDay = a.req ? a.req.d : 0;
+  const pre = (days) => (oneDay && days.every(d => d === oneDay)) ? '' : `${_tightRangeText(_tightDayRanges(days))}は、`;
+  a.items.forEach(it => {
+    const r = model.rows.find(x => x.id === it.id); if (!r) return;
+    const cur = d => r.cells[d - 1];
+    // 変える前より悪いままの日だけ（元に戻して前と同じになった日は外す）
+    const worse = d => cur(d) && cur(d).v <= 0 && (it.was[d] == null || cur(d).v < it.was[d]);
+    const marked = it.neg.concat(it.zero).filter(worse);
+    const neg = marked.filter(d => cur(d).v < 0), zero = marked.filter(d => cur(d).v === 0);
+    if (neg.length) {
+      anyNeg = true; negIds.push(r.id);
+      const more = d => it.was[d] != null && it.was[d] < 0;
+      if (neg.length === 1) lines.push(pre(neg) + _tightNegText(r, cur(neg[0]), more(neg[0])));
+      else {
+        const per = neg.slice(0, 4).map(d => `${d}日 ${-cur(d).v}人`).join('・') + (neg.length > 4 ? ` ほか${neg.length - 4}日` : '');
+        lines.push(`${pre(neg)}${r.label}${r.kind === 'skill' ? 'が最低ライン' : 'で必要な人数'}を下回ります（足りない人数：${per}）`);
+      }
+    }
+    if (zero.length) { anyTight = true; lines.push(`${pre(zero)}${_tightSubj(r)}休める人が0人になります（${_tightZeroNote(r)}）`); }
+    // 期間の日がすべて上でマイナス・0と言った日なら、同じ日を2回言わない
+    // 期間は、変える前は期間でなかった日か、いまもマイナス・0のままの日を含むものだけ
+    const said = new Set(marked), bRun = new Set(it.bRun || []);
+    const runs = _tightRuns(r.cells).filter(([x, z]) => {
+      const ds = Array.from({ length: z - x + 1 }, (_, i) => x + i);
+      return it.runs.some(o => o.nd.some(d => d >= x && d <= z && (!bRun.has(d) || said.has(d))))
+        && ds.some(d => !said.has(d));
+    });
+    if (runs.length) { anyTight = true; lines.push(`${_tightRangeText(runs)}は、${_tightSubj(r)}休める人があと1人以下の日が続きます`); }
+  });
+  return { lines, negIds, anyNeg, anyTight };
+}
+
+/** 何を変えたからか（見出しの文）。④で希望を1つだけ変えたときは、取り消すための req も返す */
+function tightCause(b, a) {
+  const parts = []; let req = null;
+  const keysOf = (x, y) => Array.from(new Set([...Object.keys(x || {}), ...Object.keys(y || {})]));
+  const same = (x, y) => JSON.stringify(x === undefined ? null : x) === JSON.stringify(y === undefined ? null : y);
+  const rangeOf = days => _tightRangeText(_tightDayRanges(days));
+  // ③ スタッフ（足した・消した・担当シフト・スキル・部門）
+  const sB = b.staff || [], sA = a.staff || [];
+  const delS = sB.filter(s => !sA.some(x => x.id === s.id)), addS = sA.filter(s => !sB.some(x => x.id === s.id));
+  delS.forEach(s => parts.push({ t: `${s.name}さんを消した` }));
+  addS.forEach(s => parts.push({ t: `${s.name}さんを足した` }));
+  sA.forEach(s => {
+    const o = sB.find(x => x.id === s.id); if (!o || same(o, s)) return;
+    const nm = `${s.name || o.name}さん`;
+    const lostSh = (o.allowedShifts || []).filter(k => !(s.allowedShifts || []).includes(k));
+    const lostSk = (o.skills || []).filter(k => !(s.skills || []).includes(k));
+    if (lostSh.length) parts.push({ t: `${nm}の担当シフトから${lostSh.map(k => `「${shiftSym(k)}」`).join('')}を外した` });
+    else if (lostSk.length) parts.push({ t: `${nm}のスキルから${lostSk.map(k => `「${k}」`).join('')}を外した` });
+    else if (o.department !== s.department) parts.push({ t: `${nm}の部門を変えた` });
+    else parts.push({ t: `${nm}の設定を変えた` });
+  });
+  // ④ 希望（消した人の希望は数えない）
+  const gone = new Set(delS.map(s => s.id));
+  const rq = [];
+  keysOf(b.requests, a.requests).forEach(id => {
+    if (gone.has(id)) return;
+    const x = b.requests[id] || {}, y = a.requests[id] || {};
+    keysOf(x, y).forEach(d => { if ((x[d] || '') !== (y[d] || '')) rq.push({ sid: id, d: +d, prev: x[d], cur: y[d] }); });
+  });
+  if (rq.length === 1) {
+    req = rq[0];
+    const s = sA.find(x => x.id === req.sid);
+    parts.push({ t: `${s ? s.name : ''}さんが${req.d}日に${_reqMarginVerb(req.cur)}`, to: true });
+  } else if (rq.length) parts.push({ t: `希望を${rq.length}か所変えた` });
+  // ② シフト（足した・消した・設定）
+  const tB = b.shiftTypes || [], tA = a.shiftTypes || [];
+  const newKeys = new Set(), oldKeys = new Set();
+  tA.forEach(t => { if (!tB.some(x => x.key === t.key)) { newKeys.add(t.key); parts.push({ t: `「${t.sym || t.key}」${t.label ? `（${t.label}）` : ''}を足した` }); } });
+  tB.forEach(t => { if (!tA.some(x => x.key === t.key)) { oldKeys.add(t.key); parts.push({ t: `「${t.sym || t.key}」を消した` }); } });
+  tA.forEach(t => { const o = tB.find(x => x.key === t.key); if (o && !same(o, t)) parts.push({ t: `「${shiftSym(t.key)}」の設定を変えた` }); });
+  const skipKey = k => newKeys.has(k) || oldKeys.has(k);
+  // ②・⑥ 日ごとの必要人数（入れた数そのもの。無ければ、ルール・ふだんの数）
+  const dd = [];
+  [['dr', false], ['drc', true]].forEach(([k, cast]) => {
+    const X = b[k] || {}, Y = a[k] || {};
+    keysOf(X, Y).forEach(key => { if (skipKey(key)) return; const x = X[key] || {}, y = Y[key] || {};
+      keysOf(x, y).forEach(d => { if (!same(x[d], y[d])) dd.push({ key, d: +d, cast }); }); });
+  });
+  if (dd.length) {
+    const k0 = dd[0].key, c0 = dd[0].cast;
+    if (dd.every(x => x.key === k0 && x.cast === c0)) {
+      const who = `${rangeOf(dd.map(x => x.d))}の${c0 ? 'キャストの' : ''}「${shiftSym(k0)}」の必要人数を`;
+      if (dd.length === 1) {
+        const n = getDayReq(c0 ? (AppState.roleRequirementsCast || {}) : (AppState.roleRequirements || {}),
+          c0 ? (AppState.dailyRequirementsCast || {}) : (AppState.dailyRequirements || {}), k0, dd[0].d);
+        parts.push({ t: `${who}${n}人にした` });
+      } else parts.push({ t: `${who}変えた` });
+    } else parts.push({ t: `日ごとの必要人数を${dd.length}か所変えた` });
+  }
+  // ② ふだんの必要人数
+  const rr = [];
+  [['rr', false], ['rrc', true]].forEach(([k, cast]) => {
+    const X = b[k] || {}, Y = a[k] || {};
+    keysOf(X, Y).forEach(key => { if (!skipKey(key) && !same(X[key], Y[key])) rr.push({ key, cast, v: Y[key] || 0 }); });
+  });
+  if (rr.length === 1) parts.push({ t: `${rr[0].cast ? 'キャストの' : ''}「${shiftSym(rr[0].key)}」のふだんの必要人数を${rr[0].v}人にした` });
+  else if (rr.length) parts.push({ t: 'ふだんの必要人数を変えた' });
+  if (!same(b.combined, a.combined)) parts.push({ t: '社員とキャストの合算を変えた' });
+  // ① 必要人数のルール・特別日
+  const rB = b.rules || [], rA = a.rules || [];
+  const rnm = r => r && r.name ? `「${r.name}」` : (r ? `（「${shiftSym(r.key)}」を${r.to}人）` : '');
+  if (rA.length > rB.length) parts.push({ t: rA.length - rB.length === 1 ? `必要人数のルール${rnm(rA[rA.length - 1])}を足した` : `必要人数のルールを${rA.length - rB.length}つ足した` });
+  else if (rA.length < rB.length) { const i = rB.findIndex((r, j) => !same(r, rA[j])); parts.push({ t: `必要人数のルール${rnm(rB[i < 0 ? rB.length - 1 : i])}を消した` }); }
+  else {
+    const ch = []; rA.forEach((r, j) => { if (!same(r, rB[j])) ch.push(j); });
+    if (ch.length === 1) { const r = rA[ch[0]], o = rB[ch[0]];
+      parts.push({ t: (o.enabled === false && r.enabled !== false) ? `必要人数のルール${rnm(r)}を使うようにした` : `必要人数のルール${rnm(r)}を変えた` }); }
+    else if (ch.length) parts.push({ t: '必要人数のルールを変えた' });
+  }
+  const sd = keysOf(b.special, a.special).filter(d => (b.special || {})[d] !== (a.special || {})[d]).map(Number);
+  if (sd.length) parts.push({ t: `${rangeOf(sd)}の特別日を変えた` });
+  // ③ スキル設定
+  const kB = b.skills || [], kA = a.skills || [];
+  const mn = x => (x.min != null && x.min >= 0) ? x.min : ((x.req != null ? x.req : x.lateReq) || 0);
+  kA.forEach(k => {
+    const o = kB.find(x => x.name === k.name);
+    if (!o) { parts.push({ t: `スキル「${k.name}」を足した` }); return; }
+    if (same(o, k)) return;
+    if (mn(o) !== mn(k)) parts.push({ t: `スキル「${k.name}」の最低ラインを${mn(k)}人にした` });
+    else if ((o.target || 'late') !== (k.target || 'late')) parts.push({ t: `スキル「${k.name}」を${(k.target || 'late') === 'early' ? '早番' : '遅番'}のスキルにした` });
+    else parts.push({ t: `スキル「${k.name}」の設定を変えた` });
+  });
+  const ds = [];
+  keysOf(b.dskills, a.dskills).forEach(n => { const x = (b.dskills || {})[n] || {}, y = (a.dskills || {})[n] || {};
+    keysOf(x, y).forEach(d => { if (!same(x[d], y[d])) ds.push({ n, d: +d }); }); });
+  if (ds.length) parts.push({ t: ds.every(x => x.n === ds[0].n) ? `${rangeOf(ds.map(x => x.d))}の「${ds[0].n}」の人数を変えた` : 'スキルの日ごとの人数を変えた' });
+  if (!parts.length && !same(b.fixed, a.fixed)) parts.push({ t: '固定を変えた' });
+  if (!parts.length) parts.push({ t: '設定を変えた' });
+  const p0 = parts[0];
+  const text = parts.length === 1 ? p0.t + (p0.to ? 'と、' : 'ので、') : `${p0.t}など、${parts.length}か所を変えたので、`;
+  return { text, req: parts.length === 1 ? req : null };
+}
+
+function _tightEval() {
+  clearTimeout(_tightTimer); _tightTimer = null;
+  const p = _tightPending; _tightPending = null;
+  if (!p || (typeof calcBusy === 'function' && calcBusy())) return;
+  let after; try { after = calendarMarginModel(); } catch (_) { return; }
+  const st = _tightState();
+  // 月を変えた・前は数える行が無かった（はじめて人を入れた など）ときは比べない
+  if (st.month !== p.state.month || after.days !== p.model.days || !p.model.rows.length) return;
+  const items = tightNewIssues(p.model, after);
+  if (!items.length) return;
+  const cause = tightCause(p.state, st);
+  _tightAlerts[p.panel] = { cause: cause.text, req: cause.req, items, month: st.month };
+  if (p.panel === 'calendar') updateCalendarMargins(); else renderTightAlert(p.panel, after);
+}
+/** 知らせを全部捨てる（読込・取り込み・リセット・月の片付け。discardGenerateResult から呼ぶ） */
+function clearTightAlerts() {
+  _tightPending = null; clearTimeout(_tightTimer);
+  Object.keys(TIGHT_BOX).forEach(panel => {
+    delete _tightAlerts[panel];
+    const box = document.getElementById(TIGHT_BOX[panel]);
+    if (box) { box.innerHTML = ''; box.hidden = true; }
+  });
+}
+/** ④以外の画面の知らせを、いまの数で確かめ直す（足りるようになった・月が変わった → 消す） */
+function refreshTightAlerts() {
+  let m = null;
+  Object.keys(_tightAlerts).forEach(panel => {
+    if (panel === 'calendar') return;
+    if (!m) { try { m = calendarMarginModel(); } catch (_) { m = { rows: [], days: 0 }; } }
+    renderTightAlert(panel, m);
+  });
+}
+
 function _reqMarginVerb(mark) {
   if (!mark) return '希望を外す';
   if (mark === '休' || mark === '☆') return '休む';
@@ -2857,46 +3137,69 @@ function _reqMarginVerb(mark) {
   if (typeof isTraining === 'function' && isTraining(mark)) return `研修（「${shiftSym(mark)}」）に入れる`;
   return `「${shiftSym(mark)}」に決める`;
 }
-function renderRequestMarginAlert(m) {
-  const box = document.getElementById('reqMarginAlert');
+function renderTightAlert(panel, m) {
+  const box = document.getElementById(TIGHT_BOX[panel]);
   if (!box) return;
-  const a = _reqMarginAlert;
-  const cur = a ? (AppState.requests[a.sid] || {})[a.d] : undefined;
-  const st = a && (AppState.staff || []).find(x => x.id === a.sid);
-  // 入れた希望が変わった・消えた・人がいない → 知らせを消す
-  if (!a || !st || cur !== a.mark) { _reqMarginAlert = null; box.innerHTML = ''; box.hidden = true; return; }
-  const model = m || calendarMarginModel();
-  const lines = [];
-  a.ids.forEach(id => {
-    const r = model.rows.find(x => x.id === id), c = r && r.cells[a.d - 1];
-    if (!c || c.v >= 0) return;
-    // 入れる前からマイナスだった日は「さらに足りなくなります」
-    const more = a.was && a.was[id] != null && a.was[id] < 0;
-    const now = r.kind === 'early' || r.kind === 'late' ? `いま${r.label.replace(/^.*の/, '')}に入れるのは${c.avail}人` : `いま出られるのは${c.avail}人`;
-    lines.push(r.kind === 'skill'
-      ? (more ? `${r.label}が、さらに足りなくなります（最低${c.need}人・${now}）` : `${r.label}が最低${c.need}人を下回ります（${now}）`)
-      : (more ? `${r.label}が、さらに足りなくなります（必要${c.need}人・${now}）` : `${r.label}で必要な${c.need}人を下回ります（${now}）`));
-  });
-  if (!lines.length) { _reqMarginAlert = null; box.innerHTML = ''; box.hidden = true; return; }
+  const a = _tightAlerts[panel];
+  const hide = () => { delete _tightAlerts[panel]; box.innerHTML = ''; box.hidden = true; };
+  if (!a || a.month !== AppState.settings.targetMonth) return hide();
+  // ④で入れた希望が変わった・消えた・人がいない → 消す（v270）
+  if (a.req && (!(AppState.staff || []).some(x => x.id === a.req.sid) || (AppState.requests[a.req.sid] || {})[a.req.d] !== a.req.cur)) return hide();
+  let model = m;
+  if (!model) { try { model = calendarMarginModel(); } catch (_) { return hide(); } }
+  const L = _tightLines(a, model);
+  a.negIds = L.negIds;
+  if (!L.lines.length) return hide();
+  const cal = panel === 'calendar';
+  const MAX = 6;
+  const shown = L.lines.slice(0, MAX), rest = L.lines.length - shown.length;
+  const hint = (cal ? '希望は入れたままです。別の日にするか、このまま進めるかを決めてください' : '変更はそのままです。このまま進めるか、変えた所を見直すかを決めてください')
+    + (L.anyNeg ? '（このままだと、その日は人員不足やスキル不足のエラーになります）' : '') + '。'
+    + (L.anyTight ? '休める人が0人の日や、1人以下の日が続く所の前後では、連勤や遅→休→早などのエラーが増えやすくなります（その日だけを見た目安です）。' : '');
   box.hidden = false;
-  box.innerHTML = `<div class="rma-body">${uiIcon('must')}<div class="grow"><b>${escapeHtml(`${st.name}さんが${a.d}日に${_reqMarginVerb(a.mark)}と、`)}</b>`
-    + `<ul>${lines.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`
-    + `<div class="hint">希望は入れたままです。別の日にするか、このまま進めるかを決めてください（このままだと、その日は人員不足やスキル不足のエラーになります）。</div></div>`
-    + `<div class="rma-btns"><button type="button" class="btn" id="rmaUndo">この希望を取り消す</button><button type="button" class="btn btn-ghost calc-view-only" id="rmaClose">閉じる</button></div></div>`;
-  box.querySelector('#rmaUndo').addEventListener('click', () => {
+  box.innerHTML = `<div class="rma-body${L.anyNeg ? '' : ' rma-warn'}">${uiIcon(L.anyNeg ? 'must' : 'soft')}<div class="grow"><b>${escapeHtml(a.cause)}</b>`
+    + `<ul>${shown.map(t => `<li>${escapeHtml(t)}</li>`).join('')}${rest > 0 ? `<li>ほか${rest}件</li>` : ''}</ul>`
+    + `<div class="hint">${escapeHtml(hint)}</div></div>`
+    + `<div class="rma-btns">${cal && a.req ? '<button type="button" class="btn" id="rmaUndo">この希望を取り消す</button>' : ''}`
+    + `<button type="button" class="btn calc-view-only" data-tight-go="1">${cal ? '日ごとの数を見る' : '④で日ごとの数を見る'}</button>`
+    + `<button type="button" class="btn btn-ghost calc-view-only" ${cal ? 'id="rmaClose"' : 'data-tight-close="1"'}>閉じる</button></div></div>`;
+  const undo = box.querySelector('#rmaUndo');
+  if (undo) undo.addEventListener('click', () => {
     if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
-    const x = _reqMarginAlert; if (!x) return;
-    AppState.requests[x.sid] = AppState.requests[x.sid] || {};
-    if (x.prev === undefined || x.prev === '') delete AppState.requests[x.sid][x.d]; else AppState.requests[x.sid][x.d] = x.prev;
-    _reqMarginAlert = null;
+    const x = _tightAlerts.calendar; if (!x || !x.req) return;
+    AppState.requests[x.req.sid] = AppState.requests[x.req.sid] || {};
+    if (x.req.prev === undefined || x.req.prev === '') delete AppState.requests[x.req.sid][x.req.d]; else AppState.requests[x.req.sid][x.req.d] = x.req.prev;
+    delete _tightAlerts.calendar;
     autoSave(); renderCalendar();
   });
-  box.querySelector('#rmaClose').addEventListener('click', () => { _reqMarginAlert = null; box.innerHTML = ''; box.hidden = true; scheduleRequestAlerts(); });
+  box.querySelector('[data-tight-go]').addEventListener('click', () => tightShowCalendar(panel));
+  box.querySelector(cal ? '#rmaClose' : '[data-tight-close]').addEventListener('click', () => { hide(); if (cal) scheduleRequestAlerts(); });
 }
-/** いま知らせている日（#reqAlerts で同じ日の人員不足・スキル不足を二重に言わないため） */
+/** 「④で日ごとの数を見る」: ④を開いて、表のいちばん下の行の、知らせた日のマスを光らせる */
+function tightShowCalendar(panel) {
+  const a = _tightAlerts[panel];
+  const go = () => {
+    const tf = document.querySelector('#calendarTable tfoot.cal-margin');
+    if (!tf) return;
+    const cells = [];
+    if (a) a.items.forEach(it => {
+      const days = new Set(it.neg.concat(it.zero));
+      it.runs.forEach(o => { for (let d = o.a; d <= o.z; d++) days.add(d); });
+      days.forEach(d => { const td = tf.querySelector(`tr[data-cm="${CSS.escape(it.id)}"] td[data-day="${d}"]`); if (td) cells.push(td); });
+    });
+    (cells[0] || tf).scrollIntoView({ block: 'center', inline: 'center' });
+    cells.forEach(td => { td.classList.add('cm-flash'); setTimeout(() => td.classList.remove('cm-flash'), 2600); });
+  };
+  if (panel === 'calendar') { go(); return; }
+  const tab = document.querySelector('.tab[data-tab="calendar"]');
+  if (tab) tab.click();
+  setTimeout(go, 120);
+}
+/** いま知らせている日（#reqAlerts で同じ日の人員不足・スキル不足を二重に言わないため）。④で1つの希望を入れた知らせのマイナスの行だけ */
 function requestMarginAlertDay() {
-  const a = _reqMarginAlert;
-  return a && (AppState.requests[a.sid] || {})[a.d] === a.mark ? a : null;
+  const a = _tightAlerts.calendar;
+  if (!a || !a.req || (AppState.requests[a.req.sid] || {})[a.req.d] !== a.req.cur || !(a.negIds || []).length) return null;
+  return { d: a.req.d, ids: a.negIds };
 }
 
 // ===== 希望だけで必ず🚨になるもの（④で希望を入れたその場で知らせる） =====
