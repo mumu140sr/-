@@ -1020,16 +1020,17 @@ tbody tr:hover { background: var(--surface-2); }
 .req-margin-alert .rma-body.rma-warn { border-color: color-mix(in srgb, var(--lv-soft) 60%, transparent); background: color-mix(in srgb, var(--lv-soft-bg) 70%, var(--surface)); }
 /* 表の大事な所を隠しすぎないように、高さは画面の4分の1まで（はみ出す分は中で送る） */
 .req-margin-alert .rma-body { max-height: 25vh; overflow-y: auto; }
-/* スマホの幅: 文の部分だけを送り、ボタン（閉じる など）はいつも見えるようにする（全体で画面の4分の1ほど） */
-@media (max-width: 600px) {
-  .req-margin-alert .rma-body { max-height: none; overflow: visible; padding: 8px 10px; }
-  .req-margin-alert .rma-body .grow { max-height: 13vh; overflow-y: auto; }
-  .req-margin-alert .rma-btns { gap: 4px; flex-wrap: nowrap; }
-  .req-margin-alert .rma-btns .btn { padding: 3px 8px; font-size: 13px; white-space: nowrap; }
-}
 .req-margin-alert .rma-body .grow { flex: 1 1 240px; min-width: 0; }
 .req-margin-alert ul { margin: 4px 0; padding-left: 18px; }
 .req-margin-alert .rma-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+/* スマホの幅: 文の部分だけを送り、ボタン（閉じる など）はいつも1行で見えるようにする（全体で画面の4分の1ほど）。
+   上の .rma-btns より後に書く（同じ強さの指定は、後に書いたほうが効く）。とても狭い画面では、ボタンの行だけを横に送る */
+@media (max-width: 600px) {
+  .req-margin-alert .rma-body { max-height: none; overflow: visible; padding: 8px 10px; }
+  .req-margin-alert .rma-body .grow { max-height: 13vh; overflow-y: auto; }
+  .req-margin-alert .rma-btns { gap: 4px; flex-wrap: nowrap; max-width: 100%; overflow-x: auto; }
+  .req-margin-alert .rma-btns .btn { padding: 3px 8px; font-size: 13px; white-space: nowrap; flex: 0 0 auto; }
+}
 
 /* ===== シフトのマス ===== */
 .shift-cell {

@@ -2903,8 +2903,13 @@ function _tightRuns(cells) {
 /** 変える前（before）と後（after）の「あと何人休めるか」を比べ、新しく起きたことを行ごとに返す */
 function tightNewIssues(before, after) {
   const items = [];
+  // 行の id は「部門|種類」（スキルは店全体で「skill|…」）。合算を切り替える・部門ができる／なくなると部門の名前が変わり、
+  // 前の行が見つからない。そのとき前からある0人の日・きつい期間を「新しく」と言わないよう、前に無かった部門の行は比べない（v272）
+  const grp = id => id.indexOf('skill|') === 0 ? null : id.split('|')[0];
+  const bGroups = new Set(before.rows.map(r => grp(r.id)).filter(Boolean));
   after.rows.forEach(r => {
     const br = before.rows.find(x => x.id === r.id);
+    if (!br && grp(r.id) && !bGroups.has(grp(r.id))) return;
     const neg = [], zero = [], was = {};
     r.cells.forEach((c, i) => {
       if (!c || c.v > 0) return;
@@ -3102,10 +3107,11 @@ function _tightEval() {
   if (!p || (typeof calcBusy === 'function' && calcBusy())) return;
   let after; try { after = calendarMarginModel(); } catch (_) { return; }
   const st = _tightState();
-  // 月を変えた・前は数える行が無かった（はじめて人を入れた など）ときは比べない
-  if (st.month !== p.state.month || after.days !== p.model.days || !p.model.rows.length) return;
+  // 月を変えた・前は数える行が無かった（はじめて人を入れた など）ときは比べない。何も新しく起きなかったときも、
+  // 出ている知らせはいまの数で確かめ直す（元に戻して足りるようになったら消える。⑥の欄は autoSave を通らないため、ここで確かめる）
+  if (st.month !== p.state.month || after.days !== p.model.days || !p.model.rows.length) { refreshTightAlerts(after, true); return; }
   const items = tightNewIssues(p.model, after);
-  if (!items.length) return;
+  if (!items.length) { refreshTightAlerts(after, true); return; }
   const cause = tightCause(p.state, st);
   _tightAlerts[p.panel] = { cause: cause.text, req: cause.req, items, month: st.month };
   if (p.panel === 'calendar') updateCalendarMargins(); else renderTightAlert(p.panel, after);
@@ -3119,11 +3125,12 @@ function clearTightAlerts() {
     if (box) { box.innerHTML = ''; box.hidden = true; }
   });
 }
-/** ④以外の画面の知らせを、いまの数で確かめ直す（足りるようになった・月が変わった → 消す） */
-function refreshTightAlerts() {
-  let m = null;
+/** 出ている知らせを、いまの数で確かめ直す（足りるようになった・月が変わった → 消す）。
+ *  ④の知らせは、ふだんは④の表を描き直すとき（updateCalendarMargins）に確かめるので、withCal のときだけ */
+function refreshTightAlerts(model, withCal) {
+  let m = model || null;
   Object.keys(_tightAlerts).forEach(panel => {
-    if (panel === 'calendar') return;
+    if (panel === 'calendar' && !withCal) return;
     if (!m) { try { m = calendarMarginModel(); } catch (_) { m = { rows: [], days: 0 }; } }
     renderTightAlert(panel, m);
   });
