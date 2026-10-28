@@ -915,6 +915,17 @@ tbody tr:hover { background: var(--surface-2); }
   -moz-appearance: textfield; appearance: textfield; cursor: text;
 }
 .summary-req-input:focus { outline: 2px solid var(--focus); background: var(--surface) !important; }
+/* v273: 日別の必要人数で、まとめて入れる日（Shift＋クリック・なぞる・Shift+←→）。まとめて固定の選んだマス（td.range-sel）と同じ見た目 */
+td.rq-sel,
+.result-table .summary-row td.rq-sel { background: var(--accent-soft) !important; box-shadow: inset 0 0 0 2px var(--focus) !important; }   /* 足りない日（td.under）の上でも選んだ色にする */
+td.rq-sel .summary-req-input, td.rq-sel .daily-req-input, td.rq-sel .daily-skill-input { color: var(--text) !important; }
+.rq-help { margin: 6px 0 0; }
+.rq-help .m-key, .rq-key { display: inline-block; padding: 0 5px; border: 1px solid var(--border-control); border-radius: 4px; background: var(--surface-2);
+  font-size: 0.95em; line-height: 1.45; color: var(--text); white-space: nowrap; }
+.rq-msg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 6px 0; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: var(--fs-sm); }
+.rq-msg[hidden] { display: none; }
+.rq-msg .btn { min-height: 0; padding: 2px 10px; }
 .summary-req-input::-webkit-outer-spin-button,
 .summary-req-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 

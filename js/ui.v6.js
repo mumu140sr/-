@@ -1913,6 +1913,11 @@ function wireDayShiftSkillsSection(container) {
 }
 
 function renderDailyReqPanel() {
+  // 描き直しても、入れていたマスに入力の場所を戻す（v273）
+  const keep = _rqSaveFocus();
+  try { _renderDailyReqPanelInner(); } finally { _rqRestoreFocus(keep); _rqPaint(); }
+}
+function _renderDailyReqPanelInner() {
   const container = document.getElementById('dailyReqContent');
   if (!container) return;
   const days = getDaysInMonth(AppState.settings.targetMonth);
@@ -1967,7 +1972,7 @@ function renderDailyReqPanel() {
         // 日ごとに要るスキル（v264）の日は、マスを点線の枠で囲み、title に要るスキルを書く
         const dsT = daySkillTitle(type.key, d);
         html += `<td style="padding:1px;border:1px solid var(--border);background:${cellBg}"${dsT ? ' class="ds-mark"' : ''}>
-          <input type="number" min="0" max="99"
+          <input type="number" min="0" max="99" enterkeyhint="next" autocomplete="off"
             value="${escapeHtml(isOv ? override : bInfo.base)}"
             data-shift="${escapeHtml(type.key)}" data-day="${d}" data-dept="${dept}" data-default="${escapeHtml(defaultVal)}"
             data-base="${escapeHtml(bInfo.base)}" data-rule-text="${escapeHtml(ruleText)}"
@@ -1995,7 +2000,7 @@ function renderDailyReqPanel() {
         const isOv = override != null;
         const cellBg = isOv ? 'var(--accent-soft)' : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
         html += `<td style="padding:1px;border:1px solid var(--border);background:${cellBg}">
-          <input type="number" min="0" max="99"
+          <input type="number" min="0" max="99" enterkeyhint="next" autocomplete="off"
             value="${escapeHtml(isOv ? override : baseVal)}"
             data-skill="${escapeHtml(sk.name)}" data-sfield="${field}" data-day="${d}" data-default="${escapeHtml(baseVal)}"
             class="daily-skill-input" style="width:42px;text-align:center;border:none;background:transparent;font-size:13px;font-weight:${isOv ? '700' : '400'};color:${isOv ? 'var(--text)' : 'var(--text-muted)'}"/>
@@ -2013,32 +2018,11 @@ function renderDailyReqPanel() {
   container.innerHTML = html;
   wireDayShiftSkillsSection(container);
 
-  // スキル要件の日別上書き
+  // スキル要件の日別上書き（決める処理は _dailySkillCommit。まとめて入れるときも同じ処理を使う。v273）
   container.querySelectorAll('.daily-skill-input').forEach(el => {
     el.addEventListener('change', e => {
-      const name  = e.target.dataset.skill;
-      const field = e.target.dataset.sfield;
-      const day   = parseInt(e.target.dataset.day);
-      const def   = parseInt(e.target.dataset.default) || 0;
-      const val   = e.target.value.trim();
-      if (!AppState.dailySkills) AppState.dailySkills = {};
-      if (!AppState.dailySkills[name]) AppState.dailySkills[name] = {};
-      const map = AppState.dailySkills[name];
-      const num = parseInt(val);
-      const hasOverride = !(val === '' || val === '-' || isNaN(num) || num === def);
-      if (!hasOverride) {
-        if (map[day]) { delete map[day][field]; if (!Object.keys(map[day]).length) delete map[day]; }
-        if (val === '' || val === '-') e.target.value = def;
-      } else {
-        if (!map[day]) map[day] = {};
-        map[day][field] = num;
-      }
-      const w = getWeekday(AppState.settings.targetMonth, day);
-      e.target.style.fontWeight = hasOverride ? '700' : '400';
-      e.target.style.color      = hasOverride ? 'var(--text)' : 'var(--text-muted)';
-      const cell = e.target.closest('td');
-      if (cell) cell.style.background = hasOverride ? 'var(--accent-soft)'
-        : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
+      const dl = _dailySkillCommit(e.target);
+      if (dl) recordDeltaHistory([dl]);   // 元に戻すで戻せるように（v273）
       autoSave(); recheckAfterRuleChange({ fromDailyPanel: true });
     });
   });
@@ -2064,36 +2048,380 @@ function renderDailyReqPanel() {
 
   container.querySelectorAll('.daily-req-input').forEach(el => {
     el.addEventListener('change', e => {
-      const sh   = e.target.dataset.shift;
-      const day  = parseInt(e.target.dataset.day);
-      const dept = e.target.dataset.dept;
-      const def  = parseInt(e.target.dataset.default) || 0;
-      const b0   = parseInt(e.target.dataset.base);
-      const base = isNaN(b0) ? def : b0;   // 上書きが無いときの数（ルールが当たればルールの数）
-      const ruleText = e.target.dataset.ruleText || '';
-      const val  = e.target.value.trim();
-      const map  = dept === 'employee' ? AppState.dailyRequirements : AppState.dailyRequirementsCast;
-      if (!map[sh]) map[sh] = {};
-      // 空欄・「-」・上書きが無いときの数と同じ → 上書き解除。それ以外 → 上書き保存
-      // （既定と比べると、ルールの日に既定の数を入れられなかった。⑥の行と同じ決め方）
-      const num = parseInt(val);
-      const hasOverride = !(val === '' || val === '-' || isNaN(num) || num === base);
-      if (!hasOverride) {
-        delete map[sh][day];
-        if (val === '' || val === '-' || isNaN(num)) e.target.value = base; // 空なら上書きが無いときの数を表示に戻す
-      } else {
-        map[sh][day] = num;
-      }
-      // 見た目を即反映（上書きあり=黒太字＋黄背景 / ルールの日=点線の下線 / ふだん=薄字）
-      const w = getWeekday(AppState.settings.targetMonth, day);
-      e.target.style.cssText = _dailyReqStyle(hasOverride, !!ruleText);
-      e.target.title = _dailyReqTitle(hasOverride, num, base, ruleText);
-      const cell = e.target.closest('td');
-      if (cell) cell.style.background = hasOverride ? 'var(--accent-soft)'
-        : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
+      const dl = _dailyReqCommit(e.target);
+      if (dl) recordDeltaHistory([dl]);   // 元に戻すで戻せるように（v273）
       autoSave(); recheckAfterRuleChange({ fromDailyPanel: true });
     });
   });
+}
+/**
+ * ②の日別必要人数の欄の数を決める（v273 で change の処理から分けた。決め方は前と同じ）。
+ * 空欄・「-」・上書きが無いときの数と同じ → 上書き解除。それ以外 → 上書き保存（v262）。
+ * 変えた所を元に戻すの履歴の形 [種類, シフト, 日, 前, 後] で返す（変わらなければ null）
+ */
+function _dailyReqCommit(el) {
+  const sh   = el.dataset.shift;
+  const day  = parseInt(el.dataset.day);
+  const dept = el.dataset.dept;
+  const def  = parseInt(el.dataset.default) || 0;
+  const b0   = parseInt(el.dataset.base);
+  const base = isNaN(b0) ? def : b0;   // 上書きが無いときの数（ルールが当たればルールの数）
+  const ruleText = el.dataset.ruleText || '';
+  const val  = el.value.trim();
+  const kind = dept === 'employee' ? 'dailyRequirements' : 'dailyRequirementsCast';
+  const map  = dept === 'employee' ? AppState.dailyRequirements : AppState.dailyRequirementsCast;
+  if (!map[sh]) map[sh] = {};
+  const before = map[sh][day];
+  // （既定と比べると、ルールの日に既定の数を入れられなかった。⑥の行と同じ決め方）
+  const num = parseInt(val);
+  const hasOverride = !(val === '' || val === '-' || isNaN(num) || num === base);
+  if (!hasOverride) {
+    delete map[sh][day];
+    if (val === '' || val === '-' || isNaN(num)) el.value = base; // 空なら上書きが無いときの数を表示に戻す
+  } else {
+    map[sh][day] = num;
+  }
+  // 見た目を即反映（上書きあり=黒太字＋黄背景 / ルールの日=点線の下線 / ふだん=薄字）
+  const w = getWeekday(AppState.settings.targetMonth, day);
+  el.style.cssText = _dailyReqStyle(hasOverride, !!ruleText);
+  el.title = _dailyReqTitle(hasOverride, num, base, ruleText);
+  const cell = el.closest('td');
+  if (cell) cell.style.background = hasOverride ? 'var(--accent-soft)'
+    : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
+  const after = map[sh][day];
+  return before === after ? null : [kind, sh, String(day), before, after];
+}
+/** ②のスキル要件の日別上書き（目標人数・最低ライン）の欄の数を決める。変えた所を ['dailySkills', [スキル, 欄], 日, 前, 後] で返す */
+function _dailySkillCommit(el) {
+  const name  = el.dataset.skill;
+  const field = el.dataset.sfield;
+  const day   = parseInt(el.dataset.day);
+  const def   = parseInt(el.dataset.default) || 0;
+  const val   = el.value.trim();
+  if (!AppState.dailySkills) AppState.dailySkills = {};
+  if (!AppState.dailySkills[name]) AppState.dailySkills[name] = {};
+  const map = AppState.dailySkills[name];
+  const before = (map[day] || {})[field];
+  const num = parseInt(val);
+  const hasOverride = !(val === '' || val === '-' || isNaN(num) || num === def);
+  if (!hasOverride) {
+    if (map[day]) { delete map[day][field]; if (!Object.keys(map[day]).length) delete map[day]; }
+    if (val === '' || val === '-') el.value = def;
+  } else {
+    if (!map[day]) map[day] = {};
+    map[day][field] = num;
+  }
+  const w = getWeekday(AppState.settings.targetMonth, day);
+  el.style.fontWeight = hasOverride ? '700' : '400';
+  el.style.color      = hasOverride ? 'var(--text)' : 'var(--text-muted)';
+  const cell = el.closest('td');
+  if (cell) cell.style.background = hasOverride ? 'var(--accent-soft)'
+    : ((w === 0 || w === 6) ? 'var(--surface-2)' : 'var(--surface)');
+  const after = (map[day] || {})[field];
+  return before === after ? null : ['dailySkills', [name, field], String(day), before, after];
+}
+
+// ===== 日別の必要人数を、キーボードで続けて入れる（v273） =====
+// ②の日別必要人数の表（.daily-req-input・.daily-skill-input）と、⑥の必要人数の行（.summary-req-input）で同じ動き。
+//  ・クリック・Tab で入ると数字を全部選ぶ（打つと置き換わる。前はクリックだと後ろにつながり「1」に「2」で「21」になった）
+//  ・Enter で決めて同じ行の次の日、Shift+Enter で前の日。月の最初・最後の日では、その日にとどまる（決めるのは同じ）
+//  ・↑↓ で同じ日の上・下の行へ（数字は変えない）。いちばん上・下の行ではとどまる。ホイールでも数字を変えない（ページを送る）
+//  ・同じ行の何日かを選ぶ: Shift を押しながら日をクリック・なぞる・Shift+←→。数字を打って Enter で選んだ日すべてに入れる。Esc でやめる
+// 決め方（上書きが無いときの数と同じなら上書きを消す。v262）は、各欄の決める処理（_dailyReqCommit・_dailySkillCommit・_summaryReqCommit）のまま。
+// ⑥は決めると表を描き直すので、描き直したあとも同じマスに入力の場所を戻す（renderResultTable の _rqSaveFocus・_rqRestoreFocus）。
+// 計算中は今までどおり欄の入力を止める（milp.v6.js の鍵。Enter・↑↓で場所を移るのは通す）。
+const RQ_SEL = '.daily-req-input, .daily-skill-input, .summary-req-input';
+const RQ_SEP = '\u0001';
+let _rqRange = null;     // まとめて入れる日: { g: 'r'（⑥）／'d'（②）, row: 行, a: 選び始めた日, b: いまの日 }
+let _rqDrag = null;      // なぞって選んでいる間: { g, row, a }
+let _rqPointer = '';     // 直前に押したもの（mouse／touch／pen）
+let _rqRestoring = false;
+const _rqStart = new WeakMap();   // 欄に入ったときの値（Esc で戻す・打った途中の数字を運ぶ）
+
+const _rqIs = (el) => !!(el && el.matches && el.matches(RQ_SEL));
+function _rqG(el) { return el.classList.contains('summary-req-input') ? 'r' : 'd'; }
+function _rqRowId(el) {
+  const d = el.dataset;
+  if (el.classList.contains('summary-req-input')) return ['s', d.gkey, d.key].join(RQ_SEP);
+  if (el.classList.contains('daily-req-input')) return ['d', d.dept, d.shift].join(RQ_SEP);
+  return ['k', d.skill, d.sfield].join(RQ_SEP);
+}
+function _rqGridEl(g) { return g === 'r' ? document.getElementById('resultTable') : document.querySelector('#dailyReqContent .dailyreq-table'); }
+/** 表の欄を行ごとに: 行 → { 日: 欄 }（並びは画面の上から） */
+function _rqRows(g) {
+  const rows = new Map(), grid = _rqGridEl(g);
+  if (!grid) return rows;
+  grid.querySelectorAll(RQ_SEL).forEach(el => {
+    const r = _rqRowId(el);
+    if (!rows.has(r)) rows.set(r, {});
+    rows.get(r)[parseInt(el.dataset.day, 10)] = el;
+  });
+  return rows;
+}
+function _rqFind(g, row, day) { const r = _rqRows(g).get(row); return r ? (r[day] || null) : null; }
+function _rqSelectAll(el) { try { el.select(); } catch (_) {} }
+const _rqDirty = (el) => { const s = _rqStart.get(el); return s != null && el.value !== s; };
+
+/** その欄へ入力の場所を移し、数字を全部選ぶ。前の欄の決める処理（change）は、離れたときに今までどおり走る */
+function _rqFocus(el) {
+  if (!el) return;
+  const g = _rqG(el), row = _rqRowId(el), day = parseInt(el.dataset.day, 10);
+  el.focus({ preventScroll: true });
+  if (!el.isConnected || document.activeElement !== el) {   // 前の欄の処理で表が描き直されていたら、同じマスを探し直す
+    el = _rqFind(g, row, day);
+    if (!el) return;
+    el.focus({ preventScroll: true });
+  }
+  _rqSelectAll(el);
+  _rqKeepVisible(el);
+}
+/** 打った途中の数字を、別の日の欄へ運ぶ（まとめて選ぶ日を広げたとき。前の欄には入れない） */
+function _rqFocusCarry(from, to) {
+  const typed = _rqIs(from) && _rqDirty(from) ? from.value : null;
+  if (typed != null) from.value = _rqStart.get(from);   // 前の欄は入ったときの数に戻す（離れても決める処理が走らない）
+  _rqFocus(to);
+  const cur = document.activeElement;
+  if (typed != null && _rqIs(cur)) { cur.value = typed; _rqSelectAll(cur); }
+}
+/** 今の欄を決めて、上下（dRow）・前後（dDay）の欄へ。行の端・月の端では、その欄にとどまる */
+function _rqStep(el, dRow, dDay) {
+  const g = _rqG(el), row = _rqRowId(el), day = parseInt(el.dataset.day, 10);
+  const rows = _rqRows(g), ids = [...rows.keys()];
+  const i = ids.indexOf(row) + dRow, d = day + dDay;
+  const t = i >= 0 && i < ids.length ? rows.get(ids[i])[d] : null;
+  if (t && t !== el) { _rqFocus(t); return; }
+  // とどまるときも、打った数字は決める（離れて戻ると、決める処理が走る）
+  if (_rqDirty(el)) { el.blur(); _rqFocus(_rqFind(g, row, day) || el); }
+  else { _rqSelectAll(el); _rqKeepVisible(el); }
+}
+/** まとめて入れる日の色を付け直す（描き直したあとも） */
+function _rqPaint() {
+  document.querySelectorAll('td.rq-sel').forEach(td => td.classList.remove('rq-sel'));
+  const r = _rqRange;
+  if (!r) return;
+  const cells = _rqRows(r.g).get(r.row);
+  if (!cells) { _rqRange = null; return; }
+  for (let d = Math.min(r.a, r.b); d <= Math.max(r.a, r.b); d++) { const td = cells[d] && cells[d].closest('td'); if (td) td.classList.add('rq-sel'); }
+}
+function _rqClearRange() { if (_rqRange) { _rqRange = null; _rqPaint(); } }
+function _rqInRange(el) {
+  const r = _rqRange;
+  if (!r || !_rqIs(el) || _rqG(el) !== r.g || _rqRowId(el) !== r.row) return false;
+  const d = parseInt(el.dataset.day, 10);
+  return d >= Math.min(r.a, r.b) && d <= Math.max(r.a, r.b);
+}
+/** 選んだ日すべてに、今の欄の数字を入れる（Enter）。決め方は1日ずつのときと同じ。元に戻すの履歴には1回分で積む */
+function _rqApplyRange(el) {
+  const r = _rqRange;
+  if (!r) return;
+  if (typeof calcBusy === 'function' && calcBusy()) { calcBusyToast(); return; }
+  const g = r.g, row = r.row, lo = Math.min(r.a, r.b), hi = Math.max(r.a, r.b);
+  const cellsOf = _rqRows(g).get(row) || {};
+  const cells = [];
+  for (let d = lo; d <= hi; d++) if (cellsOf[d]) cells.push(cellsOf[d]);
+  const val = el.value;
+  // v272 の「きつい日の知らせ」: 変える前の数を控える（各欄の change を通らないため）
+  if (typeof _tightOnEvent === 'function') _tightOnEvent({ type: 'change', target: el });
+  // 今の欄は入ったときの数に戻してから離れる（離れたときに1日分だけ決める処理が走らないように）
+  if (_rqStart.has(el)) el.value = _rqStart.get(el);
+  el.blur();
+  _rqRange = null; _rqPaint();
+  const kind = el.classList.contains('summary-req-input') ? 's' : el.classList.contains('daily-req-input') ? 'd' : 'k';
+  const res = cells.map(c => {
+    c.value = val;
+    if (kind === 's') return _summaryReqCommit(c);
+    return { delta: kind === 'd' ? _dailyReqCommit(c) : _dailySkillCommit(c) };
+  });
+  const deltas = res.map(x => x.delta).filter(Boolean);
+  if (deltas.length) recordDeltaHistory(deltas);
+  if (kind === 's') _summaryReqAfter(res, true);
+  else {
+    autoSave(); recheckAfterRuleChange({ fromDailyPanel: true });
+    _rqNoteRoles(cells, val, deltas);
+  }
+  // 選んだ日の次の日へ（月の最後の日まで選んだときは、最後の日にとどまる）
+  _rqFocus(_rqFind(g, row, hi + 1) || _rqFind(g, row, hi));
+}
+/** ②でまとめて入れたあとの知らせ（表の上の文。元に戻すのボタンつき） */
+let _rqRolesDelta = null;
+function _rqNoteRoles(cells, val, deltas) {
+  const box = document.getElementById('rqMsgRoles');
+  if (!box) return;
+  const c0 = cells[0], cz = cells[cells.length - 1];
+  const rowName = (c0.closest('tr') && c0.closest('tr').firstElementChild) ? c0.closest('tr').firstElementChild.textContent.trim() : '';
+  const days = `${c0.dataset.day}〜${cz.dataset.day}日（${cells.length}日分）`;
+  const num = parseInt(String(val).trim());
+  const what = isNaN(num) ? '上書きを消しました（ふだんの数・必要人数のルールの数に戻ります）' : `を ${num}人 にしました`;
+  _rqRolesDelta = deltas.length ? deltas : null;
+  box.hidden = false;
+  box.innerHTML = `<span>${escapeHtml(`${days}の「${rowName}」${isNaN(num) ? 'の' : ''}${what}。`)}</span>`
+    + (deltas.length ? '<button type="button" class="btn btn-ghost" data-rq-undo="1">元に戻す</button>' : '<span class="hint">（数は変わりませんでした）</span>');
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest && e.target.closest('[data-rq-undo]');
+    if (!b) return;
+    const box = document.getElementById('rqMsgRoles');
+    // いちばん新しい履歴が、そのまとめて入れた分のときだけ戻す（あとでほかの変更をしていたら、⑥の「元に戻す」で順に戻す）
+    const top = _undoStack[_undoStack.length - 1];
+    if (!_rqRolesDelta || !top || top.delta !== _rqRolesDelta) {
+      if (box) box.innerHTML = '<span>そのあとにほかの変更があるので、ここでは戻せません。<b>シフト表</b>の「元に戻す」で、新しい順に戻してください。</span>';
+      return;
+    }
+    undoShiftEdit();
+    _rqRolesDelta = null;
+    if (box) box.innerHTML = '<span>まとめて入れた分を元に戻しました（「やり直す」で、もう一度入れられます）。</span>';
+  });
+  // 押したものの種類を覚える（指で押したときは、キーボードを出すため、ふだんどおりに欄へ入れる）
+  document.addEventListener('pointerdown', (e) => { _rqPointer = e.pointerType || ''; }, true);
+  document.addEventListener('mousedown', (e) => {
+    const el = _rqIs(e.target) ? e.target : null;
+    if (!el || e.button !== 0 || (_rqPointer && _rqPointer !== 'mouse')) return;
+    e.preventDefault();   // 数字の間に入らず、数字を全部選ぶ（打つと置き換わる）
+    const g = _rqG(el), row = _rqRowId(el), day = parseInt(el.dataset.day, 10);
+    const cur = document.activeElement;
+    if (e.shiftKey) {
+      const anchor = (_rqRange && _rqRange.g === g && _rqRange.row === row) ? _rqRange.a
+        : (_rqIs(cur) && _rqG(cur) === g && _rqRowId(cur) === row ? parseInt(cur.dataset.day, 10) : null);
+      if (anchor != null && anchor !== day) {
+        _rqRange = { g, row, a: anchor, b: day };
+        _rqPaint();
+        _rqFocusCarry(cur, el);
+        return;
+      }
+    }
+    _rqClearRange();
+    _rqDrag = { g, row, a: day };
+    if (cur === el) { _rqSelectAll(el); return; }
+    _rqFocus(el);
+  });
+  // なぞって選ぶ（同じ行の中だけ）
+  document.addEventListener('mousemove', (e) => {
+    if (!_rqDrag) return;
+    if (!(e.buttons & 1)) { _rqDragEnd(); return; }
+    const t = document.elementFromPoint(e.clientX, e.clientY);
+    const el = _rqIs(t) ? t : (t && t.closest && t.closest('td') ? t.closest('td').querySelector(RQ_SEL) : null);
+    if (!el || _rqG(el) !== _rqDrag.g || _rqRowId(el) !== _rqDrag.row) return;
+    const d = parseInt(el.dataset.day, 10);
+    if (!_rqRange && d === _rqDrag.a) return;
+    if (_rqRange && _rqRange.b === d) return;
+    _rqRange = { g: _rqDrag.g, row: _rqDrag.row, a: _rqDrag.a, b: d };
+    _rqPaint();
+  });
+  document.addEventListener('mouseup', () => { if (_rqDrag) _rqDragEnd(); });
+  // ホイールでは数字を変えない（ページを送る）。読み取りだけにしている間は、数字の欄がホイールで数を変えない
+  document.addEventListener('wheel', (e) => {
+    const el = _rqIs(e.target) ? e.target : null;
+    if (!el || document.activeElement !== el || el.readOnly) return;
+    el.readOnly = true;
+    setTimeout(() => { el.readOnly = false; }, 0);
+  }, { capture: true, passive: true });
+  document.addEventListener('focusin', (e) => {
+    const el = e.target;
+    if (!_rqIs(el)) { if (_rqRange && !_rqDrag) _rqClearRange(); return; }
+    if (_rqRange && !_rqInRange(el)) _rqClearRange();
+    if (_rqRestoring) return;
+    _rqStart.set(el, el.value);
+    _rqSelectAll(el);
+    // 指で押したときは、押したあとに字の間へ入ることがあるので、もう一度全部選ぶ
+    if (_rqPointer && _rqPointer !== 'mouse') setTimeout(() => { if (document.activeElement === el && !_rqDirty(el)) _rqSelectAll(el); }, 60);
+  });
+  document.addEventListener('keydown', (e) => {
+    const el = _rqIs(e.target) ? e.target : null;
+    if (!el) return;
+    if (e.isComposing || e.keyCode === 229) return;   // 日本語入力の確定中は、入力に任せる
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const g = _rqG(el), row = _rqRowId(el), day = parseInt(el.dataset.day, 10);
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (_rqRange && _rqInRange(el) && _rqRange.a !== _rqRange.b) { _rqApplyRange(el); return; }
+      _rqClearRange();
+      _rqStep(el, 0, e.shiftKey ? -1 : 1);
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();   // 数字を1つ増やす・減らすのはやめ、行を移る
+      _rqClearRange();
+      _rqStep(el, e.key === 'ArrowUp' ? -1 : 1, 0);
+    } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.shiftKey) {
+      e.preventDefault();
+      const to = _rqFind(g, row, day + (e.key === 'ArrowLeft' ? -1 : 1));
+      if (!to) return;
+      const a = (_rqRange && _rqInRange(el)) ? _rqRange.a : day;
+      _rqRange = { g, row, a, b: parseInt(to.dataset.day, 10) };
+      if (_rqRange.a === _rqRange.b) _rqRange = null;
+      _rqPaint();
+      _rqFocusCarry(el, to);
+    } else if (e.key === 'Escape') {
+      const had = !!_rqRange, dirty = _rqDirty(el);
+      if (!had && !dirty) return;
+      e.preventDefault(); e.stopPropagation();   // 理由の枠を閉じる Esc とは分ける（もう一度押すと閉じる）
+      _rqClearRange();
+      if (dirty) el.value = _rqStart.get(el);
+      _rqSelectAll(el);
+    }
+  });
+}
+function _rqDragEnd() {
+  const dr = _rqDrag; _rqDrag = null;
+  const r = _rqRange;
+  if (!dr || !r || r.g !== dr.g || r.row !== dr.row) return;
+  const end = _rqFind(r.g, r.row, r.b);
+  if (end && document.activeElement !== end) _rqFocusCarry(document.activeElement, end);
+}
+/** 描き直す前に、入れている欄（と、⑥の「理由を見る」の数のボタン）を覚える */
+function _rqSaveFocus() {
+  const a = document.activeElement;
+  if (_rqIs(a)) return { g: _rqG(a), row: _rqRowId(a), day: parseInt(a.dataset.day, 10), value: a.value, start: _rqStart.get(a) };
+  if (a && a.matches && a.matches('[data-sw-day]')) return { sw: [a.dataset.swDay, a.dataset.swKey, a.dataset.swG] };
+  return null;
+}
+/** 描き直したあとに、同じマスへ入力の場所を戻す（その間にほかの所へ移っていたら、何もしない） */
+function _rqRestoreFocus(s) {
+  if (!s) return;
+  const a = document.activeElement;
+  if (a && a !== document.body && a.isConnected) return;
+  if (s.sw) {
+    const b = Array.from(document.querySelectorAll('[data-sw-day]')).find(x => x.dataset.swDay === s.sw[0] && x.dataset.swKey === s.sw[1] && x.dataset.swG === s.sw[2]);
+    if (b) b.focus({ preventScroll: true });
+    return;
+  }
+  const el = _rqFind(s.g, s.row, s.day);
+  if (!el) return;
+  _rqRestoring = true;
+  try { el.focus({ preventScroll: true }); } finally { _rqRestoring = false; }
+  const start = s.start != null ? s.start : el.value;
+  // まだ決めていない打った途中の数字は、そのまま残す
+  if (s.value !== start) el.value = s.value;
+  _rqStart.set(el, s.value !== start ? start : el.value);
+  _rqSelectAll(el);
+}
+/**
+ * 入れている欄が、画面の上のヘッダー・下に貼り付いた知らせ（v272）・理由の枠・左の名前の列に隠れないように送る。
+ * 知らせは入れている途中に出ることがあるので、出したとき（renderTightAlert）にも呼ぶ
+ */
+function _rqKeepVisible(el) {
+  el = el || document.activeElement;
+  if (!_rqIs(el) || !el.isConnected) return;
+  const r = el.getBoundingClientRect();
+  if (!r.height) return;
+  const head = document.querySelector('.app-header');
+  const top = head ? Math.max(0, head.getBoundingClientRect().bottom) : 0;
+  let bottom = window.innerHeight;
+  document.querySelectorAll('.req-margin-alert:not([hidden]), #shortPanel:not([hidden])').forEach(b => {
+    const br = b.getBoundingClientRect();
+    if (br.height && br.top < bottom && br.bottom > r.top && br.left < r.right && br.right > r.left) bottom = Math.min(bottom, br.top);
+  });
+  if (r.bottom > bottom - 6) window.scrollBy(0, r.bottom - bottom + 12);
+  else if (r.top < top + 6) window.scrollBy(0, r.top - top - 12);
+  // 横: 表の枠の中で、左に貼り付いた名前の列の右へ
+  const sc = el.closest('.table-wrap, #dailyReqContent > div');
+  if (sc) {
+    const sr = sc.getBoundingClientRect(), tr = el.closest('tr');
+    const first = tr && tr.firstElementChild;
+    const left = sr.left + (first && first !== el.closest('td') ? first.getBoundingClientRect().width : 0);
+    const r2 = el.getBoundingClientRect();
+    if (r2.left < left + 2) sc.scrollLeft -= (left - r2.left + 8);
+    else if (r2.right > sr.right - 2) sc.scrollLeft += (r2.right - sr.right + 8);
+  }
 }
 
 
@@ -3181,6 +3509,8 @@ function renderTightAlert(panel, m) {
   });
   box.querySelector('[data-tight-go]').addEventListener('click', () => tightShowCalendar(panel));
   box.querySelector(cal ? '#rmaClose' : '[data-tight-close]').addEventListener('click', () => { hide(); if (cal) scheduleRequestAlerts(); });
+  // ②・⑥で必要人数を続けて入れている欄が、画面の下に出た知らせに隠れないように送る（v273。入力の場所は取らない）
+  _rqKeepVisible();
 }
 /** 「④で日ごとの数を見る」: ④を開いて、表のいちばん下の行の、知らせた日のマスを光らせる */
 function tightShowCalendar(panel) {
@@ -3391,7 +3721,80 @@ function renderShiftLegend() {
 
 // 表を描き直すたびに、⑤の生成の結果の文がいまの表のものかを見直す（手直し・入れ替え・自動修正など。A6）
 function renderResultTable() {
-  try { _renderResultTableInner(); } finally { syncGenerateResult(); try { renderResultBand(); } catch (_) {} }
+  // 必要人数の行で入れている途中に描き直しても、同じマスに入力の場所を戻す（v273。前は body に戻り、1つ入れるたびにクリックが要った）
+  const keep = _rqSaveFocus();
+  try { _renderResultTableInner(); } finally {
+    syncGenerateResult(); try { renderResultBand(); } catch (_) {}
+    _rqRestoreFocus(keep); _rqPaint();
+  }
+}
+/**
+ * ⑥の必要人数の行の欄の数を決める（v273 で change の処理から分けた。決め方は前と同じ）。
+ * 上書きが無いときの数と同じなら上書き解除（既定と比べると、ルールの日に既定の数を入れられなかった。v262）。
+ * 返り値: { delta: 元に戻すの履歴の形（変わらなければ null）, key, day, gkey, cleared, num, noOv }
+ */
+function _summaryReqCommit(el) {
+  const key  = el.dataset.key;
+  const day  = parseInt(el.dataset.day);
+  const dept = el.dataset.dept;
+  const def  = parseInt(el.dataset.default) || 0;
+  const base = parseInt(el.dataset.base);
+  const noOv = isNaN(base) ? def : base;   // 上書きが無いときの数（ルールが当たればルールの数）
+  const kind = dept === 'cast' ? 'dailyRequirementsCast' : 'dailyRequirements';
+  const map  = dept === 'cast' ? AppState.dailyRequirementsCast : AppState.dailyRequirements;
+  if (!map[key]) map[key] = {};
+  const before = map[key][day];
+  const num = parseInt(el.value);
+  const cleared = isNaN(num) || num === noOv;
+  if (cleared) delete map[key][day];
+  else map[key][day] = num;
+  const after = map[key][day];
+  return { delta: before === after ? null : [kind, key, String(day), before, after], key, day, gkey: el.dataset.gkey, cleared, num, noOv };
+}
+/** ⑥の必要人数を決めたあと: 保存・数え直し・表の描き直し（入力の場所を移したあとに描き直す）・②の表・知らせ */
+function _summaryReqAfter(list, bulk) {
+  if (typeof saveToStorage === 'function') saveToStorage();
+  AppState.violations = checkViolations(AppState.shifts);
+  // 色（過不足）を描き直す。次の欄へ移ってから描き直し、移った先に入力の場所を戻す（Tab・Enter・↑↓のどれでも）
+  _rqRenderResultSoon();
+  refreshDailyReqPanelIfOpen();   // ②の日別必要人数の表にも同じ数を出す
+  _summaryReqNote(list.filter(r => r.delta), bulk);
+}
+let _rqRenderTimer = null;
+function _rqRenderResultSoon() {
+  clearTimeout(_rqRenderTimer);
+  _rqRenderTimer = setTimeout(() => { _rqRenderTimer = null; renderResultTable(); }, 0);
+}
+// 知らせは、続けて入れている間はまとめて1回にする（v273。前は1つ入れるたびに出て、次の欄に重なっていた）
+let _sqNotes = [], _sqNoteTimer = null;
+function _summaryReqNote(list, bulk) {
+  if (!list.length) return;
+  const groups = getDepartmentGroups(AppState.staff);
+  const items = list.map(r => {
+    const g2 = groups.find(x => x.key === r.gkey);
+    // 知らせには、実際に決まった数を出す
+    const now = g2 ? getDayReq(g2.reqs, g2.dailyReqs || {}, r.key, r.day) : (r.cleared ? r.noOv : r.num);
+    const bInfo = g2 ? dayReqBase(g2.reqs, r.key, r.day) : null;
+    const why = (r.cleared && bInfo && bInfo.rule) ? `（必要人数のルール${bInfo.rule.names.map(n => `「${n}」`).join('')}の数です）` : '';
+    return { key: r.key, day: r.day, now, why };
+  });
+  if (bulk && items.length > 1) {
+    const a = items[0], z = items[items.length - 1];
+    const what = `${shiftSym(a.key)} ${a.day}〜${z.day}日（${items.length}日分）の必要人数`;
+    const same = items.every(x => x.now === a.now);
+    _sqNotes.push({ text: list.every(r => r.cleared) && !same ? `${what}の上書きを消しました（ふだんの数・必要人数のルールの数に戻ります）`
+      : `${what}を ${a.now} に設定` + (items.some(x => x.why) ? '（必要人数のルールの数と同じ日は、上書きを消しました）' : ''), long: true });
+  } else {
+    items.forEach(x => _sqNotes.push({ text: `${shiftSym(x.key)} ${x.day}日 の必要人数を ${x.now} に設定${x.why}`, short: `${shiftSym(x.key)} ${x.day}日→${x.now}`, long: !!x.why }));
+  }
+  clearTimeout(_sqNoteTimer);
+  _sqNoteTimer = setTimeout(() => {
+    const n = _sqNotes; _sqNotes = []; _sqNoteTimer = null;
+    if (!n.length) return;
+    if (n.length === 1) { toast(n[0].text, 'info', n[0].long ? 3000 : 1500); return; }
+    const sh = n.map(x => x.short || x.text);
+    toast(`必要人数を ${n.length}か所 変えました（${sh.slice(0, 4).join('、')}${n.length > 4 ? ` ほか${n.length - 4}か所` : ''}）。戻すときは「元に戻す」`, 'info', 3500);
+  }, 1200);
 }
 function _renderResultTableInner() {
   try { renderPartialIgnoreBanner(); } catch (_) {}
@@ -3538,7 +3941,7 @@ function _renderResultTableInner() {
           : `<div style="font-size:10px;color:var(--text-muted);line-height:1">${count}</div>`;
         cells += `<td class="${cls}${dsT ? ' ds-mark' : ''}" style="padding:0">
           ${countHtml}
-          <input type="number" min="0" max="99" value="${escapeHtml(dayReq)}"
+          <input type="number" min="0" max="99" value="${escapeHtml(dayReq)}" enterkeyhint="next" autocomplete="off"
             class="summary-req-input" data-key="${escapeHtml(key)}" data-day="${d}"
             data-dept="${deptKey}" data-gkey="${escapeHtml(g.key)}" data-default="${escapeHtml(defaultReq)}" data-base="${escapeHtml(bInfo.base)}"
             title="配置 ${count}人 / 必要 ${escapeHtml(dayReq)}人（この数字が定数。変更できます）${escapeHtml(ruleNote)}${dsT ? escapeHtml(' / ' + dsT) : ''}"
@@ -3558,29 +3961,9 @@ function _renderResultTableInner() {
     // 入力欄クリックでセル編集モーダルが開かないように伝播を止める
     el.addEventListener('click', e => e.stopPropagation());
     el.addEventListener('change', e => {
-      const key  = e.target.dataset.key;
-      const day  = parseInt(e.target.dataset.day);
-      const dept = e.target.dataset.dept;
-      const def  = parseInt(e.target.dataset.default) || 0;
-      const base = parseInt(e.target.dataset.base);
-      const noOv = isNaN(base) ? def : base;   // 上書きが無いときの数（ルールが当たればルールの数）
-      const map  = dept === 'cast' ? AppState.dailyRequirementsCast : AppState.dailyRequirements;
-      if (!map[key]) map[key] = {};
-      const num = parseInt(e.target.value);
-      // 上書きが無いときの数と同じなら上書き解除（既定と比べると、ルールの日に既定の数を入れられなかった）
-      const cleared = isNaN(num) || num === noOv;
-      if (cleared) delete map[key][day];
-      else map[key][day] = num;
-      if (typeof saveToStorage === 'function') saveToStorage();
-      AppState.violations = checkViolations(AppState.shifts);
-      renderResultTable(); // 色（過不足）を更新
-      refreshDailyReqPanelIfOpen();   // ②の日別必要人数の表にも同じ数を出す
-      // 知らせには、実際に決まった数を出す
-      const g2 = getDepartmentGroups(AppState.staff).find(x => x.key === e.target.dataset.gkey);
-      const now = g2 ? getDayReq(g2.reqs, g2.dailyReqs || {}, key, day) : (cleared ? noOv : num);
-      const bInfo = g2 ? dayReqBase(g2.reqs, key, day) : null;
-      const why = (cleared && bInfo && bInfo.rule) ? `（必要人数のルール${bInfo.rule.names.map(n => `「${n}」`).join('')}の数です）` : '';
-      toast(`${shiftSym(key)} ${day}日 の必要人数を ${now} に設定${why}`, 'info', why ? 3000 : 1500);
+      const r = _summaryReqCommit(e.target);
+      if (r.delta) recordDeltaHistory([r.delta]);   // 元に戻すで戻せるように（v273）
+      _summaryReqAfter([r]);
     });
   });
 
@@ -3828,6 +4211,14 @@ function _applyChangeList(list, dir, T, kinds) {
       if (s && s.paidLeave === want) s.paidLeave = set;
       return;
     }
+    if (k === 'dailySkills') {                   // ②のスキル要件の日別上書き（v273）: id は [スキル名, 'req'／'min']
+      const [name, field] = id;
+      const M = T.dailySkills || (T.dailySkills = {});
+      if (((M[name] || {})[d] || {})[field] !== want) return;
+      if (set === undefined) { if (M[name] && M[name][d]) { delete M[name][d][field]; if (!Object.keys(M[name][d]).length) delete M[name][d]; } }
+      else { M[name] = M[name] || {}; M[name][d] = M[name][d] || {}; M[name][d][field] = set; }
+      return;
+    }
     const M = T[k] || (T[k] = {});
     const row = M[id] || {};
     if (row[d] !== want) return;                 // あとから変えられた所は触らない
@@ -3970,6 +4361,7 @@ function _rebaseSnapWith(list, dir, T, kinds, rec) {
   (list || []).forEach(c => {
     const [k, id, d, from, to] = c;
     if (kinds && !kinds.includes(k)) return;
+    if (k === 'dailySkills') return;   // 控え（🧭・🩹）はスキル要件の日別上書きを持たない（v273）
     let get, put;
     if (k === 'paid') {
       const s = (T.staff || []).find(x => x.id === id);
@@ -4055,8 +4447,13 @@ function _redoSaveForSnap(redoBefore) {
   const n = _undoStack.length - 1;   // 積んだ組（いちばん上）を除いた数
   return { redo: redoBefore || [], undoLen: n, undoTop: n > 0 ? _undoStack[n - 1] : null };
 }
-function _afterHistoryApply(touchedStaff) {
+function _afterHistoryApply(touchedStaff, delta) {
   try { _afterHistoryApplyInner(touchedStaff); } finally { syncGenerateResult(); }
+  // 日ごとの必要人数・スキル要件を戻した・やり直したとき（v273）: ②の表、④の「あと何人休めるか」ときつい日の知らせも数え直す
+  if (delta && delta.some(c => /^daily/.test(c[0]))) {
+    refreshDailyReqPanelIfOpen();
+    if (typeof scheduleCalendarMargins === 'function') scheduleCalendarMargins();
+  }
 }
 function _afterHistoryApplyInner(touchedStaff) {
   AppState.violations  = checkViolations(AppState.shifts);
@@ -4121,6 +4518,9 @@ function resetShiftHistory() {
   _undoStack = [];
   _redoStack = []; _redoBeforeRecord = null;
   updateHistoryButtons();
+  // ②の「まとめて入れました（元に戻す）」の知らせも消す（v273。戻す先の履歴が無くなるため）
+  const m = typeof document !== 'undefined' && document.getElementById('rqMsgRoles');
+  if (m && !m.hidden) { m.hidden = true; m.innerHTML = ''; }
 }
 
 function _applyShiftState(st) {
@@ -4139,7 +4539,7 @@ function undoShiftEdit() {
     _applyChangeList(st.delta, 'undo');
     if (!st.noRebase) _rebaseSnaps(st.delta, 'undo');
     _redoStack.push(st);
-    _afterHistoryApply(st.delta.some(c => c[0] === 'paid'));
+    _afterHistoryApply(st.delta.some(c => c[0] === 'paid'), st.delta);
   } else if (st.gen) {                          // 生成する前の表へ戻す
     _redoStack.push(_swapGenState(st));
     updateHistoryButtons();
@@ -4160,7 +4560,7 @@ function redoShiftEdit() {
     _applyChangeList(st.delta, 'redo');
     if (!st.noRebase) _rebaseSnaps(st.delta, 'redo');
     _undoStack.push(st);
-    _afterHistoryApply(st.delta.some(c => c[0] === 'paid'));
+    _afterHistoryApply(st.delta.some(c => c[0] === 'paid'), st.delta);
   } else if (st.gen) {                          // 生成した表へ進める
     _undoStack.push(_swapGenState(st));
     updateHistoryButtons();

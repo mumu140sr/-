@@ -7,11 +7,11 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=272" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=272" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=272" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=272">
-<link rel="stylesheet" href="css/style.css?v=272" />
+<link rel="icon" href="favicon.svg?v=273" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=273" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=273" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=273">
+<link rel="stylesheet" href="css/style.css?v=273" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -72,7 +72,7 @@
     <!-- 読み込まれているバージョン。画面が更新されていないときの切り分け用。
          js の ?v=NNN と揃えて上げること。 -->
     <span id="appVersion" class="hint" style="margin-left:8px;font-size:11px;opacity:.7"
-          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v272</span>
+          title="このページが読み込んでいるバージョンです。変更が反映されないときは Ctrl+F5 で再読み込みしてください">v273</span>
   </div>
   <div class="header-actions">
     <!-- 「データ」メニュー：今のボタンそのものを中に置く（id はそのまま。開閉は js/ui-shell.v6.js） -->
@@ -248,6 +248,9 @@
       <h3 class="calc-view-only" style="cursor:pointer" onclick="toggleDailyReqPanel()">日別必要人数（上書き設定） <span id="dailyReqToggle">▶ 展開</span></h3>
       <div id="dailyReqPanel" style="display:none">
         <p class="hint">特定の日だけ必要人数を変えたい場合に入力してください。空欄または「-」の日はデフォルト値を使用します。</p>
+        <!-- v273: キーボードで続けて入れる・まとめて入れる（js/ui.v6.js の「日別の必要人数を、キーボードで続けて入れる」） -->
+        <p class="hint rq-help">数字を打って <span class="rq-key">Enter</span> で次の日、<span class="rq-key">Shift</span>＋<span class="rq-key">Enter</span> で前の日、<span class="rq-key">↑</span><span class="rq-key">↓</span> で上・下の行へ移ります。何日か同じ数にするときは、<span class="rq-key">Shift</span> を押しながら日をクリック（または、なぞる・<span class="rq-key">Shift</span>＋<span class="rq-key">←</span><span class="rq-key">→</span>）して選び、数字を打って <span class="rq-key">Enter</span> を押すと、選んだ日すべてに入ります（<span class="rq-key">Esc</span> でやめる）。</p>
+        <div id="rqMsgRoles" class="rq-msg" role="status" aria-live="polite" hidden></div>
         <div id="dailyReqContent"></div>
       </div>
     </div>
@@ -498,6 +501,8 @@
         <div id="partialIgnoreBar" style="display:none"></div>
         <table id="resultTable" class="result-table"></table>
       </div>
+      <!-- v273: 必要人数の行をキーボードで続けて入れる・まとめて入れる（js/ui.v6.js） -->
+      <p class="hint rq-help">表の下のほうの必要人数の行（「早 (必要2)」など）の数字は、打って <span class="rq-key">Enter</span> で次の日、<span class="rq-key">↑</span><span class="rq-key">↓</span> で上・下の行へ移ります。<span class="rq-key">Shift</span> を押しながら日をクリック（または、なぞる）すると何日かまとめて選べ、数字を打って <span class="rq-key">Enter</span> で選んだ日すべてに入ります（<span class="rq-key">Esc</span> でやめる）。戻すときは「元に戻す」を押します。</p>
     </div>
     <div class="card">
       <h3>集計</h3>
@@ -529,13 +534,13 @@
   </div>
 </div>
 
-<script src="js/data.v6.js?v=272"></script>
-<script src="js/optimizer.v6.js?v=272"></script>
-<script src="js/worker-client.v6.js?v=272"></script>
-<script src="js/ai-explain.v6.js?v=272"></script>
-<script src="js/ui.v6.js?v=272"></script>
-<script src="js/milp.v6.js?v=272"></script>
-<script src="js/app.v6.js?v=272"></script>
-<script src="js/ui-shell.v6.js?v=272"></script>
+<script src="js/data.v6.js?v=273"></script>
+<script src="js/optimizer.v6.js?v=273"></script>
+<script src="js/worker-client.v6.js?v=273"></script>
+<script src="js/ai-explain.v6.js?v=273"></script>
+<script src="js/ui.v6.js?v=273"></script>
+<script src="js/milp.v6.js?v=273"></script>
+<script src="js/app.v6.js?v=273"></script>
+<script src="js/ui-shell.v6.js?v=273"></script>
 </body>
 </html>

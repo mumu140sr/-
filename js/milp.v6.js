@@ -146,6 +146,9 @@ function _calcInputGuard(e) {
   // 欄に入ったとき・日本語入力を始めたとき・書き換わる直前は、元の値を控える（止めはしない）
   if (e.type === 'focusin' || e.type === 'compositionstart') { if (field) _calcHoldField(field); return; }
   if (e.type === 'keydown' && ['Tab', 'Shift', 'Escape'].includes(e.key)) return;
+  // v273: 日別の必要人数の欄は、Enter・↑↓・Shift+←→ で場所を移るのを通す（数は変わらない。まとめて入れるのは ui.v6.js が計算中に断る）
+  if (e.type === 'keydown' && t.matches && t.matches('.daily-req-input, .daily-skill-input, .summary-req-input') &&
+      (['Enter', 'ArrowUp', 'ArrowDown'].includes(e.key) || (e.shiftKey && ['ArrowLeft', 'ArrowRight'].includes(e.key)))) return;
   const b = t.closest('button');
   if (b && /^(×|✕|閉じる)$/.test((b.textContent || '').trim())) return;
   if (t.classList && t.classList.contains('calc-lock-area')) return;   // 暗幕そのもの（閉じる）
@@ -204,7 +207,7 @@ function milpTrial(payload, variant, timeOverride) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=272'); }
+    try { worker = new Worker('js/milp.worker.js?v=273'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     const untrack = _milpTrack(worker, () => { clearTimeout(timeout); reject(new Error(MILP_CANCEL_MSG)); });
     const timeout = setTimeout(() => { untrack(); try { worker.terminate(); } catch (_) {} reject(new Error('タイムアウト')); }, 600000);
@@ -300,7 +303,7 @@ function _milpOnce(onProgress, opts, variant) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') { reject(new Error('このブラウザは数理最適化(Worker)に非対応です')); return; }
     let worker;
-    try { worker = new Worker('js/milp.worker.js?v=272'); }
+    try { worker = new Worker('js/milp.worker.js?v=273'); }
     catch (e) { reject(new Error('数理最適化Workerを起動できません: ' + e.message)); return; }
     // 1部門あたり最大10分。部門数ぶん待てるよう十分な余裕を持たせる（誤タイムアウト防止）
     const timeout = setTimeout(() => { cleanup(); try { worker.terminate(); } catch (_) {} reject(new Error('数理最適化がタイムアウトしました（30分）')); }, 1800000);

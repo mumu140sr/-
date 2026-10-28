@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=272" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=272" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=272" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=272">
+<link rel="icon" href="favicon.svg?v=273" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=273" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=273" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=273">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=272" />
+<link rel="stylesheet" href="css/style.css?v=273" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -364,6 +364,17 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>「研」（研修）は、必要人数に数えません。</li>
         </ul>
       </details>
+      <div class="m-howto" id="reqinput">
+        <h4>日別の人数を続けて入れるとき</h4>
+        <p>「<span class="m-ui">日別必要人数（上書き設定）</span>」の表と、<span class="m-tab" data-n="6">シフト表</span> の下の必要人数の行で、同じように入れられます。</p>
+        <ol>
+          <li>人数を変えたい日の数字をクリックします。数字が全部選ばれるので、そのまま打つと置き換わります。</li>
+          <li>数字を打って <span class="m-key">Enter</span> を押すと、決まって、次の日へ移ります。続けて打てます。前の日へは <span class="m-key">Shift</span>+<span class="m-key">Enter</span>、同じ日の上・下の行（別のシフト）へは <span class="m-key">↑</span> <span class="m-key">↓</span> です（<span class="m-key">↑</span> <span class="m-key">↓</span> で数字は変わりません）。月の最後の日で <span class="m-key">Enter</span> を押すと、その日にとどまります。</li>
+          <li>何日か同じ数にするときは、始めの日をクリックしてから、<span class="m-key">Shift</span> を押しながら終わりの日をクリックします（マウスでなぞる・<span class="m-key">Shift</span>+<span class="m-key">←</span> <span class="m-key">→</span> でも選べます。同じ行の中だけ）。選んだ日には色が付きます。数字を打って <span class="m-key">Enter</span> を押すと、選んだ日すべてに入ります。やめるときは <span class="m-key">Esc</span> です（打った数字も消えます）。</li>
+          <li>まちがえたときは、<span class="m-tab" data-n="6">シフト表</span> の <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> で戻せます（まとめて入れた分は1回で戻ります）。「<span class="m-ui">日別必要人数（上書き設定）</span>」でまとめて入れたときは、表の上に出る知らせの <span class="m-btn">元に戻す</span> でも戻せます。</li>
+        </ol>
+        <p>決め方は1日ずつ入れるときと同じです（ふだんの人数・必要人数のルールの人数と同じ数を入れると、その日の上書きは消えます）。<span class="m-tab" data-n="6">シフト表</span> の必要人数の行で続けて入れたときは、画面の右下の知らせはまとめて1回だけ出ます。スマホのキーボードに「次へ」が出るときは、押すと次の日へ移ります。</p>
+      </div>
       <div class="m-howto" id="addshift">
         <h4>新しいシフトを足すとき</h4>
         <p><span class="m-btn out"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>シフト追加</span> を押すと、6つの質問が出ます。答えてから <span class="m-btn pri"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>このシフトを足す</span> を押します。<span class="m-btn">やめる</span> を押すと、何も足しません。</p>
@@ -503,6 +514,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
         <dt>気をつけること</dt><dd><ul>
           <li>マスを押して変えたマスは、固定されます。作り直しても動きません。</li>
           <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> は、ページを読み込み直すと使えません。</li>
+          <li>表の下の必要人数の行の数字は、打って <span class="m-key">Enter</span> で次の日、<span class="m-key">↑</span> <span class="m-key">↓</span> で上・下の行へ移ります。<span class="m-key">Shift</span> を押しながら日をクリックすると、何日かまとめて入れられます（<a href="#reqinput">日別の人数を続けて入れるとき</a>）。</li>
           <li>表の下の必要人数の行で人数を変えて、その日の「<span class="m-ui">あと何人休めるか</span>」（<span class="m-tab" data-n="4">希望休入力</span> の表のいちばん下の行）がマイナス・0になる日や、1以下の日が続く所が新しくできると、この画面の下に知らせが出ます。<span class="m-btn">④で日ごとの数を見る</span> で、その日の数を見られます（くわしくは <span class="m-tab" data-n="4">希望休入力</span> の説明）。</li>
         </ul></dd>
       </dl>
@@ -527,7 +539,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           </li>
           <li>マスを押すと「<span class="m-ui">シフト編集</span>」が出ます。選んだものに変わり、そのマスは固定されます。「―」を選ぶと空になり、固定も外れます。</li>
           <li>マスをドラッグして別のマスに落とすと、2つが入れ替わります。入れ替えただけでは、新しく固定されません。</li>
-          <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-redo"/></svg>やり直す</span> は、この画面では <span class="m-key">Ctrl</span>+<span class="m-key">Z</span>・<span class="m-key">Ctrl</span>+<span class="m-key">Y</span> でも使えます。手直しや自動修正のほか、作り直したあとも、前の表に戻れます。</li>
+          <li><span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-redo"/></svg>やり直す</span> は、この画面では <span class="m-key">Ctrl</span>+<span class="m-key">Z</span>・<span class="m-key">Ctrl</span>+<span class="m-key">Y</span> でも使えます。手直しや自動修正のほか、作り直したあとも、前の表に戻れます。必要人数の行と「<span class="m-ui">日別必要人数（上書き設定）</span>」で入れた数字も戻せます。</li>
           <li><span class="m-btn pri"><svg class="ic" aria-hidden="true"><use href="#i-repair"/></svg>エラーを自動修正</span>：直す案を、変えるマスの少ない順に計算して並べます。<span class="m-btn pri">反映</span> を押すまで、表は変わりません。「絶対」の違反が増える案は出ません。</li>
           <li><span class="m-btn">その他の操作</span> の中の7つ：
             <ul>
