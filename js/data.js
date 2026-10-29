@@ -978,20 +978,20 @@ function resetAll() {
 // サンプルスタッフ（allowedShifts を直接指定）
 function addSampleStaff() {
   const samples = [
-    { name: '田中 太郎',   positionType: 'viceManager', allowedShifts: ['早責','遅責'],                                     maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
-    { name: '佐藤 花子',   positionType: 'chief',       allowedShifts: ['早責','遅責','早総務','遅総務'],                    maxOff: 9, prefs: ['早可','遅可'], balance: 'earlyMore'  },
-    { name: '鈴木 一郎',   positionType: 'chief',       allowedShifts: ['早総務','遅総務','早責','遅責'],                    maxOff: 9, prefs: ['早可','遅可'], balance: 'lateMore'   },
-    { name: '高橋 美咲',   positionType: 'leader',      allowedShifts: ['早総務','遅総務'],                                  maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
-    { name: '伊藤 健太',   positionType: 'leader',      allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'earlyHeavy' },
-    { name: '渡辺 由美',   positionType: 'leader',      allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'lateHeavy'  },
-    { name: '山本 拓也',   positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
-    { name: '中村 さくら', positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'earlyMore'  },
-    { name: '小林 健',     positionType: 'staff',       allowedShifts: ['早','遅'],                                          maxOff: 9, prefs: ['早可','遅可'], balance: 'lateMore'   },
-    { name: '加藤 真理',   positionType: 'staff',       allowedShifts: ['早','早総務'],                                       maxOff: 9, prefs: ['早可'],         balance: 'earlyHeavy' },
-    { name: '吉田 翔',     positionType: 'staff',       allowedShifts: ['遅'],                                               maxOff: 9, prefs: ['遅可'],         balance: 'lateHeavy'  },
-    { name: '山田 恵子',   positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
-    { name: '松本 大輔',   positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
-    { name: '井上 千秋',   positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: 'A', positionType: 'viceManager', allowedShifts: ['早責','遅責'],                                     maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: 'B', positionType: 'chief',       allowedShifts: ['早責','遅責','早総務','遅総務'],                    maxOff: 9, prefs: ['早可','遅可'], balance: 'earlyMore'  },
+    { name: 'C', positionType: 'chief',       allowedShifts: ['早総務','遅総務','早責','遅責'],                    maxOff: 9, prefs: ['早可','遅可'], balance: 'lateMore'   },
+    { name: 'D', positionType: 'leader',      allowedShifts: ['早総務','遅総務'],                                  maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: 'E', positionType: 'leader',      allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'earlyHeavy' },
+    { name: 'F', positionType: 'leader',      allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'lateHeavy'  },
+    { name: 'G', positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: 'H', positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'earlyMore'  },
+    { name: 'I', positionType: 'staff',       allowedShifts: ['早','遅'],                                          maxOff: 9, prefs: ['早可','遅可'], balance: 'lateMore'   },
+    { name: 'J', positionType: 'staff',       allowedShifts: ['早','早総務'],                                       maxOff: 9, prefs: ['早可'],         balance: 'earlyHeavy' },
+    { name: 'K', positionType: 'staff',       allowedShifts: ['遅'],                                               maxOff: 9, prefs: ['遅可'],         balance: 'lateHeavy'  },
+    { name: 'L', positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: 'M', positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
+    { name: 'N', positionType: 'staff',       allowedShifts: ['早','遅','早総務','遅総務'],                         maxOff: 9, prefs: ['早可','遅可'], balance: 'balanced'   },
   ];
   samples.forEach(s => {
     AppState.staff.push({
