@@ -98,6 +98,9 @@ id	forbidLateEarly	HTML	1	ui.v6.js
 id	forecastModal	JS	0	app.v6.js
 id	genStaleDeep	JS	0	ui.v6.js
 id	maxAttempts	none	0	ui.v6.js
+id	maxBandSwitch	HTML	1	ui.v6.js
+id	maxBandSwitchMsg	HTML	1	ui.v6.js
+id	maxBandSwitchNote	HTML	1	ui.v6.js
 id	maxConsecutive	HTML	1	ui.v6.js
 id	mcCancel	JS	0	ui.v6.js
 id	mcCarry	JS	0	ui.v6.js

@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>シフト作成の手引き｜シフト自動生成アプリ</title>
-<link rel="icon" href="favicon.svg?v=274" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png?v=274" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png?v=274" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=274">
+<link rel="icon" href="favicon.svg?v=275" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png?v=275" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-16.png?v=275" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=275">
 <script>
 /* アプリと同じ明暗で出す（アプリで選んだものを使い、無ければパソコンの設定に合わせる。app.v6.js と同じ決め方） */
 (function () {
@@ -19,7 +19,7 @@
 })();
 </script>
 <!-- 色・アイコン・エラーの札・マスの見本は、アプリの変数と部品（css/style.css）をそのまま使う -->
-<link rel="stylesheet" href="css/style.css?v=274" />
+<link rel="stylesheet" href="css/style.css?v=275" />
 <style>
 /* ===== 手引きだけの見た目（m- で始まる名前。アプリの画面には効かない） ===== */
 body.m-body { font-size: 16px; line-height: 1.8; }
@@ -313,6 +313,13 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <li>「<span class="m-ui">遅→早の禁止</span>」：遅番の次の日に、早番を入れません。</li>
           <li>「<span class="m-ui">単発休みのペナルティ</span>」：出勤に挟まれた1日だけの休みを避けます。</li>
           <li>「<span class="m-ui">連休の目安回数（月・全体）</span>」：全員に、月に何回2連休を入れるかの目安です。0は指定なしです。</li>
+          <li>「<span class="m-ui">早遅の切り替え回数（上限）</span>」：1人が1か月に、早番と遅番を行き来してよい回数です（はじめは2回）。休みの日は前の時間帯のまま数え、半休は早番に数えます。超えた分は「<span class="m-ui">早遅の切り替え回数</span>」のエラーになります。0〜10回の整数で入れます（使えない数を入れると、「<span class="m-msg" data-pat="入れた数は使えません（◯）。もとの◯回に戻しました。">入れた数は使えません（回数は、0、1、2…のような整数で入れてください）。もとの 2回 に戻しました。</span>」のように出て、元の数に戻ります）。
+            <ul>
+              <li>どれくらい守らせるかは、「<span class="m-ui">詳しい設定</span>」→「<span class="m-ui">ルールごとの強弱（ON/OFF）</span>」の「<span class="m-ui">早遅の切り替え回数</span>」で決めます。そこが「<span class="m-ui">OFF（使わない）</span>」のときは、欄の下に「<span class="m-msg" data-pat="いまは「詳しい設定」→「ルールごとの強弱（ON/OFF）」で「早遅の切り替え回数」が「OFF（使わない）」なので、この回数は、表を作るときにも、エラーを数えるときにも使われません。">いまは「詳しい設定」→「ルールごとの強弱（ON/OFF）」で「早遅の切り替え回数」が「OFF（使わない）」なので、この回数は、表を作るときにも、エラーを数えるときにも使われません。</span>」と出ます。</li>
+              <li>早番と遅番の行き来を減らしたいとき：この欄を小さく（たとえば1回に）し、「<span class="m-ui">ルールごとの強弱（ON/OFF）</span>」で「<span class="m-ui">早遅の切り替え回数</span>」を「<span class="m-ui">絶対</span>」にして、作り直します。月によっては、ほかの「絶対」のエラー（責任者の順位など）が増えます。作り直す前と後で、<span class="m-tab" data-n="6">シフト表</span> の帯の件数を比べてください（作り直したあとも <span class="m-btn"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>元に戻す</span> で前の表に戻れます）。</li>
+              <li>希望・固定の並びだけで上限を超える人は、作り直しても「<span class="m-ui">早遅の切り替え回数</span>」のエラーが残ります（希望を変えないと消えません）。</li>
+            </ul>
+          </li>
           <li>「<span class="m-ui">表を作ったあとに、総務の順番に入れ替える</span>」：はじめは入です。表を作ったあと、総務のシフトに入る人を、<span class="m-tab" data-n="3">スタッフ管理</span> の「<span class="m-ui">総務の順番</span>」の順に入れ替えます（くわしくは <span class="m-tab" data-n="3">スタッフ管理</span> の説明）。エラーが1件でも増える入れ替えはしません。切ると、作った表のままです。</li>
           <li>特別日：「<span class="m-ui">入れ替え日（副店長を遅番固定）</span>」は副店長をその日の遅責に、「<span class="m-ui">新装日（副店長を早番固定）</span>」は早責に入れます。「<span class="m-ui">搬入日</span>」は、「<span class="m-ui">必要人数のルール</span>」で人数を決めるときに使います。日付は「1,15」のようにカンマで区切ります。</li>
           <li>「<span class="m-ui">詳しい設定</span>」の中：
@@ -630,7 +637,7 @@ table.m-table { width: 100%; border-collapse: collapse; }
           <tr><td><span class="m-ui">夜勤明けの出勤</span></td><td>夜勤の次の日に、夜勤でないシフトで出勤している（夜勤が続くのはよい）。</td><td>次の日を休みにします。</td></tr>
           <tr><td><span class="m-ui">単発出勤</span></td><td>前後が休みで、1日だけ出勤している。</td><td>休みをずらして、出勤を続けます。月の初めなら、前月末の連勤日数を確かめます。</td></tr>
           <tr><td><span class="m-ui">連勤中の時間帯切替</span></td><td>続けて出勤する間に、早番と遅番が入れ替わる。</td><td>時間帯をそろえます。</td></tr>
-          <tr><td><span class="m-ui">早遅の切り替え回数</span></td><td>早番と遅番の切り替えが、1か月で2回を超える。</td><td>時間帯をまとめます。</td></tr>
+          <tr><td><span class="m-ui">早遅の切り替え回数</span></td><td>早番と遅番の切り替えが、1か月で、<span class="m-tab" data-n="1">基本設定</span> の「<span class="m-ui">早遅の切り替え回数（上限）</span>」で決めた回数（はじめは2回）を超える。</td><td>時間帯をまとめます。</td></tr>
           <tr><td><span class="m-ui">遅→休→早</span></td><td>休み1日だけを挟んで、遅番から早番になる。</td><td>2連休にするか、時間帯をそろえます。</td></tr>
           <tr><td><span class="m-ui">連休が長すぎる</span></td><td>上限（はじめは3日）より長い連休がある。</td><td>休みを分けるか、上限の日数を変えます。</td></tr>
           <tr class="m-grp"><th colspan="3"><span class="m-ui">個人希望</span></th></tr>

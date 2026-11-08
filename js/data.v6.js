@@ -815,6 +815,11 @@ function normalizeAppData(data, base) {
     if (out.settings.parallelSolve  == null) out.settings.parallelSolve  = true;      // 旧データ補完
     if (out.settings.ignoreVioBeforeDay == null) out.settings.ignoreVioBeforeDay = 0;   // 旧データ補完
     if (!(out.settings.maxConsecutiveOff >= 1)) out.settings.maxConsecutiveOff = 3;    // 旧データ補完
+    // v275: 早遅の切り替え回数の上限は 0〜10 の整数だけを通す（①で入れられるようにした。生成は parseInt(…) || 0 で読むので、
+    // 空の文字などが入ると「0回まで」になってしまう）。だめなら既定の2
+    { const v = out.settings.maxBandSwitch;
+      const n = (typeof v === 'number') ? v : (typeof v === 'string' && /^\d+$/.test(v.trim())) ? Number(v.trim()) : NaN;
+      out.settings.maxBandSwitch = (Number.isInteger(n) && n >= 0 && n <= 10) ? n : 2; }
     // v269: 表を作ったあとに総務の順番に入れ替えるか（項目が無ければ入れ替える）。true／false だけを通す
     if (typeof out.settings.somuAutoSwap !== 'boolean') delete out.settings.somuAutoSwap;
 

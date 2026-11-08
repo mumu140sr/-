@@ -357,6 +357,11 @@ a { color: var(--link); }
 .set-ctl { display: flex; align-items: center; gap: 8px; flex: none; }
 .set-ctl .unit { color: var(--text-soft); font-size: var(--fs-sm); }
 .set-ctl input[type="number"] { width: 80px; text-align: right; }
+/* ①の欄の下の知らせ（v275: 早遅の切り替え回数（上限）。「OFF（使わない）」のとき・入れた数がだめなとき） */
+.set-note { margin-top: 6px; padding: 6px 10px; border-radius: 8px; font-size: var(--fs-xs); line-height: 1.55; color: var(--text);
+  background: var(--lv-soft-bg); border: 1px solid color-mix(in srgb, var(--lv-soft) 45%, transparent); }
+.set-note-err { background: var(--lv-must-bg); border-color: color-mix(in srgb, var(--lv-must) 45%, transparent); }
+.set-note[hidden] { display: none; }
 
 /* 折りたたみのカード（詳しい設定・使い方 など。中身は DOM に残る） */
 .card.fold-card { padding: 0; }

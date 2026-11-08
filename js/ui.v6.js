@@ -28,6 +28,7 @@ let _autoSaveTimer = null;
 function autoSave() {
   if (typeof scheduleShortageRefresh === 'function') scheduleShortageRefresh();   // 帯の下の文・理由の枠を数え直す（v265）
   if (typeof scheduleCalendarMargins === 'function') scheduleCalendarMargins();   // ④の「あと何人休めるか」と知らせを数え直す（v270）
+  if (typeof renderBandSwitchNote === 'function') renderBandSwitchNote();   // ①の切り替え回数の欄の下の文（ルールの強弱が変わったら出し直す。v275）
   if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
   _autoSaveTimer = setTimeout(() => {
     if (typeof saveToStorage === 'function') saveToStorage();
@@ -782,6 +783,11 @@ function refreshAllUI() {
   if ($maxAtt)    $maxAtt.value      = AppState.settings.maxAttempts;
   const $pairRestR = document.getElementById('pairRestTarget');
   if ($pairRestR) $pairRestR.value   = AppState.settings.pairRestTarget || 0;
+  const $bswR = document.getElementById('maxBandSwitch');
+  if ($bswR) $bswR.value = bandSwitchCap();
+  const $bswMsgR = document.getElementById('maxBandSwitchMsg');
+  if ($bswMsgR) $bswMsgR.hidden = true;
+  renderBandSwitchNote();
   if ($replDays) {
     $replDays.value = Object.keys(AppState.specialDays)
       .filter(d => AppState.specialDays[d] === 'replacement').join(',');
@@ -953,6 +959,63 @@ function refreshDailyReqPanelIfOpen() {
   if ($dp && $dp.style.display !== 'none' && typeof renderDailyReqPanel === 'function') renderDailyReqPanel();
 }
 
+// ── ①「早遅の切り替え回数（上限）」（v275） ──
+// 生成（milp-core）と検査（optimizer の band-switch）は前から settings.maxBandSwitch（既定2）を使っていたが、
+// 画面に入れる欄が無く、利用者は上限を変えられなかった。生成・検査の数え方はそのまま。
+// 出す数は、生成・検査と同じ読み方（parseInt。だめなら0）
+function bandSwitchCap() {
+  const v = AppState.settings.maxBandSwitch;
+  return Math.max(0, parseInt(v != null ? v : 2, 10) || 0);
+}
+// 「ルールごとの強弱」で「早遅の切り替え回数」が OFF のとき、欄だけ変えても何も変わらないことを、欄の下に出す
+function renderBandSwitchNote() {
+  const el = document.getElementById('maxBandSwitchNote');
+  if (!el || typeof getRuleLevel !== 'function') return;
+  const off = getRuleLevel('band-switch') === 'off';
+  if (el.hidden === !off) return;
+  el.hidden = !off;
+  el.textContent = off ? 'いまは「詳しい設定」→「ルールごとの強弱（ON/OFF）」で「早遅の切り替え回数」が「OFF（使わない）」なので、' +
+    'この回数は、表を作るときにも、エラーを数えるときにも使われません。使うときは、そこで「できれば」か「絶対」にしてください。' : '';
+}
+function setupBandSwitchField() {
+  const $el = document.getElementById('maxBandSwitch');
+  if (!$el) return;
+  const $msg = document.getElementById('maxBandSwitchMsg');
+  $el.value = bandSwitchCap();
+  renderBandSwitchNote();
+  $el.addEventListener('change', () => {
+    const cur = bandSwitchCap();
+    if (typeof calcBusy === 'function' && calcBusy()) { $el.value = cur; calcBusyToast(); return; }
+    const raw = String($el.value == null ? '' : $el.value).trim();
+    // 0〜10 の整数だけ。だめな値は理由を出して、元の値に戻す
+    let why = '';
+    if ($el.validity && $el.validity.badInput) why = '数でない字が入っています';
+    else if (raw === '') why = '空のままにはできません';
+    else if (!/^-?\d+(\.0+)?$/.test(raw)) why = '回数は、0、1、2…のような整数で入れてください';   // 「2.0」は2として使う
+    else if (+raw < 0 || +raw > 10) why = '0〜10回の間で入れてください';
+    if (why) {
+      $el.value = cur;
+      if ($msg) {
+        $msg.textContent = `入れた数は使えません（${why}）。もとの ${cur}回 に戻しました。`;
+        $msg.hidden = false;
+      }
+      return;
+    }
+    const v = parseInt(raw, 10);
+    $el.value = v;
+    if ($msg) $msg.hidden = true;
+    if (v === cur) return;
+    AppState.settings.maxBandSwitch = v;
+    autoSave(); recheckAfterRuleChange();
+    // 「ルールごとの強弱」の説明にも、いまの回数を出している
+    const rp = document.getElementById('ruleLevelsPanel');
+    if (rp && rp.style.display !== 'none') renderRuleLevels();
+    toast(`「早遅の切り替え回数（上限）」を ${v}回 にしました。` + (getRuleLevel('band-switch') === 'off'
+      ? 'いまは「早遅の切り替え回数」が「OFF（使わない）」なので、表にもエラーにも使われません。'
+      : `1人・1か月に ${v}回 を超える切り替えは「早遅の切り替え回数」のエラーになります。`), 'info', 6000);
+  });
+}
+
 // ===== ① 基本設定 =====
 function setupSettingsPanel() {
   const $month     = document.getElementById('targetMonth');
@@ -983,6 +1046,7 @@ function setupSettingsPanel() {
       autoSave(); recheckAfterRuleChange();
     });
   }
+  setupBandSwitchField();
 
   $replDays.value = Object.keys(AppState.specialDays)
     .filter(d => AppState.specialDays[d] === 'replacement').join(',');
@@ -1290,7 +1354,7 @@ const RULE_LEVEL_META = [
   { g: 'リズム',     t: 'night-after-work',  d: '夜勤の次の日に、夜勤でないシフトで出勤している（夜勤が続くのはよい）', def: 'must' },
   { g: 'リズム',     t: 'single-work',       def: 'must' },
   { g: 'リズム',     t: 'category-switch',   def: 'should' },
-  { g: 'リズム',     t: 'band-switch',       d: '1人の、早番と遅番の切り替えが月の上限を超える', def: 'should' },
+  { g: 'リズム',     t: 'band-switch',       d: () => `1人の、早番と遅番の切り替えが月の上限を超える（上限の回数は、①の「早遅の切り替え回数（上限）」で決めます。いまは${bandSwitchCap()}回）`, def: 'should' },
   { g: 'リズム',     t: 'bad-rest',          d: '遅番→休み1日→早番の並び', def: 'should' },
   { g: 'リズム',     t: 'long-rest',         def: 'should',
     num: { key: 'maxConsecutiveOff', min: 1, max: 14, def: 3,

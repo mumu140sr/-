@@ -8,7 +8,8 @@
 // アプリを、作り物のデータ（tools/suite/cases。本物のデータは使わない）でいろいろな状態にして、
 // 画面に出た文字を集め、手引きの名前と突き合わせる。状態：6つの画面、開いた小窓（実現性チェック・
 // エラー解消プラン・余の使い道・見込み・順番に確認して生成する・余の解消・途中から作り直す・まとめて固定・
-// 自動修正の案・シフト編集・人手が足りない理由の枠・余り・不足の内訳と表の一言・人手がきつくなる日の知らせ）、計算中、確認の文、知らせ、月の切り替え、1分生成のあとの知らせ。
+// 自動修正の案・シフト編集・人手が足りない理由の枠・余り・不足の内訳と表の一言・人手がきつくなる日の知らせ）、計算中、確認の文、知らせ、月の切り替え、1分生成のあとの知らせ、
+// ①の「早遅の切り替え回数（上限）」の欄の下の文。
 // 実際に出せなかった名前は、JS の文字列と CSS の content でも探し、そうと分かるように出す。
 // あわせて、①「ルールごとの強弱」の名前がエラーの名前（VIOLATION_LABEL）と同じか、既定（def）が検査・生成の既定と同じかも確かめる（v268）。
 //
@@ -113,6 +114,9 @@ const norm = s => String(s || '').replace(/\s+/g, '');
     base:      async p => { await p.evaluate(() => { document.getElementById('settingsMore').open = true; toggleRuleLevelsPanel(); toggleDailyReqPanel(); });
                             await p.click('.tab[data-tab="roles"]'); await p.evaluate(() => document.querySelectorAll('.role-more-btn').forEach(x => x.click())); },
     addshift:  async p => { await p.click('.tab[data-tab="roles"]'); await p.click('#btnAddShiftType'); await p.waitForTimeout(300); },
+    // ①「早遅の切り替え回数（上限）」の欄の下の文（v275）: この状態の中だけ「早遅の切り替え回数」を OFF にし、欄に使えない数を入れる
+    bswoff:    async p => { await p.evaluate(() => { AppState.settings.ruleLevels = Object.assign({}, AppState.settings.ruleLevels, { 'band-switch': 'off' }); renderBandSwitchNote(); });
+                            await p.fill('#maxBandSwitch', '1.5'); await p.press('#maxBandSwitch', 'Tab'); await p.waitForTimeout(300); },
     // 日ごとに要るスキル（v264）: 指定が1つある状態の一覧（「外す」）と欄
     dayskill:  async p => { await p.click('.tab[data-tab="roles"]');
                             await p.evaluate(() => { const n = (AppState.skills[0] || {}).name; if (n) AppState.dailyShiftSkills = { [getWorkShiftKeys()[0]]: { 3: [n] } };
